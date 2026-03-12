@@ -1987,10 +1987,18 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
           const isTestSession = isTestCallFlag || isTestIdPattern;
 
-          const requestedProvider = (customParams.provider || (urlParams as any).provider || 'google')
-            .toString()
-            .toLowerCase();
-          const voiceGovernance = await resolveVoiceGovernance(requestedProvider);
+          // Provider priority: explicit param > campaign setting > default
+          let requestedProvider = (customParams.provider || (urlParams as any).provider || '').toString().toLowerCase();
+          if (!requestedProvider && campaignId) {
+            try {
+              const [cpRow] = await db.select({ voiceProvider: campaigns.voiceProvider }).from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+              if (cpRow?.voiceProvider) {
+                requestedProvider = cpRow.voiceProvider;
+                console.log(`${LOG_PREFIX} Using campaign-level voiceProvider: ${requestedProvider}`);
+              }
+            } catch (_e) { /* non-fatal */ }
+          }
+          const voiceGovernance = await resolveVoiceGovernance(requestedProvider || undefined);
           const provider: 'openai' | 'google' | 'kimi' = voiceGovernance.selectedProvider as any;
           for (const warning of voiceGovernance.warnings) {
             console.warn(`${LOG_PREFIX} ${warning}`);
@@ -9900,6 +9908,9 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       callFlow: campaign.callFlow,
       // Max call duration enforcement (campaign-level)
       maxCallDurationSeconds: campaign.maxCallDurationSeconds,
+      // Voice provider per-campaign
+      voiceProvider: campaign.voiceProvider || null,
+      voiceProviderFallback: campaign.voiceProviderFallback ?? true,
     };
   } catch (error) {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
