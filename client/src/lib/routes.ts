@@ -66,7 +66,6 @@ export const ROUTES = {
   SETTINGS_DATA: '/settings/data',
   SETTINGS_AGENT_DEFAULTS: '/settings/agent-defaults',
   SETTINGS_AI_GOVERNANCE: '/settings/ai-governance',
-  SETTINGS_KNOWLEDGE_HUB: '/settings/knowledge-hub',
   SETTINGS_PROMPT_INSPECTOR: '/settings/prompt-inspector',
   SETTINGS_VOICE_ENGINE: '/settings/voice-engine',
 

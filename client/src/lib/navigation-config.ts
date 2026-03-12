@@ -698,13 +698,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             description: 'Govern providers and models by task',
           },
           {
-            id: 'settings-knowledge-hub',
-            title: 'Knowledge Hub',
-            url: '/settings/knowledge-hub',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Unified AI knowledge source management',
-          },
-          {
             id: 'settings-prompts',
             title: 'Prompt Management',
             url: '/settings/prompts',
