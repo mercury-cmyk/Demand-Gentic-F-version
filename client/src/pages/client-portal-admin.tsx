@@ -49,15 +49,12 @@ import {
   Pencil,
 } from 'lucide-react';
 import type { ClientAccount, VerificationCampaign } from '@shared/schema';
-<<<<<<< HEAD
 import { InvoiceEditor } from '@/components/invoicing/InvoiceEditor';
 import { InvoicePreviewDialog } from '@/components/invoicing/InvoicePreviewDialog';
 import { SendInvoiceDialog } from '@/components/invoicing/SendInvoiceDialog';
 import { downloadInvoicePDF } from '@/lib/invoice-pdf';
 import type { InvoiceData, InvoiceLineItem } from '@/components/invoicing/InvoiceDocument';
-=======
 import { ClientNotificationCenter } from '@/components/admin/client-notification-center';
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1928,11 +1925,8 @@ export default function ClientPortalAdmin() {
                       <TabsTrigger value="settings" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Settings</TabsTrigger>
                       <TabsTrigger value="users" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Users & Access</TabsTrigger>
                       <TabsTrigger value="projects" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Projects</TabsTrigger>
-<<<<<<< HEAD
                       <TabsTrigger value="invoicing" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Invoicing</TabsTrigger>
-=======
                       <TabsTrigger value="notifications" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2">Notifications</TabsTrigger>
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
                     </TabsList>
 
                     <TabsContent value="profile">
@@ -2328,7 +2322,6 @@ export default function ClientPortalAdmin() {
                     </div>
                   </TabsContent>
 
-<<<<<<< HEAD
                   {/* ===== INVOICING SUB-TAB ===== */}
                   <TabsContent value="invoicing">
                     <div className="pt-4 space-y-6">
@@ -2553,7 +2546,6 @@ export default function ClientPortalAdmin() {
                     </div>
                   </TabsContent>
 
-=======
                   <TabsContent value="notifications">
                     <ClientNotificationCenter
                       clientAccountId={selectedClient.id}
@@ -2574,7 +2566,6 @@ export default function ClientPortalAdmin() {
                       ].filter((c: any) => c.id)}
                     />
                   </TabsContent>
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
                   </Tabs>
                 ) : (
                   <p className="text-muted-foreground text-center py-12">
