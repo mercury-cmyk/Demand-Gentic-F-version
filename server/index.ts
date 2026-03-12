@@ -292,6 +292,14 @@ if (isMainModule) {
       }
     }
 
+    // Load active Google Cloud account from DB (hot-swap credentials on startup)
+    try {
+      const { loadActiveAccountOnStartup } = await import("./services/google-account-manager");
+      await loadActiveAccountOnStartup();
+    } catch (err) {
+      console.error('[STARTUP] Google account loader failed (non-blocking):', err);
+    }
+
     // Recover audio checkpoints from crashed calls (non-blocking)
     try {
       const { recoverAudioCheckpoints } = await import("./services/call-recording-manager");

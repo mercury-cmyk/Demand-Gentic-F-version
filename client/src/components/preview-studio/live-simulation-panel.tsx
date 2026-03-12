@@ -181,7 +181,7 @@ export function LiveSimulationPanel({
   const [mode, setMode] = useState<SimulationMode>('voice');
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [voiceProvider, setVoiceProvider] = useState<"openai" | "google">("google");
+  const [voiceProvider, setVoiceProvider] = useState<"openai" | "google">("openai");
   const [selectedVoice, setSelectedVoice] = useState<string>("Kore");
   // OpenAI Realtime configuration
   const [turnDetection, setTurnDetection] = useState<string>("server_vad");

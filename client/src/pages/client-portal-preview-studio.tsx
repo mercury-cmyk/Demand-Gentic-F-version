@@ -604,7 +604,7 @@ export default function ClientPortalPreviewStudioPage() {
           accountId: selectedAccountId,
           contactId: selectedContactId,
           testPhoneNumber: testPhoneNumber.trim(),
-          voiceProvider: 'google',
+          voiceProvider: 'openai',
           voice: selectedVoice,
         }),
       });

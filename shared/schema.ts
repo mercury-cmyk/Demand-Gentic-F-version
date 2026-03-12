@@ -2467,11 +2467,11 @@ export const agentDefaults = pgTable("agent_defaults", {
   defaultFirstMessage: text("default_first_message").notNull(),
   defaultSystemPrompt: text("default_system_prompt").notNull(),
   defaultTrainingGuidelines: jsonb("default_training_guidelines").notNull().$type<string[]>(),
-  defaultVoiceProvider: text("default_voice_provider").notNull().default('google'),
-  defaultVoice: text("default_voice").notNull().default('Fenrir'),
+  defaultVoiceProvider: text("default_voice_provider").notNull().default('openai'),
+  defaultVoice: text("default_voice").notNull().default('ash'),
   // Global concurrent call limits
-  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(10), // Per-campaign default (Gemini Live supports ~10 concurrent sessions)
-  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(10),   // System-wide cap (must stay within Gemini Live quota)
+  defaultMaxConcurrentCalls: integer("default_max_concurrent_calls").notNull().default(10), // Per-campaign default
+  globalMaxConcurrentCalls: integer("global_max_concurrent_calls").notNull().default(10),   // System-wide cap (must stay within provider quota)
   // Call engine: 'texml' (Telnyx TeXML + Gemini WebSocket) or 'sip' (Direct SIP via Drachtio)
   defaultCallEngine: text("default_call_engine").notNull().default('texml'),
   updatedBy: varchar("updated_by").references(() => users.id, { onDelete: 'set null' }),
@@ -15924,4 +15924,60 @@ export const insertFinanceAcceleratorChecklistSchema = createInsertSchema(financ
 });
 export type FinanceAcceleratorChecklist = typeof financeAcceleratorChecklist.$inferSelect;
 export type InsertFinanceAcceleratorChecklist = z.infer<typeof insertFinanceAcceleratorChecklistSchema>;
+
+// ============================================================================
+// GOOGLE CLOUD ACCOUNT MANAGER
+// Stores multiple GCP account configurations for safe hot-swapping.
+// Only one account can be "active" at a time (enforced via isActive flag).
+// Service account JSON is stored encrypted.
+// ============================================================================
+
+export const googleCloudAccounts = pgTable("google_cloud_accounts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  // Display
+  name: varchar("name", { length: 100 }).notNull(),          // e.g. "Production GCP", "Backup GCP"
+  description: text("description"),
+  // GCP identity
+  projectId: varchar("project_id", { length: 100 }).notNull(),
+  location: varchar("location", { length: 50 }).notNull().default("us-central1"),
+  gcsBucket: varchar("gcs_bucket", { length: 100 }).notNull(),
+  // Gemini / AI API keys (stored plaintext — same security posture as .env)
+  geminiApiKey: text("gemini_api_key"),                       // AI Studio key (for Gemini Live)
+  googleSearchApiKey: text("google_search_api_key"),
+  googleSearchEngineId: varchar("google_search_engine_id", { length: 50 }),
+  // OAuth credentials (same OAuth app or different)
+  googleClientId: varchar("google_client_id", { length: 150 }),
+  googleClientSecret: varchar("google_client_secret", { length: 100 }),
+  googleOauthRedirectUri: varchar("google_oauth_redirect_uri", { length: 255 }),
+  // Service account — stored as encrypted JSON blob
+  serviceAccountJson: text("service_account_json"),          // AES-256 encrypted JSON
+  serviceAccountEmail: varchar("service_account_email", { length: 255 }), // for display only
+  // State
+  isActive: boolean("is_active").notNull().default(false),
+  isDefault: boolean("is_default").notNull().default(false),
+  // Health / last switch
+  lastActivatedAt: timestamp("last_activated_at", { withTimezone: true }),
+  lastActivatedBy: varchar("last_activated_by", { length: 36 }),
+  lastHealthCheckAt: timestamp("last_health_check_at", { withTimezone: true }),
+  lastHealthStatus: varchar("last_health_status", { length: 20 }),  // ok | error | unknown
+  lastHealthError: text("last_health_error"),
+  // Audit
+  createdBy: varchar("created_by", { length: 36 }),
+  updatedBy: varchar("updated_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  activeIdx: index("gca_active_idx").on(table.isActive),
+  projectIdx: index("gca_project_idx").on(table.projectId),
+}));
+
+export const insertGoogleCloudAccountSchema = createInsertSchema(googleCloudAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastActivatedAt: true,
+  lastHealthCheckAt: true,
+});
+export type GoogleCloudAccount = typeof googleCloudAccounts.$inferSelect;
+export type InsertGoogleCloudAccount = z.infer<typeof insertGoogleCloudAccountSchema>;
 

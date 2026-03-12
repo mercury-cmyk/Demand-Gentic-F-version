@@ -8,20 +8,45 @@ import { Storage, Bucket } from '@google-cloud/storage';
 import { Readable } from 'stream';
 
 // Environment configuration
-const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-const GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-ai-storage';
-const GCS_KEY_FILE = process.env.GCS_KEY_FILE; // Optional: path to service account key file
+let GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+let GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-ai-storage';
+let GCS_KEY_FILE = process.env.GCS_KEY_FILE; // Optional: path to service account key file
+
+function buildStorageClient(projectId?: string, keyFilename?: string) {
+  return new Storage({
+    ...(projectId ? { projectId } : {}),
+    ...(keyFilename ? { keyFilename } : {}),
+  });
+}
 
 // Initialize Google Cloud Storage client
 // In Cloud Run, it uses the default service account automatically
-const storage = new Storage({
-  projectId: GCS_PROJECT_ID,
-  ...(GCS_KEY_FILE ? { keyFilename: GCS_KEY_FILE } : {}),
-});
+let storage = buildStorageClient(GCS_PROJECT_ID, GCS_KEY_FILE);
+let bucket: Bucket = storage.bucket(GCS_BUCKET);
 
-const bucket: Bucket = storage.bucket(GCS_BUCKET);
-
+/** Always returns the current active bucket name (updated on account switch). */
+export function getActiveBucket(): string { return GCS_BUCKET; }
+/** Always returns the current active Storage client (updated on account switch). */
+export function getStorageClient() { return storage; }
+/** @deprecated Import getActiveBucket() instead — this is a snapshot from module load time. */
 export const BUCKET = GCS_BUCKET;
+
+/**
+ * Reinitialise the GCS singleton with new credentials.
+ * Called by the Google Account Manager on account switch.
+ */
+export function reinitializeStorage(opts: {
+  projectId: string;
+  bucket: string;
+  keyFilename?: string;
+}): void {
+  GCS_PROJECT_ID = opts.projectId;
+  GCS_BUCKET = opts.bucket;
+  GCS_KEY_FILE = opts.keyFilename;
+  storage = buildStorageClient(opts.projectId, opts.keyFilename);
+  bucket = storage.bucket(opts.bucket);
+  console.log(`[Storage] ♻️  Reinitialized GCS for project: ${opts.projectId}, bucket: ${opts.bucket}`);
+}
 
 // Legacy export for compatibility
 export const s3Client = null; // Deprecated - use GCS functions instead

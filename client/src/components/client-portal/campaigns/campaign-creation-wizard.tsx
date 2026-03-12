@@ -437,7 +437,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
         await apiRequest('POST', `/api/campaigns/${workOrderId}/test-call?source=work_order`, {
           testPhoneNumber: normalizedPhone,
           testContactName: "Test User", // Default for wizard test
-          voiceProvider: "google" // Defaulting to Google as per preference
+          voiceProvider: "openai" // Defaulting to OpenAI Realtime as per governance
         });
 
       } else {

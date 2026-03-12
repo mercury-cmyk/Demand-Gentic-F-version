@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Settings, User, Bell, Shield, Mail, Phone, Database, Plus, Pencil, Trash2, Play, Clock, Link as LinkIcon, CheckCircle2, AlertCircle, Globe, Loader2, RefreshCw } from "lucide-react";
+import { Settings, User, Bell, Shield, Mail, Phone, Database, Plus, Pencil, Trash2, Play, Clock, Link as LinkIcon, CheckCircle2, AlertCircle, Globe, Loader2, RefreshCw, Cloud } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -37,6 +37,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import type { CustomFieldDefinition } from "@shared/schema";
+import { GoogleCloudAccountsTab } from "@/components/settings/google-cloud-accounts-tab";
 
 type MfaSetup = {
   qrCode: string;
@@ -311,6 +312,10 @@ export default function SettingsPage() {
           <TabsTrigger value="background-jobs" data-testid="tab-background-jobs">
             <Clock className="mr-2 h-4 w-4" />
             Background Jobs
+          </TabsTrigger>
+          <TabsTrigger value="google-cloud" data-testid="tab-google-cloud">
+            <Cloud className="mr-2 h-4 w-4" />
+            Google Cloud
           </TabsTrigger>
         </TabsList>
 
@@ -976,6 +981,10 @@ export default function SettingsPage() {
 
         <TabsContent value="background-jobs" className="space-y-4 mt-6">
           <BackgroundJobsTab />
+        </TabsContent>
+
+        <TabsContent value="google-cloud" className="space-y-4 mt-6">
+          <GoogleCloudAccountsTab />
         </TabsContent>
       </Tabs>
     </div>

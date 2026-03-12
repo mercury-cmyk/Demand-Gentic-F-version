@@ -75,7 +75,7 @@ async function checkAICallReadiness() {
     const defaultConfig = defaults[0];
     
     if (defaultConfig) {
-      const voiceProvider = defaultConfig.defaultVoiceProvider || 'google';
+      const voiceProvider = defaultConfig.defaultVoiceProvider || 'openai';
       const voiceName = defaultConfig.defaultVoice || 'Fenrir';
       results.push({
         component: 'Voice Config',

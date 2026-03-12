@@ -48,6 +48,7 @@ import { guardQualifiedLeadDisposition } from "./disposition-engagement-guard";
 import { RealtimeCallTelemetry, hashText } from "./realtime-call-telemetry";
 import { analyzeVoicemailTranscript } from "./voicemail-detection";
 import { resolveAgentConfig, type ResolvedAgentConfig } from "./unified-call-context";
+import { mapVoiceToProvider } from "./voice-providers/voice-provider.interface";
 
 type DispositionCode = CanonicalDisposition;
 
@@ -916,7 +917,11 @@ async function initializeOpenAISession(session: OpenAIRealtimeSession): Promise<
         baseSystemPrompt,
         voiceTemplateValues
       );
-      const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "alloy";
+      const rawVoice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "ash";
+      const voice = mapVoiceToProvider(rawVoice, 'openai');
+      if (voice !== rawVoice) {
+        console.log(`${LOG_PREFIX} Voice mapped: "${rawVoice}" → "${voice}" (provider=openai)`);
+      }
       const modalities = ["text", "audio"];
       const turnDetection = buildTurnDetection(agentSettings.advanced.conversational);
       // Transcription configuration - can be disabled to save ~$0.006/min

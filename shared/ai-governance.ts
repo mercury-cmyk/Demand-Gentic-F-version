@@ -205,12 +205,12 @@ export type AiModelPolicyMap = Record<AiGovernanceScope, AiGovernancePolicy>;
 export const DEFAULT_AI_MODEL_POLICIES: AiModelPolicyMap = {
   voice_realtime: {
     enabled: true,
-    primaryProvider: "google",
-    primaryModel: "gemini-live-2.5-flash-native-audio",
-    allowFallback: false,
-    fallbackProvider: null,
-    fallbackModel: null,
-    notes: "Primary live calling path.",
+    primaryProvider: "openai",
+    primaryModel: "gpt-4o-realtime-preview-2024-12-17",
+    allowFallback: true,
+    fallbackProvider: "google",
+    fallbackModel: "gemini-live-2.5-flash-native-audio",
+    notes: "Primary live calling path — OpenAI Realtime with Gemini fallback.",
   },
   analysis_standard: {
     enabled: true,

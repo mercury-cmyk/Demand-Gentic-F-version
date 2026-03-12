@@ -20,7 +20,7 @@ async function diagnose() {
   } else {
     for (const c of campaigns.rows as any[]) {
       console.log(`   - ${c.name} (id: ${c.id})`);
-      console.log(`     status: ${c.status}, mode: ${c.dial_mode}, voice: ${c.voice_provider || 'default (google)'}`);
+      console.log(`     status: ${c.status}, mode: ${c.dial_mode}, voice: ${c.voice_provider || 'default (openai)'}`);
     }
   }
 

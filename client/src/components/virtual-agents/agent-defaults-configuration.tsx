@@ -49,7 +49,7 @@ export function AgentDefaultsConfiguration() {
   const [firstMessage, setFirstMessage] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [trainingGuidelines, setTrainingGuidelines] = useState<string[]>([]);
-  const [voiceProvider, setVoiceProvider] = useState('google');
+  const [voiceProvider, setVoiceProvider] = useState('openai');
   const [voice, setVoice] = useState('Kore');
   const [defaultMaxConcurrentCalls, setDefaultMaxConcurrentCalls] = useState(100);
   const [globalMaxConcurrentCalls, setGlobalMaxConcurrentCalls] = useState(100);

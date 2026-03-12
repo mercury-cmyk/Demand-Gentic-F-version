@@ -94,8 +94,8 @@ export function isEnforcedProvider(provider: string): boolean {
 }
 
 export function getOppositeProvider(provider: VoiceProviderType): VoiceProviderType {
-  if (provider === "kimi") return "google"; // Kimi falls back to Google
-  return provider === "google" ? "openai" : "google";
+  if (provider === "kimi") return "openai"; // Kimi falls back to OpenAI
+  return provider === "openai" ? "google" : "openai";
 }
 
 export function isValidProvider(provider: string): boolean {

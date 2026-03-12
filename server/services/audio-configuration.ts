@@ -182,8 +182,8 @@ export function resolveAudioConfiguration(context: {
   campaignId?: string;
   source?: 'test_endpoint' | 'production_queue' | 'manual_test' | 'campaign_test';
 }) {
-  // Determine provider (defaults to Google Gemini Live)
-  const defaultProvider = (process.env.VOICE_PROVIDER?.toLowerCase() || 'google').includes('openai')
+  // Determine provider (defaults to OpenAI Realtime)
+  const defaultProvider = (process.env.VOICE_PROVIDER?.toLowerCase() || 'openai').includes('openai')
     ? 'openai'
     : 'google';
   

@@ -6,29 +6,10 @@
  * can reuse it without duplicating Storage init logic.
  */
 
-import { Storage } from '@google-cloud/storage';
-import { BUCKET } from './storage';
+import { getStorageClient, getActiveBucket } from './storage';
 
-// Singleton GCS client — lazy-init on first call
-let _storage: InstanceType<typeof Storage> | null = null;
-let _initAttempted = false;
-
-function getGcsStorage(): InstanceType<typeof Storage> | null {
-  if (_initAttempted) return _storage;
-  _initAttempted = true;
-  try {
-    const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-    const GCS_KEY_FILE = process.env.GCS_KEY_FILE;
-    _storage = new Storage({
-      projectId: GCS_PROJECT_ID,
-      ...(GCS_KEY_FILE ? { keyFilename: GCS_KEY_FILE } : {}),
-    });
-    console.log('[GCS] Storage client initialized');
-  } catch (e) {
-    console.warn('[GCS] Storage init failed:', (e as Error).message);
-    _storage = null;
-  }
-  return _storage;
+function getGcsStorage() {
+  return getStorageClient();
 }
 
 /**
@@ -40,9 +21,10 @@ function getGcsStorage(): InstanceType<typeof Storage> | null {
  */
 export async function downloadGcsAudioAsBuffer(gcsKey: string): Promise<Buffer | null> {
   const storage = getGcsStorage();
-  if (!storage || !gcsKey || !BUCKET) return null;
+  const activeBucket = getActiveBucket();
+  if (!storage || !gcsKey || !activeBucket) return null;
   try {
-    const [buffer] = await storage.bucket(BUCKET).file(gcsKey).download();
+    const [buffer] = await storage.bucket(activeBucket).file(gcsKey).download();
     console.log(`[GCS] Downloaded ${gcsKey} (${buffer.length} bytes)`);
     return buffer;
   } catch (e: any) {
@@ -75,7 +57,7 @@ export function extractGcsKeyFromUrl(recordingUrl: string | null | undefined): s
     const bucket = withoutScheme.slice(0, firstSlash);
     const objectPath = withoutScheme.slice(firstSlash + 1);
     if (!objectPath) return null;
-    if (bucket && bucket !== BUCKET) return null;
+    if (bucket && bucket !== getActiveBucket()) return null;
     return objectPath;
   }
 
@@ -84,7 +66,7 @@ export function extractGcsKeyFromUrl(recordingUrl: string | null | undefined): s
     const bucket = m[1];
     const objectPath = m[2];
     if (!objectPath) return null;
-    if (bucket && bucket !== BUCKET) return null;
+    if (bucket && bucket !== getActiveBucket()) return null;
     return objectPath;
   }
 

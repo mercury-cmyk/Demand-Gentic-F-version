@@ -223,8 +223,8 @@ function buildScopeWarnings(scope: AiGovernanceScope, policy: AiGovernancePolicy
     }
   }
 
-  if (scope === "voice_realtime" && policy.allowFallback && policy.fallbackProvider === "openai") {
-    warnings.push("OpenAI realtime fallback can change call behavior and cost profile. Validate in staging before production rollout.");
+  if (scope === "voice_realtime" && policy.allowFallback && policy.fallbackProvider === "google") {
+    warnings.push("Gemini Live fallback can change call behavior and cost profile. Validate in staging before production rollout.");
   }
 
   return warnings;

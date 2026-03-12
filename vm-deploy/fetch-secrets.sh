@@ -69,9 +69,9 @@ GCS_BUCKET=demandgentic-ai-storage
 USE_VERTEX_AI=true
 
 # Voice
-VOICE_PROVIDER=google
+VOICE_PROVIDER=openai
 VOICE_PROVIDER_FALLBACK=true
-VOICE_PROVIDER_FALLBACK_TARGET=openai
+VOICE_PROVIDER_FALLBACK_TARGET=google
 GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
 
 # Telnyx

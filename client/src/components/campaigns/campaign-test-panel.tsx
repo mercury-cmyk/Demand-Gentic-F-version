@@ -142,7 +142,7 @@ export function CampaignTestPanel({ campaignId, campaignName, dialMode, hidePrev
     testCompanyName: "Pivotal B2B",
     testJobTitle: "Founder",
     testContactEmail: "zahid@pivotal-b2b.com",
-    voiceProvider: "google" as "openai" | "google",
+    voiceProvider: "openai" as "openai" | "google",
   });
 
   const showLoggedTests = true;

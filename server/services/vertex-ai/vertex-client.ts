@@ -238,6 +238,28 @@ export function getVertexAI(config?: Partial<VertexAIConfig>): VertexAI {
 }
 
 /**
+ * Reinitialise the Vertex AI singleton with new credentials.
+ * Called by the Google Account Manager on account switch.
+ */
+export function reinitializeVertexClient(opts: {
+  projectId: string;
+  location: string;
+  keyFilename?: string;
+}): void {
+  vertexAIInstance = null; // drop old singleton
+  currentConfig = {
+    ...defaultConfig,
+    projectId: opts.projectId,
+    location: opts.location,
+  };
+  // Force immediate init so the new project is applied now
+  const initOpts: any = { project: opts.projectId, location: opts.location };
+  if (opts.keyFilename) initOpts.keyFilename = opts.keyFilename;
+  vertexAIInstance = new VertexAI(initOpts);
+  console.log(`[VertexAI] ♻️  Reinitialized for project: ${opts.projectId}, location: ${opts.location}`);
+}
+
+/**
  * Get current configuration
  */
 export function getVertexConfig(): VertexAIConfig {

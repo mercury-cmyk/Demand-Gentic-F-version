@@ -13,7 +13,7 @@ import { db } from "../db";
 import { leads, activityLog, callSessions } from "@shared/schema";
 import { eq, and, isNotNull, lt, gt, sql } from "drizzle-orm";
 import { SpeechClient, protos } from "@google-cloud/speech";
-import { getPresignedDownloadUrl, isS3Configured, s3ObjectExists, BUCKET } from "../lib/storage";
+import { getPresignedDownloadUrl, isS3Configured, s3ObjectExists, getActiveBucket } from "../lib/storage";
 
 // Lazy initialization of Speech client
 let _speechClient: SpeechClient | null = null;
@@ -102,7 +102,7 @@ function toGcsUri(value: string | null | undefined): string | null {
   }
 
   const key = decodeObjectPath(trimmed.replace(/^\/+/, ''));
-  return key ? `gs://${BUCKET}/${key}` : null;
+  return key ? `gs://${getActiveBucket()}/${key}` : null;
 }
 
 function resolveGcsUriForTranscription(
@@ -908,14 +908,9 @@ export async function processPendingTranscriptions(): Promise<void> {
       ))
       .limit(10);
 
-<<<<<<< HEAD
-    // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
-    const failedLeads = await db.select({ id: leads.id })
-=======
     // Retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
     // Skip recordings older than 7 days — S3 presigned URLs expire and will never succeed
     const failedLeads = await db.select()
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),

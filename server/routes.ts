@@ -137,6 +137,7 @@ import clientPortalSimulationRouter from './routes/client-portal-simulation';
 import campaignPipelineRouter from './routes/campaign-pipeline-routes';
 import precisionLeadsRouter from './routes/precision-leads-routes';
 import financeProgramRouter from './routes/finance-program-routes';
+import googleCloudAccountsRouter from './routes/google-cloud-accounts-routes';
 import { autoEnrollJourneyLeadFromDisposition } from './services/client-journey-automation';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
@@ -1556,7 +1557,7 @@ export function registerRoutes(app: Express) {
     });
   });
 
-  app.post("/api/auth/change-password", requireAuth, validate(changePasswordSchema), async (req, res) => {
+  app.post("/api/auth/change-password", requireAuth, validate({ body: changePasswordSchema }), async (req, res) => {
     try {
       const userId = req.user!.userId;
       const { currentPassword, newPassword } = req.body;
@@ -1585,7 +1586,7 @@ export function registerRoutes(app: Express) {
 
   // ==================== PASSWORD RESET ====================
 
-  app.post("/api/auth/forgot-password", authLimiter, validate(forgotPasswordSchema), async (req, res) => {
+  app.post("/api/auth/forgot-password", authLimiter, validate({ body: forgotPasswordSchema }), async (req, res) => {
     try {
       const { email, userType } = req.body;
 
@@ -1645,7 +1646,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.post("/api/auth/reset-password", authLimiter, validate(resetPasswordSchema), async (req, res) => {
+  app.post("/api/auth/reset-password", authLimiter, validate({ body: resetPasswordSchema }), async (req, res) => {
     try {
       const { token, newPassword } = req.body;
 
@@ -10439,7 +10440,7 @@ export function registerRoutes(app: Express) {
           );
         } else if (normalizedQaStatus === 'pending_review' || normalizedQaStatus === 'in_review') {
           // Accept legacy query params from older dashboard filters.
-          filtered = filtered.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review' || l.qaStatus === 'Pending Review');
+          filtered = filtered.filter(l => l.qaStatus === 'new' || l.qaStatus === 'under_review');
         } else {
           filtered = filtered.filter(l => l.qaStatus === normalizedQaStatus);
         }
@@ -10609,7 +10610,7 @@ export function registerRoutes(app: Express) {
         ...lead,
         recordingUrl,
         hasGcsRecording: !!(lead.recordingS3Key),
-        account: lead.contact?.account || null,
+        account: (lead.contact && !Array.isArray(lead.contact) ? (lead.contact as any).account : null) || null,
       };
 
       res.json(responseData);
@@ -18371,8 +18372,8 @@ Provide JSON response with:
           if (session.lqaShouldCreateLead === true) confidence += 10;
           if (session.lqaProspectInterested === true) confidence += 10;
           // Boost for job title / pain point alignment
-          if (session.lqaJobTitleAlignment === true) confidence += 8;
-          if (session.lqaPainPointAlignment === true) confidence += 8;
+          if ((session.lqaJobTitleAlignment ?? 0) > 0) confidence += 8;
+          if ((session.lqaPainPointAlignment ?? 0) > 0) confidence += 8;
           const negOutcomes = ['voicemail', 'invalid', 'not_a_fit', 'dnc'];
           if (session.lqaOutcomeCategory && negOutcomes.includes(session.lqaOutcomeCategory)) confidence -= 20;
           return { confidence: Math.max(0, Math.min(100, confidence)), scoringSource: 'lead_quality_ai' };
@@ -19634,6 +19635,9 @@ Provide JSON response with:
 
   // ==================== OI BATCH PIPELINE ====================
   app.use("/api/oi-batch", requireAuth, oiBatchRouter);
+
+  // ==================== GOOGLE CLOUD ACCOUNT MANAGER ====================
+  app.use("/api/google-cloud-accounts", googleCloudAccountsRouter);
 
   // =============================================================================
   // OTHER ROUTES
