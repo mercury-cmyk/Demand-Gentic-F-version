@@ -4120,7 +4120,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
             const gatekeeperReminder = `[GATEKEEPER DETECTED] You are speaking with a gatekeeper/receptionist, NOT ${contactFirstName}. ` +
               `Do NOT repeat "May I speak with ${contactFirstName}?" again â€” they already heard you. ` +
               `ENGAGE with the gatekeeper warmly and answer their questions: ` +
-              `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${contactFirstName} available?" ` +
+              `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding ${session.campaignType === 'content_syndication' ? 'a report we are sharing with business leaders' : 'something relevant to their role'}. Is ${contactFirstName} available?" ` +
               `If asked "Who is calling?", say: "My name is ${agentName}, calling from ${orgName}." ` +
               `Be kind, polite, and professional. Make no more than 2 polite attempts. If refused, thank them sincerely and end the call.`;
             provider.sendTextMessage(gatekeeperReminder);
@@ -11144,7 +11144,7 @@ If the response is any of:
 **CRITICAL: You are now talking to a gatekeeper. Do NOT repeat "May I speak with ${firstName}?" â€” they already heard you. ANSWER THEIR QUESTIONS.**
 
 **When Asked “What is this regarding?”, “What's this about?”, “What is this in regards to?”, or similar:**
-- Answer warmly: “Of course â€” my name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer that may be relevant to your team. Is ${firstName} available?”
+- Answer warmly: “Of course â€” my name is ${agentName}, calling on behalf of ${orgName}. ${campaignType === 'content_syndication' ? "It's regarding a report we're sharing with business leaders in this space." : "It's regarding something relevant to their role."} Is ${firstName} available?”
 - Do NOT dodge the question. Do NOT just repeat the name request.
 - If pressed further: “I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?”
 - NEVER say “let me get you over to someone” or attempt to transfer â€” YOU are the representative on this call. Answer directly.
@@ -11176,7 +11176,7 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 - "Before I try to connect you"
 
 **Respond EXACTLY ONCE:**
-"This is ${agentName} calling from ${orgName} for ${firstName} regarding a business opportunity."
+"This is ${agentName} calling from ${orgName} for ${firstName} regarding ${campaignType === 'content_syndication' ? 'a report we are sharing with business leaders' : 'a brief professional matter'}."
 
 **Then WAIT IN COMPLETE SILENCE. Do NOT repeat yourself. Do NOT ask questions.**
 - If a human connects â†’ restart identity check: "Hi, am I speaking with ${firstName}?"

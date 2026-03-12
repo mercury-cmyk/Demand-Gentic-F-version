@@ -320,6 +320,24 @@ export function buildCampaignContextSection(config: {
 }): string {
   const sections: string[] = [];
 
+  // For content syndication: prepend a hard override that cancels any qualification/sales mindset
+  // from the base agent prompt. This ensures the 7-step content flow takes absolute precedence.
+  if (config.campaignType === 'content_syndication') {
+    sections.push(`# ⚠️ CAMPAIGN OVERRIDE — READ FIRST
+
+**THIS IS A CONTENT DISTRIBUTION CALL. ALL PRIOR INSTRUCTIONS ABOUT QUALIFICATION, DISCOVERY, SALES, OR SCHEDULING ARE SUSPENDED FOR THIS CAMPAIGN.**
+
+Your ONLY job: get permission to send a free resource via email. Nothing else.
+
+- DO NOT ask about pain points, challenges, current tools, or budget
+- DO NOT pitch services, solutions, or your company's capabilities
+- DO NOT attempt to qualify the contact or schedule follow-up meetings
+- DO NOT engage in discovery conversations
+- DO NOT say "services we offer", "business opportunity", or any sales language
+
+The 7-step flow in the Campaign Context below is your COMPLETE script. Follow it exactly.`);
+  }
+
   // Campaign type provides critical context for how to approach the call
   if (config.campaignType) {
     const typeDescriptions: Record<string, string> = {
