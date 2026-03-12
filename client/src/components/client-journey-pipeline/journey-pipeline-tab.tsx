@@ -88,6 +88,7 @@ export interface JourneyAction {
   actionType: string;
   status: string;
   scheduledAt: string | null;
+  executedAt: string | null;
   completedAt: string | null;
   title: string | null;
   description: string | null;
@@ -97,6 +98,9 @@ export interface JourneyAction {
   outcomeDetails: any;
   resultDisposition: string | null;
   triggeredNextAction: boolean | null;
+  executionMethod: string | null;
+  linkedEntityType: string | null;
+  linkedEntityId: string | null;
   createdAt: string;
 }
 
@@ -168,8 +172,34 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
     enabled: !!activePipeline && view === "analytics",
   });
 
+  // ─── Fetch accountability for active pipeline ───
+  const { data: accountabilityData } = useQuery<{
+    accountability: {
+      totalActions: number;
+      completedActions: number;
+      completionRate: number;
+      overdueActions: number;
+      avgResponseHours: number | null;
+      verifiedActions: number;
+      verificationRate: number;
+      byActionType: { actionType: string; total: number; completed: number; automated: number; manual: number }[];
+    };
+  }>({
+    queryKey: ["journey-pipeline-accountability", activePipeline?.id],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/pipelines/${activePipeline!.id}/accountability`,
+        authHeaders
+      );
+      if (!res.ok) throw new Error("Failed to fetch accountability");
+      return res.json();
+    },
+    enabled: !!activePipeline && view === "analytics",
+  });
+
   const leads = leadsData?.leads || [];
   const analytics = analyticsData?.analytics;
+  const pipelineAccountability = accountabilityData?.accountability;
 
   const handleExport = async () => {
     if (!activePipeline?.id) return;
@@ -655,6 +685,55 @@ export function JourneyPipelineTab({ authHeaders }: JourneyPipelineTabProps) {
               </div>
             </CardContent>
           </Card>
+
+          {/* Accountability Metrics */}
+          {pipelineAccountability && pipelineAccountability.totalActions > 0 && (
+            <Card className="md:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Execution Accountability</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="text-center p-2 rounded bg-muted/50">
+                    <div className="text-2xl font-bold">{pipelineAccountability.completionRate}%</div>
+                    <div className="text-xs text-muted-foreground">Completion Rate</div>
+                  </div>
+                  <div className="text-center p-2 rounded bg-muted/50">
+                    <div className="text-2xl font-bold">{pipelineAccountability.verificationRate}%</div>
+                    <div className="text-xs text-muted-foreground">Verified</div>
+                  </div>
+                  <div className="text-center p-2 rounded bg-muted/50">
+                    <div className={`text-2xl font-bold ${pipelineAccountability.overdueActions > 0 ? "text-destructive" : ""}`}>
+                      {pipelineAccountability.overdueActions}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Overdue</div>
+                  </div>
+                  <div className="text-center p-2 rounded bg-muted/50">
+                    <div className="text-2xl font-bold">
+                      {pipelineAccountability.avgResponseHours != null
+                        ? pipelineAccountability.avgResponseHours < 24
+                          ? `${pipelineAccountability.avgResponseHours}h`
+                          : `${Math.round(pipelineAccountability.avgResponseHours / 24)}d`
+                        : "—"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Avg Response</div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {pipelineAccountability.byActionType.map((at) => (
+                    <div key={at.actionType} className="flex items-center justify-between text-sm">
+                      <span className="capitalize font-medium">{at.actionType}s</span>
+                      <div className="flex gap-2">
+                        <Badge variant="secondary">{at.completed}/{at.total}</Badge>
+                        {at.automated > 0 && <Badge variant="outline">{at.automated} auto</Badge>}
+                        {at.manual > 0 && <Badge variant="outline">{at.manual} manual</Badge>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 

@@ -28,7 +28,7 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { emailEvents, emailSends, emailSuppressionList, contacts } from '@shared/schema';
+import { emailEvents, emailSends, emailSuppressionList, emailOpens, emailLinkClicks, contacts } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 
 const router = Router();

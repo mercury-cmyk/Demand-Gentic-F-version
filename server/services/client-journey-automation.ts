@@ -6,6 +6,7 @@ import {
   clientJourneyPipelines,
   clientJourneyLeads,
   clientJourneyActions,
+  activityLog,
 } from "@shared/schema";
 import {
   and,
@@ -487,6 +488,7 @@ export async function executeDueJourneyActions(limit: number = 25): Promise<{ pr
           .update(clientJourneyActions)
           .set({
             status: "completed",
+            executedAt: new Date(),
             completedAt: new Date(),
             outcome: callbackResult.queued
               ? "Auto-queued AI callback in campaign dialing queue"
@@ -496,10 +498,29 @@ export async function executeDueJourneyActions(limit: number = 25): Promise<{ pr
               reason: callbackResult.reason || null,
               targetAgentType: "ai",
             },
+            executionMethod: "automated",
+            linkedEntityType: callbackResult.queued ? "campaign_queue" : null,
             triggeredNextAction: true,
             updatedAt: new Date(),
           })
           .where(eq(clientJourneyActions.id, action.id));
+
+        // Log accountability event
+        await db.insert(activityLog).values({
+          entityType: "pipeline_action",
+          entityId: action.id,
+          eventType: callbackResult.queued ? "pipeline_callback_queued" : "pipeline_action_completed",
+          payload: {
+            journeyLeadId: lead.id,
+            pipelineId: action.pipelineId,
+            actionType: "callback",
+            queued: callbackResult.queued,
+            reason: callbackResult.reason || null,
+            contactId: lead.contactId,
+            contactName: lead.contactName,
+            executionMethod: "automated",
+          },
+        });
       } else if (action.actionType === "email") {
         // Email actions are now handled by executePipelineEmailActions() in
         // campaign-pipeline-orchestrator.ts which generates AI content and
@@ -511,11 +532,26 @@ export async function executeDueJourneyActions(limit: number = 25): Promise<{ pr
           .update(clientJourneyActions)
           .set({
             status: "completed",
+            executedAt: new Date(),
             completedAt: new Date(),
             outcome: "Action auto-completed by journey automation",
+            executionMethod: "automated",
             updatedAt: new Date(),
           })
           .where(eq(clientJourneyActions.id, action.id));
+
+        await db.insert(activityLog).values({
+          entityType: "pipeline_action",
+          entityId: action.id,
+          eventType: "pipeline_action_completed",
+          payload: {
+            journeyLeadId: lead.id,
+            pipelineId: action.pipelineId,
+            actionType: action.actionType,
+            contactId: lead.contactId,
+            executionMethod: "automated",
+          },
+        });
       }
 
       await refreshLeadNextAction(lead.id);
@@ -525,12 +561,28 @@ export async function executeDueJourneyActions(limit: number = 25): Promise<{ pr
         .update(clientJourneyActions)
         .set({
           status: "failed",
+          executedAt: new Date(),
           completedAt: new Date(),
           outcome: `Automation failed: ${error?.message || "unknown error"}`,
           outcomeDetails: { error: error?.message || String(error) },
+          executionMethod: "automated",
           updatedAt: new Date(),
         })
         .where(eq(clientJourneyActions.id, action.id));
+
+      await db.insert(activityLog).values({
+        entityType: "pipeline_action",
+        entityId: action.id,
+        eventType: "pipeline_action_failed",
+        payload: {
+          actionType: action.actionType,
+          pipelineId: action.pipelineId,
+          journeyLeadId: action.journeyLeadId,
+          error: error?.message || String(error),
+          executionMethod: "automated",
+        },
+      }).catch(() => {}); // Don't fail the main loop on log error
+
       failed += 1;
     }
   }

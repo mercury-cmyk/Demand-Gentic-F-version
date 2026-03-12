@@ -707,7 +707,18 @@ export const activityEventTypeEnum = pgEnum('activity_event_type', [
   'admin_delete_contacts',
   'admin_delete_accounts',
   'admin_delete_leads',
-  'admin_delete_all_data'
+  'admin_delete_all_data',
+  // Pipeline action accountability events
+  'pipeline_action_scheduled',
+  'pipeline_action_executed',
+  'pipeline_action_completed',
+  'pipeline_action_skipped',
+  'pipeline_action_failed',
+  'pipeline_callback_queued',
+  'pipeline_callback_verified',
+  'pipeline_email_sent',
+  'pipeline_email_delivered',
+  'pipeline_email_opened_verified'
 ]);
 
 export const activityEntityTypeEnum = pgEnum('activity_entity_type', [
@@ -718,7 +729,8 @@ export const activityEntityTypeEnum = pgEnum('activity_entity_type', [
   'call_session',
   'lead',
   'user',
-  'email_message'
+  'email_message',
+  'pipeline_action'
 ]);
 
 // ==================== MULTI-CHANNEL CAMPAIGN ENUMS ====================
@@ -9377,7 +9389,7 @@ export const dealMessages = pgTable("deal_messages", {
 // Email Tracking - Opens, clicks, and engagement tracking
 export const emailOpens = pgTable("email_opens", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  messageId: varchar("message_id", { length: 36 }).notNull().references(() => dealMessages.id, { onDelete: 'cascade' }),
+  messageId: varchar("message_id", { length: 36 }).notNull(), // No FK — stores dealMessage.id OR emailSend.id
   recipientEmail: varchar("recipient_email", { length: 320 }).notNull(),
   openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
   ipAddress: varchar("ip_address", { length: 45 }),
@@ -9393,7 +9405,7 @@ export const emailOpens = pgTable("email_opens", {
 
 export const emailLinkClicks = pgTable("email_link_clicks", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
-  messageId: varchar("message_id", { length: 36 }).notNull().references(() => dealMessages.id, { onDelete: 'cascade' }),
+  messageId: varchar("message_id", { length: 36 }).notNull(), // No FK — stores dealMessage.id OR emailSend.id
   recipientEmail: varchar("recipient_email", { length: 320 }).notNull(),
   linkUrl: text("link_url").notNull(),
   linkText: text("link_text"),
@@ -15457,6 +15469,7 @@ export const clientJourneyActions = pgTable("client_journey_actions", {
   status: clientJourneyActionStatusEnum("status").notNull().default('scheduled'),
 
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  executedAt: timestamp("executed_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
 
   title: text("title"),
@@ -15472,6 +15485,11 @@ export const clientJourneyActions = pgTable("client_journey_actions", {
   resultDisposition: text("result_disposition"),
   triggeredNextAction: boolean("triggered_next_action").default(false),
 
+  // Accountability tracking
+  executionMethod: text("execution_method"), // 'automated' | 'manual' | 'linked_call' | 'linked_email'
+  linkedEntityType: text("linked_entity_type"), // 'call_session' | 'email_send' | 'mercury_outbox'
+  linkedEntityId: varchar("linked_entity_id", { length: 36 }),
+
   createdBy: varchar("created_by", { length: 36 }),
   completedBy: varchar("completed_by", { length: 36 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -15482,6 +15500,7 @@ export const clientJourneyActions = pgTable("client_journey_actions", {
   statusIdx: index("cja_status_idx").on(table.status),
   scheduledAtIdx: index("cja_scheduled_at_idx").on(table.scheduledAt),
   actionTypeIdx: index("cja_action_type_idx").on(table.actionType),
+  linkedEntityIdx: index("cja_linked_entity_idx").on(table.linkedEntityType, table.linkedEntityId),
 }));
 
 export const insertClientJourneyPipelineSchema = createInsertSchema(clientJourneyPipelines);

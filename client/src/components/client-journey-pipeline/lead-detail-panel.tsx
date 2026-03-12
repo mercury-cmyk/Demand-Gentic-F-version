@@ -123,6 +123,40 @@ export function LeadDetailPanel({
 
   const comms = commsData?.communications;
 
+  // ─── Accountability Scorecard ───
+  const { data: accountabilityData } = useQuery<{
+    success: boolean;
+    accountability: {
+      summary: {
+        total: number;
+        completed: number;
+        failed: number;
+        skipped: number;
+        scheduled: number;
+        overdue: number;
+        completionRate: number;
+        verified: number;
+        verificationRate: number;
+        avgResponseHours: number | null;
+      };
+      byActionType: Record<string, { total: number; completed: number; failed: number; skipped: number }>;
+      executionMethods: Record<string, number>;
+    };
+  }>({
+    queryKey: ["journey-lead-accountability", leadId],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/client-portal/journey-pipeline/leads/${leadId}/accountability`,
+        authHeaders
+      );
+      if (!res.ok) throw new Error("Failed to fetch accountability");
+      return res.json();
+    },
+    enabled: !!leadId,
+  });
+
+  const accountability = accountabilityData?.accountability;
+
   // ─── AI Follow-up Generation ───
   const generateFollowUp = useMutation({
     mutationFn: async (type: "callback" | "email") => {
@@ -171,13 +205,23 @@ export function LeadDetailPanel({
 
   // ─── Complete Action ───
   const completeAction = useMutation({
-    mutationFn: async ({ actionId, outcome }: { actionId: string; outcome: string }) => {
+    mutationFn: async ({ actionId, outcome, resultDisposition, executionMethod }: {
+      actionId: string;
+      outcome: string;
+      resultDisposition?: string;
+      executionMethod?: string;
+    }) => {
       const res = await fetch(
         `/api/client-portal/journey-pipeline/actions/${actionId}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json", ...authHeaders.headers },
-          body: JSON.stringify({ status: "completed", outcome }),
+          body: JSON.stringify({
+            status: "completed",
+            outcome,
+            resultDisposition,
+            executionMethod: executionMethod || "manual",
+          }),
         }
       );
       if (!res.ok) throw new Error("Failed to update action");
@@ -185,6 +229,7 @@ export function LeadDetailPanel({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["journey-lead-detail", leadId] });
+      queryClient.invalidateQueries({ queryKey: ["journey-lead-accountability", leadId] });
     },
   });
 
@@ -389,6 +434,63 @@ export function LeadDetailPanel({
               </Card>
             )}
 
+            {/* Accountability Scorecard */}
+            {accountability && accountability.summary.total > 0 && (
+              <Card className="mb-3">
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-2 mb-2 text-sm font-medium">
+                    <Activity className="h-4 w-4" />
+                    Execution Scorecard
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="text-center p-1.5 rounded bg-muted/50">
+                      <div className="text-lg font-bold">{accountability.summary.completionRate}%</div>
+                      <div className="text-[10px] text-muted-foreground">Completion</div>
+                    </div>
+                    <div className="text-center p-1.5 rounded bg-muted/50">
+                      <div className="text-lg font-bold">
+                        {accountability.summary.completed}/{accountability.summary.total}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Actions Done</div>
+                    </div>
+                    <div className="text-center p-1.5 rounded bg-muted/50">
+                      <div className={`text-lg font-bold ${accountability.summary.overdue > 0 ? "text-destructive" : ""}`}>
+                        {accountability.summary.overdue}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Overdue</div>
+                    </div>
+                    <div className="text-center p-1.5 rounded bg-muted/50">
+                      <div className="text-lg font-bold">
+                        {accountability.summary.avgResponseHours != null
+                          ? accountability.summary.avgResponseHours < 24
+                            ? `${accountability.summary.avgResponseHours}h`
+                            : `${Math.round(accountability.summary.avgResponseHours / 24)}d`
+                          : "—"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Avg Response</div>
+                    </div>
+                  </div>
+                  {/* Action type breakdown row */}
+                  <div className="flex gap-3 mt-2 text-xs text-muted-foreground">
+                    {Object.entries(accountability.byActionType).map(([type, stats]) => (
+                      <span key={type} className="flex items-center gap-1 capitalize">
+                        {type === "callback" && <Phone className="h-3 w-3" />}
+                        {type === "email" && <Mail className="h-3 w-3" />}
+                        {type === "sms" && <MessageSquare className="h-3 w-3" />}
+                        {stats.completed}/{stats.total}
+                      </span>
+                    ))}
+                    {accountability.summary.verified > 0 && (
+                      <span className="flex items-center gap-1 text-green-600">
+                        <CheckCircle2 className="h-3 w-3" />
+                        {accountability.summary.verificationRate}% verified
+                      </span>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Tabs: Timeline / Source Context / Notes */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="w-full">
@@ -417,8 +519,8 @@ export function LeadDetailPanel({
                     <ActionTimelineItem
                       key={action.id}
                       action={action}
-                      onComplete={(outcome) =>
-                        completeAction.mutate({ actionId: action.id, outcome })
+                      onComplete={(outcome, resultDisposition, executionMethod) =>
+                        completeAction.mutate({ actionId: action.id, outcome, resultDisposition, executionMethod })
                       }
                       onSkip={() => skipAction.mutate(action.id)}
                     />
@@ -858,17 +960,36 @@ export function LeadDetailPanel({
 
 // ─── Action Timeline Item ───
 
+const CALLBACK_DISPOSITIONS = [
+  { value: "connected", label: "Connected - Spoke with contact" },
+  { value: "voicemail", label: "Left voicemail" },
+  { value: "no_answer", label: "No answer" },
+  { value: "busy", label: "Line busy" },
+  { value: "meeting_set", label: "Meeting scheduled" },
+  { value: "not_interested", label: "Not interested" },
+  { value: "wrong_number", label: "Wrong number" },
+  { value: "callback_requested", label: "Callback requested" },
+];
+
+const EMAIL_DISPOSITIONS = [
+  { value: "sent", label: "Email sent" },
+  { value: "replied", label: "Got reply" },
+  { value: "bounced", label: "Bounced" },
+  { value: "no_response", label: "No response yet" },
+];
+
 function ActionTimelineItem({
   action,
   onComplete,
   onSkip,
 }: {
   action: JourneyAction;
-  onComplete: (outcome: string) => void;
+  onComplete: (outcome: string, resultDisposition?: string, executionMethod?: string) => void;
   onSkip: () => void;
 }) {
   const [showOutcome, setShowOutcome] = useState(false);
   const [outcome, setOutcome] = useState("");
+  const [disposition, setDisposition] = useState("");
 
   const isOverdue =
     action.status === "scheduled" &&
@@ -894,6 +1015,20 @@ function ActionTimelineItem({
   const ActionIcon = iconMap[action.actionType] || FileText;
   const StatusIcon = statusIconMap[action.status] || Clock;
 
+  const dispositionOptions = action.actionType === "callback"
+    ? CALLBACK_DISPOSITIONS
+    : action.actionType === "email"
+      ? EMAIL_DISPOSITIONS
+      : null;
+
+  // Compute response time if executed
+  const responseTimeLabel = action.scheduledAt && action.executedAt
+    ? (() => {
+        const hrs = Math.round((new Date(action.executedAt).getTime() - new Date(action.scheduledAt).getTime()) / (1000 * 60 * 60));
+        return hrs < 1 ? "<1h" : hrs < 24 ? `${hrs}h` : `${Math.round(hrs / 24)}d`;
+      })()
+    : null;
+
   return (
     <Card className={isOverdue ? "border-destructive/50" : ""}>
       <CardContent className="p-3">
@@ -914,7 +1049,7 @@ function ActionTimelineItem({
 
           <div className="flex-1 min-w-0 space-y-1">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-sm capitalize">{action.actionType}</span>
                 <Badge
                   variant={
@@ -935,12 +1070,32 @@ function ActionTimelineItem({
                     Overdue
                   </Badge>
                 )}
+                {/* Execution method badge */}
+                {action.executionMethod && (
+                  <Badge variant="outline" className="text-xs">
+                    {action.executionMethod === "automated" ? "Auto" : "Manual"}
+                  </Badge>
+                )}
+                {/* Verified badge */}
+                {action.linkedEntityId && (
+                  <Badge variant="secondary" className="text-xs gap-1 bg-green-50 text-green-700 border-green-200">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Verified
+                  </Badge>
+                )}
               </div>
-              <span className="text-xs text-muted-foreground">
-                {action.scheduledAt
-                  ? new Date(action.scheduledAt).toLocaleDateString()
-                  : new Date(action.createdAt).toLocaleDateString()}
-              </span>
+              <div className="flex items-center gap-2">
+                {responseTimeLabel && (
+                  <span className="text-xs text-muted-foreground" title="Response time (scheduled → executed)">
+                    {responseTimeLabel}
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {action.scheduledAt
+                    ? new Date(action.scheduledAt).toLocaleDateString()
+                    : new Date(action.createdAt).toLocaleDateString()}
+                </span>
+              </div>
             </div>
 
             {action.title && <div className="text-sm">{action.title}</div>}
@@ -951,6 +1106,22 @@ function ActionTimelineItem({
               <div className="text-sm">
                 <span className="font-medium">Outcome: </span>
                 {action.outcome}
+              </div>
+            )}
+            {action.resultDisposition && (
+              <div className="text-sm">
+                <span className="font-medium">Disposition: </span>
+                <span className="capitalize">{action.resultDisposition.replace(/_/g, " ")}</span>
+              </div>
+            )}
+
+            {/* Execution timestamps for completed actions */}
+            {action.status === "completed" && action.executedAt && (
+              <div className="text-xs text-muted-foreground">
+                Executed: {new Date(action.executedAt).toLocaleString()}
+                {action.completedAt && action.executedAt !== action.completedAt && (
+                  <> &middot; Completed: {new Date(action.completedAt).toLocaleString()}</>
+                )}
               </div>
             )}
 
@@ -964,9 +1135,9 @@ function ActionTimelineItem({
 
             {/* Action buttons for scheduled items */}
             {action.status === "scheduled" && (
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-col gap-2 pt-1">
                 {!showOutcome ? (
-                  <>
+                  <div className="flex gap-2">
                     <Button
                       size="sm"
                       variant="outline"
@@ -985,26 +1156,60 @@ function ActionTimelineItem({
                       <SkipForward className="h-3 w-3" />
                       Skip
                     </Button>
-                  </>
+                  </div>
                 ) : (
-                  <div className="flex gap-2 w-full">
+                  <div className="space-y-2 border rounded-md p-2 bg-muted/30">
+                    {/* Disposition selector for callbacks/emails */}
+                    {dispositionOptions && (
+                      <Select value={disposition} onValueChange={setDisposition}>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="Select disposition..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {dispositionOptions.map((d) => (
+                            <SelectItem key={d.value} value={d.value} className="text-xs">
+                              {d.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                     <input
                       type="text"
                       value={outcome}
                       onChange={(e) => setOutcome(e.target.value)}
-                      placeholder="Outcome (e.g. Left voicemail, Scheduled meeting)"
-                      className="flex-1 h-7 text-xs border rounded px-2"
+                      placeholder="Notes (e.g. Discussed pricing, will follow up Thursday)"
+                      className="w-full h-7 text-xs border rounded px-2"
                     />
-                    <Button
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        onComplete(outcome || "Completed");
-                        setShowOutcome(false);
-                      }}
-                    >
-                      Save
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          const outcomeText = disposition
+                            ? `${disposition.replace(/_/g, " ")}${outcome ? ` - ${outcome}` : ""}`
+                            : outcome || "Completed";
+                          onComplete(outcomeText, disposition || undefined, "manual");
+                          setShowOutcome(false);
+                          setOutcome("");
+                          setDisposition("");
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setShowOutcome(false);
+                          setOutcome("");
+                          setDisposition("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>

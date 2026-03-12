@@ -23,6 +23,7 @@ import {
   clientJourneyActions,
   campaignQueue,
   dialerCallAttempts,
+  activityLog,
 } from "@shared/schema";
 import {
   and,
@@ -431,11 +432,12 @@ export async function executePipelineEmailActions(limit: number = 10): Promise<{
         }
       }
 
-      // Mark action as completed
+      // Mark action as completed with accountability
       await db
         .update(clientJourneyActions)
         .set({
           status: "completed",
+          executedAt: new Date(),
           completedAt: new Date(),
           outcome: `Email sent: "${emailContent.subject}"`,
           outcomeDetails: {
@@ -446,10 +448,32 @@ export async function executePipelineEmailActions(limit: number = 10): Promise<{
             emailType,
             deliveryMode: "automated",
             sentAt: new Date().toISOString(),
+            trackingMessageId,
           },
+          executionMethod: "automated",
+          linkedEntityType: "mercury_outbox",
+          linkedEntityId: sendResult.outboxId || null,
           updatedAt: new Date(),
         })
         .where(eq(clientJourneyActions.id, action.id));
+
+      // Log accountability event
+      await db.insert(activityLog).values({
+        entityType: "pipeline_action",
+        entityId: action.id,
+        eventType: "pipeline_email_sent",
+        payload: {
+          journeyLeadId: lead.id,
+          pipelineId: pipeline.id,
+          actionType: "email",
+          recipientEmail: lead.contactEmail,
+          subject: emailContent.subject,
+          outboxId: sendResult.outboxId,
+          trackingMessageId,
+          executionMethod: "automated",
+          contactName: lead.contactName,
+        },
+      }).catch(() => {});
 
       // Update lead activity
       await db
@@ -469,12 +493,28 @@ export async function executePipelineEmailActions(limit: number = 10): Promise<{
         .update(clientJourneyActions)
         .set({
           status: "failed",
+          executedAt: new Date(),
           completedAt: new Date(),
           outcome: `Email send failed: ${error.message || "unknown error"}`,
           outcomeDetails: { error: error.message || String(error) },
+          executionMethod: "automated",
           updatedAt: new Date(),
         })
         .where(eq(clientJourneyActions.id, action.id));
+
+      await db.insert(activityLog).values({
+        entityType: "pipeline_action",
+        entityId: action.id,
+        eventType: "pipeline_action_failed",
+        payload: {
+          journeyLeadId: lead.id,
+          pipelineId: pipeline.id,
+          actionType: "email",
+          error: error.message || String(error),
+          executionMethod: "automated",
+        },
+      }).catch(() => {});
+
       failed += 1;
     }
   }

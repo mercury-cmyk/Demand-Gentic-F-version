@@ -21,7 +21,7 @@ import {
   activityLog,
   mercuryEmailOutbox,
 } from "@shared/schema";
-import { eq, and, or, desc, asc, sql, count, inArray } from "drizzle-orm";
+import { eq, and, or, desc, asc, sql, count, inArray, lte } from "drizzle-orm";
 import {
   generateFollowUpContext,
   generateFollowUpEmail,
@@ -773,6 +773,9 @@ const updateActionSchema = z.object({
   outcome: z.string().max(1000).optional(),
   outcomeDetails: z.any().optional(),
   resultDisposition: z.string().max(100).optional(),
+  executionMethod: z.enum(["manual", "linked_call", "linked_email"]).optional(),
+  linkedEntityType: z.string().max(50).optional(),
+  linkedEntityId: z.string().max(36).optional(),
 });
 
 router.patch("/actions/:id", async (req: Request, res: Response) => {
@@ -808,11 +811,25 @@ router.patch("/actions/:id", async (req: Request, res: Response) => {
       if (input.status === "completed" || input.status === "skipped" || input.status === "failed") {
         updates.completedAt = new Date();
         updates.completedBy = clientUserId;
+        if (!action.executedAt) {
+          updates.executedAt = new Date();
+        }
+      }
+      if (input.status === "in_progress" && !action.executedAt) {
+        updates.executedAt = new Date();
       }
     }
     if (input.outcome !== undefined) updates.outcome = input.outcome;
     if (input.outcomeDetails !== undefined) updates.outcomeDetails = input.outcomeDetails;
     if (input.resultDisposition !== undefined) updates.resultDisposition = input.resultDisposition;
+    if (input.executionMethod !== undefined) updates.executionMethod = input.executionMethod;
+    if (input.linkedEntityType !== undefined) updates.linkedEntityType = input.linkedEntityType;
+    if (input.linkedEntityId !== undefined) updates.linkedEntityId = input.linkedEntityId;
+
+    // Default executionMethod to 'manual' for user-completed actions
+    if (input.status === "completed" && !input.executionMethod && !action.executionMethod) {
+      updates.executionMethod = "manual";
+    }
 
     const [updated] = await db
       .update(clientJourneyActions)
@@ -825,6 +842,31 @@ router.patch("/actions/:id", async (req: Request, res: Response) => {
       .update(clientJourneyLeads)
       .set({ lastActivityAt: new Date(), updatedAt: new Date() })
       .where(eq(clientJourneyLeads.id, action.journeyLeadId));
+
+    // Log accountability event to activity log
+    const eventType = input.status === "completed"
+      ? "pipeline_action_completed"
+      : input.status === "skipped"
+        ? "pipeline_action_skipped"
+        : input.status === "failed"
+          ? "pipeline_action_failed"
+          : "pipeline_action_executed";
+
+    await db.insert(activityLog).values({
+      entityType: "pipeline_action",
+      entityId: action.id,
+      eventType: eventType as any,
+      payload: {
+        journeyLeadId: action.journeyLeadId,
+        pipelineId: action.pipelineId,
+        actionType: action.actionType,
+        status: input.status || action.status,
+        outcome: input.outcome || action.outcome,
+        resultDisposition: input.resultDisposition,
+        executionMethod: updates.executionMethod || action.executionMethod || "manual",
+        completedBy: clientUserId,
+      },
+    }).catch(() => {}); // Don't fail the main request on log error
 
     res.json({ success: true, action: updated });
   } catch (error: any) {
@@ -1161,6 +1203,271 @@ router.get("/pipelines/:id/analytics", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("[JourneyPipeline] Failed to fetch analytics:", error);
     res.status(500).json({ success: false, message: "Failed to fetch analytics" });
+  }
+});
+
+// ─── GET /leads/:id/accountability — Execution scorecard for a lead ───
+
+router.get("/leads/:id/accountability", async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: "Unauthorized" });
+
+    const [lead] = await db
+      .select()
+      .from(clientJourneyLeads)
+      .where(eq(clientJourneyLeads.id, req.params.id))
+      .limit(1);
+
+    if (!lead) return res.status(404).json({ message: "Lead not found" });
+
+    const [pipeline] = await db
+      .select({ clientAccountId: clientJourneyPipelines.clientAccountId })
+      .from(clientJourneyPipelines)
+      .where(eq(clientJourneyPipelines.id, lead.pipelineId))
+      .limit(1);
+
+    if (!pipeline || pipeline.clientAccountId !== clientAccountId) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    // Fetch all actions for this lead
+    const actions = await db
+      .select({
+        id: clientJourneyActions.id,
+        actionType: clientJourneyActions.actionType,
+        status: clientJourneyActions.status,
+        scheduledAt: clientJourneyActions.scheduledAt,
+        executedAt: clientJourneyActions.executedAt,
+        completedAt: clientJourneyActions.completedAt,
+        executionMethod: clientJourneyActions.executionMethod,
+        linkedEntityType: clientJourneyActions.linkedEntityType,
+        linkedEntityId: clientJourneyActions.linkedEntityId,
+        outcome: clientJourneyActions.outcome,
+        resultDisposition: clientJourneyActions.resultDisposition,
+        createdAt: clientJourneyActions.createdAt,
+      })
+      .from(clientJourneyActions)
+      .where(eq(clientJourneyActions.journeyLeadId, lead.id))
+      .orderBy(desc(clientJourneyActions.createdAt));
+
+    // Compute accountability metrics
+    const total = actions.length;
+    const completed = actions.filter(a => a.status === "completed").length;
+    const failed = actions.filter(a => a.status === "failed").length;
+    const skipped = actions.filter(a => a.status === "skipped").length;
+    const scheduled = actions.filter(a => a.status === "scheduled").length;
+    const overdue = actions.filter(a =>
+      a.status === "scheduled" && a.scheduledAt && new Date(a.scheduledAt) < new Date()
+    ).length;
+
+    // Per action type breakdown
+    const byType: Record<string, { total: number; completed: number; failed: number; skipped: number; avgResponseHours: number | null }> = {};
+    for (const a of actions) {
+      if (!byType[a.actionType]) {
+        byType[a.actionType] = { total: 0, completed: 0, failed: 0, skipped: 0, avgResponseHours: null };
+      }
+      byType[a.actionType].total += 1;
+      if (a.status === "completed") byType[a.actionType].completed += 1;
+      if (a.status === "failed") byType[a.actionType].failed += 1;
+      if (a.status === "skipped") byType[a.actionType].skipped += 1;
+    }
+
+    // Avg response time (scheduled → executed)
+    const responseTimes = actions
+      .filter(a => a.scheduledAt && a.executedAt)
+      .map(a => (new Date(a.executedAt!).getTime() - new Date(a.scheduledAt!).getTime()) / (1000 * 60 * 60));
+    const avgResponseHours = responseTimes.length > 0
+      ? Math.round((responseTimes.reduce((s, v) => s + v, 0) / responseTimes.length) * 10) / 10
+      : null;
+
+    // Execution method breakdown
+    const executionMethods: Record<string, number> = {};
+    for (const a of actions) {
+      const method = a.executionMethod || "untracked";
+      executionMethods[method] = (executionMethods[method] || 0) + 1;
+    }
+
+    // Linked verification count (actions with proof)
+    const verified = actions.filter(a => a.linkedEntityId).length;
+
+    // Fetch activity log entries for this lead's actions
+    const actionIds = actions.map(a => a.id);
+    const logEntries = actionIds.length > 0
+      ? await db
+          .select({
+            id: activityLog.id,
+            entityId: activityLog.entityId,
+            eventType: activityLog.eventType,
+            payload: activityLog.payload,
+            createdAt: activityLog.createdAt,
+          })
+          .from(activityLog)
+          .where(
+            and(
+              eq(activityLog.entityType, "pipeline_action" as any),
+              inArray(activityLog.entityId, actionIds)
+            )
+          )
+          .orderBy(desc(activityLog.createdAt))
+          .limit(100)
+      : [];
+
+    res.json({
+      success: true,
+      accountability: {
+        summary: {
+          total,
+          completed,
+          failed,
+          skipped,
+          scheduled,
+          overdue,
+          completionRate: total > 0 ? Math.round((completed / total) * 100) : 0,
+          verified,
+          verificationRate: completed > 0 ? Math.round((verified / completed) * 100) : 0,
+          avgResponseHours,
+        },
+        byActionType: byType,
+        executionMethods,
+        actions,
+        auditLog: logEntries,
+      },
+    });
+  } catch (error) {
+    console.error("[JourneyPipeline] Failed to fetch accountability:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch accountability data" });
+  }
+});
+
+// ─── GET /pipelines/:id/accountability — Pipeline-wide accountability metrics ───
+
+router.get("/pipelines/:id/accountability", async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: "Unauthorized" });
+
+    const [pipeline] = await db
+      .select()
+      .from(clientJourneyPipelines)
+      .where(
+        and(
+          eq(clientJourneyPipelines.id, req.params.id),
+          eq(clientJourneyPipelines.clientAccountId, clientAccountId)
+        )
+      )
+      .limit(1);
+
+    if (!pipeline) return res.status(404).json({ message: "Pipeline not found" });
+
+    // Aggregate action stats
+    const actionSummary = await db
+      .select({
+        actionType: clientJourneyActions.actionType,
+        status: clientJourneyActions.status,
+        executionMethod: clientJourneyActions.executionMethod,
+        count: count(),
+      })
+      .from(clientJourneyActions)
+      .where(eq(clientJourneyActions.pipelineId, pipeline.id))
+      .groupBy(clientJourneyActions.actionType, clientJourneyActions.status, clientJourneyActions.executionMethod);
+
+    // Overdue count
+    const [overdueResult] = await db
+      .select({ count: count() })
+      .from(clientJourneyActions)
+      .where(
+        and(
+          eq(clientJourneyActions.pipelineId, pipeline.id),
+          eq(clientJourneyActions.status, "scheduled"),
+          lte(clientJourneyActions.scheduledAt, new Date())
+        )
+      );
+
+    // Avg response time across pipeline
+    const [avgResponse] = await db
+      .select({
+        avgHours: sql<number>`ROUND(AVG(EXTRACT(EPOCH FROM ("executed_at" - "scheduled_at")) / 3600.0)::numeric, 1)`,
+      })
+      .from(clientJourneyActions)
+      .where(
+        and(
+          eq(clientJourneyActions.pipelineId, pipeline.id),
+          sql`"executed_at" IS NOT NULL AND "scheduled_at" IS NOT NULL`
+        )
+      );
+
+    // Verified (linked entity) count
+    const [verifiedResult] = await db
+      .select({ count: count() })
+      .from(clientJourneyActions)
+      .where(
+        and(
+          eq(clientJourneyActions.pipelineId, pipeline.id),
+          sql`"linked_entity_id" IS NOT NULL`
+        )
+      );
+
+    // Total and completed counts
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(clientJourneyActions)
+      .where(eq(clientJourneyActions.pipelineId, pipeline.id));
+
+    const [completedResult] = await db
+      .select({ count: count() })
+      .from(clientJourneyActions)
+      .where(
+        and(
+          eq(clientJourneyActions.pipelineId, pipeline.id),
+          eq(clientJourneyActions.status, "completed")
+        )
+      );
+
+    // Per-type execution rates
+    const typeStats: Record<string, { total: number; completed: number; automated: number; manual: number; verified: number }> = {};
+    for (const row of actionSummary) {
+      const key = row.actionType;
+      if (!typeStats[key]) {
+        typeStats[key] = { total: 0, completed: 0, automated: 0, manual: 0, verified: 0 };
+      }
+      const cnt = Number(row.count);
+      typeStats[key].total += cnt;
+      if (row.status === "completed") typeStats[key].completed += cnt;
+      if (row.executionMethod === "automated") typeStats[key].automated += cnt;
+      if (row.executionMethod === "manual" || row.executionMethod === "linked_call" || row.executionMethod === "linked_email") {
+        typeStats[key].manual += cnt;
+      }
+    }
+
+    const totalCount = Number(totalResult?.count || 0);
+    const completedCount = Number(completedResult?.count || 0);
+    const verifiedCount = Number(verifiedResult?.count || 0);
+
+    res.json({
+      success: true,
+      accountability: {
+        summary: {
+          totalActions: totalCount,
+          completedActions: completedCount,
+          completionRate: totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0,
+          overdueActions: Number(overdueResult?.count || 0),
+          avgResponseHours: Number(avgResponse?.avgHours || 0),
+          verifiedActions: verifiedCount,
+          verificationRate: completedCount > 0 ? Math.round((verifiedCount / completedCount) * 100) : 0,
+        },
+        byActionType: typeStats,
+        breakdown: actionSummary.map(row => ({
+          actionType: row.actionType,
+          status: row.status,
+          executionMethod: row.executionMethod || "untracked",
+          count: Number(row.count),
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("[JourneyPipeline] Failed to fetch pipeline accountability:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch accountability data" });
   }
 });
 
