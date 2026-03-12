@@ -55,6 +55,9 @@ import pipelineIntelligenceRouter from './routes/pipeline-intelligence-routes';
 import intelligenceRoutes from './routes/intelligence-routes';
 import aiProjectRouter from './routes/ai-project-routes';
 import inboxRouter from './routes/inbox-routes';
+import draftRouter from './routes/draft-routes';
+import scheduleRouter from './routes/schedule-routes';
+import inboxSettingsRouter from './routes/inbox-settings-routes';
 import emailAiRouter from './routes/email-ai-routes';
 import deepseekAiRouter from './routes/deepseek-ai-routes';
 import emailCampaignStatsRouter from './routes/email-campaign-stats-routes';
@@ -16576,6 +16579,9 @@ Provide JSON response with:
 
   // ==================== EMAIL INBOX ====================
   app.use('/api/inbox', inboxRouter);
+  app.use('/api/inbox', draftRouter);
+  app.use('/api/inbox', scheduleRouter);
+  app.use('/api/inbox', inboxSettingsRouter);
 
   // ==================== EMAIL AI ANALYSIS ====================
   app.use('/api/email-ai', emailAiRouter);

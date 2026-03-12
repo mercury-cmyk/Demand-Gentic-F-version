@@ -654,3 +654,203 @@ export async function archiveMessage(
       )
     );
 }
+
+/**
+ * Trash message (soft-delete)
+ */
+export async function trashMessage(userId: string, messageId: string): Promise<void> {
+  await getOrCreateInboxCategory(userId, messageId);
+  await db
+    .update(inboxCategories)
+    .set({ isTrashed: true, trashedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.messageId, messageId)));
+}
+
+/**
+ * Restore message from trash
+ */
+export async function untrashMessage(userId: string, messageId: string): Promise<void> {
+  await db
+    .update(inboxCategories)
+    .set({ isTrashed: false, trashedAt: null, updatedAt: new Date() })
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.messageId, messageId)));
+}
+
+/**
+ * Permanently delete a trashed message category record
+ */
+export async function permanentlyDeleteMessage(userId: string, messageId: string): Promise<boolean> {
+  const result = await db
+    .delete(inboxCategories)
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.messageId, messageId), eq(inboxCategories.isTrashed, true)));
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Empty trash – delete all trashed category records for a user
+ */
+export async function emptyTrash(userId: string): Promise<number> {
+  const result = await db
+    .delete(inboxCategories)
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.isTrashed, true)));
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Get trashed messages
+ */
+export async function getTrashedMessages(
+  userId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<InboxMessage[]> {
+  const { limit = 50, offset = 0 } = options;
+
+  const results = await db
+    .select({
+      message: dealMessages,
+      category: inboxCategories,
+      conversation: dealConversations,
+      opportunity: pipelineOpportunities,
+      account: accounts,
+      contact: contacts
+    })
+    .from(inboxCategories)
+    .innerJoin(dealMessages, eq(dealMessages.id, inboxCategories.messageId))
+    .leftJoin(dealConversations, eq(dealConversations.id, dealMessages.conversationId))
+    .leftJoin(pipelineOpportunities, eq(pipelineOpportunities.id, dealConversations.opportunityId))
+    .leftJoin(accounts, eq(accounts.id, pipelineOpportunities.accountId))
+    .leftJoin(contacts, eq(contacts.id, pipelineOpportunities.contactId))
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.isTrashed, true)))
+    .orderBy(desc(inboxCategories.trashedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return results.map(({ message, category: cat, conversation, opportunity, account, contact }) => ({
+    id: message.id,
+    conversationId: message.conversationId,
+    subject: message.subject || '(No Subject)',
+    bodyPreview: message.bodyPreview || '',
+    bodyHtml: message.bodyContent,
+    from: message.fromEmail,
+    fromName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    to: message.toEmails,
+    cc: message.ccEmails || [],
+    receivedDateTime: message.receivedAt || message.sentAt || new Date(),
+    hasAttachments: message.hasAttachments || false,
+    importance: message.importance || 'normal',
+    isRead: cat?.isRead ?? false,
+    isStarred: cat?.isStarred ?? false,
+    category: (cat?.category as 'primary' | 'other') ?? 'primary',
+    accountId: opportunity?.accountId ?? null,
+    accountName: account?.name ?? null,
+    contactId: opportunity?.contactId ?? null,
+    contactName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    opportunityId: message.opportunityId || conversation?.opportunityId || null
+  }));
+}
+
+/**
+ * Get starred messages
+ */
+export async function getStarredMessages(
+  userId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<InboxMessage[]> {
+  const { limit = 50, offset = 0 } = options;
+
+  const results = await db
+    .select({
+      message: dealMessages,
+      category: inboxCategories,
+      conversation: dealConversations,
+      opportunity: pipelineOpportunities,
+      account: accounts,
+      contact: contacts
+    })
+    .from(inboxCategories)
+    .innerJoin(dealMessages, eq(dealMessages.id, inboxCategories.messageId))
+    .leftJoin(dealConversations, eq(dealConversations.id, dealMessages.conversationId))
+    .leftJoin(pipelineOpportunities, eq(pipelineOpportunities.id, dealConversations.opportunityId))
+    .leftJoin(accounts, eq(accounts.id, pipelineOpportunities.accountId))
+    .leftJoin(contacts, eq(contacts.id, pipelineOpportunities.contactId))
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.isStarred, true), eq(inboxCategories.isTrashed, false)))
+    .orderBy(desc(dealMessages.receivedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return results.map(({ message, category: cat, conversation, opportunity, account, contact }) => ({
+    id: message.id,
+    conversationId: message.conversationId,
+    subject: message.subject || '(No Subject)',
+    bodyPreview: message.bodyPreview || '',
+    bodyHtml: message.bodyContent,
+    from: message.fromEmail,
+    fromName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    to: message.toEmails,
+    cc: message.ccEmails || [],
+    receivedDateTime: message.receivedAt || message.sentAt || new Date(),
+    hasAttachments: message.hasAttachments || false,
+    importance: message.importance || 'normal',
+    isRead: cat?.isRead ?? false,
+    isStarred: cat?.isStarred ?? false,
+    category: (cat?.category as 'primary' | 'other') ?? 'primary',
+    accountId: opportunity?.accountId ?? null,
+    accountName: account?.name ?? null,
+    contactId: opportunity?.contactId ?? null,
+    contactName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    opportunityId: message.opportunityId || conversation?.opportunityId || null
+  }));
+}
+
+/**
+ * Get archived messages
+ */
+export async function getArchivedMessages(
+  userId: string,
+  options: { limit?: number; offset?: number } = {}
+): Promise<InboxMessage[]> {
+  const { limit = 50, offset = 0 } = options;
+
+  const results = await db
+    .select({
+      message: dealMessages,
+      category: inboxCategories,
+      conversation: dealConversations,
+      opportunity: pipelineOpportunities,
+      account: accounts,
+      contact: contacts
+    })
+    .from(inboxCategories)
+    .innerJoin(dealMessages, eq(dealMessages.id, inboxCategories.messageId))
+    .leftJoin(dealConversations, eq(dealConversations.id, dealMessages.conversationId))
+    .leftJoin(pipelineOpportunities, eq(pipelineOpportunities.id, dealConversations.opportunityId))
+    .leftJoin(accounts, eq(accounts.id, pipelineOpportunities.accountId))
+    .leftJoin(contacts, eq(contacts.id, pipelineOpportunities.contactId))
+    .where(and(eq(inboxCategories.userId, userId), eq(inboxCategories.isArchived, true), eq(inboxCategories.isTrashed, false)))
+    .orderBy(desc(dealMessages.receivedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return results.map(({ message, category: cat, conversation, opportunity, account, contact }) => ({
+    id: message.id,
+    conversationId: message.conversationId,
+    subject: message.subject || '(No Subject)',
+    bodyPreview: message.bodyPreview || '',
+    bodyHtml: message.bodyContent,
+    from: message.fromEmail,
+    fromName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    to: message.toEmails,
+    cc: message.ccEmails || [],
+    receivedDateTime: message.receivedAt || message.sentAt || new Date(),
+    hasAttachments: message.hasAttachments || false,
+    importance: message.importance || 'normal',
+    isRead: cat?.isRead ?? false,
+    isStarred: cat?.isStarred ?? false,
+    category: (cat?.category as 'primary' | 'other') ?? 'primary',
+    accountId: opportunity?.accountId ?? null,
+    accountName: account?.name ?? null,
+    contactId: opportunity?.contactId ?? null,
+    contactName: contact ? `${contact.firstName} ${contact.lastName}`.trim() : null,
+    opportunityId: message.opportunityId || conversation?.opportunityId || null
+  }));
+}

@@ -10,9 +10,19 @@ import {
   moveMessageToCategory,
   markAllAsRead,
   archiveMessage,
+  trashMessage,
+  untrashMessage,
+  permanentlyDeleteMessage,
+  getTrashedMessages,
+  emptyTrash,
+  getStarredMessages,
+  getArchivedMessages,
   type InboxMessage,
   type InboxStats
 } from "../lib/inbox-service";
+import { db } from "../db";
+import { contacts } from "@shared/schema";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
@@ -253,6 +263,163 @@ router.post('/archive', requireAuth, apiLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Invalid request', errors: error.errors });
     }
     res.status(500).json({ message: 'Failed to archive message' });
+  }
+});
+
+const trashSchema = z.object({
+  messageId: z.string().uuid()
+});
+
+const paginationSchema = z.object({
+  limit: z.coerce.number().min(1).max(100).default(50),
+  offset: z.coerce.number().min(0).default(0),
+});
+
+/**
+ * POST /api/inbox/trash
+ * Move message to trash (soft-delete)
+ */
+router.post('/trash', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const { messageId } = trashSchema.parse(req.body);
+    await trashMessage(req.user!.userId, messageId);
+    res.json({ success: true, message: 'Message moved to trash' });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Invalid request', errors: error.errors });
+    console.error('[INBOX] trash error:', error);
+    res.status(500).json({ message: 'Failed to trash message' });
+  }
+});
+
+/**
+ * POST /api/inbox/untrash
+ * Restore message from trash
+ */
+router.post('/untrash', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const { messageId } = trashSchema.parse(req.body);
+    await untrashMessage(req.user!.userId, messageId);
+    res.json({ success: true, message: 'Message restored from trash' });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Invalid request', errors: error.errors });
+    console.error('[INBOX] untrash error:', error);
+    res.status(500).json({ message: 'Failed to restore message' });
+  }
+});
+
+/**
+ * DELETE /api/inbox/delete
+ * Permanently delete a trashed message
+ */
+router.delete('/delete', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const { messageId } = trashSchema.parse(req.body);
+    const deleted = await permanentlyDeleteMessage(req.user!.userId, messageId);
+    if (!deleted) return res.status(404).json({ message: 'Message not found in trash' });
+    res.json({ success: true, message: 'Message permanently deleted' });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Invalid request', errors: error.errors });
+    console.error('[INBOX] permanent delete error:', error);
+    res.status(500).json({ message: 'Failed to delete message' });
+  }
+});
+
+/**
+ * GET /api/inbox/trash-messages
+ * List trashed messages
+ */
+router.get('/trash-messages', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const query = paginationSchema.parse(req.query);
+    const messages = await getTrashedMessages(req.user!.userId, query);
+    res.json({ messages });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Invalid query', errors: error.errors });
+    console.error('[INBOX] list trash error:', error);
+    res.status(500).json({ message: 'Failed to fetch trashed messages' });
+  }
+});
+
+/**
+ * POST /api/inbox/empty-trash
+ * Delete all trashed messages
+ */
+router.post('/empty-trash', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const count = await emptyTrash(req.user!.userId);
+    res.json({ success: true, count, message: `${count} messages permanently deleted` });
+  } catch (error) {
+    console.error('[INBOX] empty trash error:', error);
+    res.status(500).json({ message: 'Failed to empty trash' });
+  }
+});
+
+/**
+ * GET /api/inbox/starred
+ * Fetch starred messages
+ */
+router.get('/starred', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const query = paginationSchema.parse(req.query);
+    const messages = await getStarredMessages(req.user!.userId, query);
+    res.json({ messages });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Invalid query', errors: error.errors });
+    console.error('[INBOX] starred error:', error);
+    res.status(500).json({ message: 'Failed to fetch starred messages' });
+  }
+});
+
+/**
+ * GET /api/inbox/archived
+ * Fetch archived messages
+ */
+router.get('/archived', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const query = paginationSchema.parse(req.query);
+    const messages = await getArchivedMessages(req.user!.userId, query);
+    res.json({ messages });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Invalid query', errors: error.errors });
+    console.error('[INBOX] archived error:', error);
+    res.status(500).json({ message: 'Failed to fetch archived messages' });
+  }
+});
+
+/**
+ * GET /api/inbox/contacts/autocomplete?q=
+ * Search contacts by name or email (top 10)
+ */
+router.get('/contacts/autocomplete', requireAuth, apiLimiter, async (req, res) => {
+  try {
+    const q = z.string().min(1).max(100).parse(req.query.q);
+    const pattern = `%${q}%`;
+    const results = await db
+      .select({
+        id: contacts.id,
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        jobTitle: contacts.jobTitle,
+      })
+      .from(contacts)
+      .where(
+        sql`(${contacts.fullName} ILIKE ${pattern} OR ${contacts.email} ILIKE ${pattern} OR ${contacts.firstName} ILIKE ${pattern} OR ${contacts.lastName} ILIKE ${pattern})`
+      )
+      .limit(10);
+    res.json({ contacts: results });
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      return res.status(400).json({ message: 'Query parameter q is required' });
+    console.error('[INBOX] autocomplete error:', error);
+    res.status(500).json({ message: 'Failed to search contacts' });
   }
 });
 

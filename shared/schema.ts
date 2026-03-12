@@ -9498,6 +9498,8 @@ export const inboxCategories = pgTable("inbox_categories", {
   isRead: boolean("is_read").default(false).notNull(),
   isStarred: boolean("is_starred").default(false).notNull(),
   isArchived: boolean("is_archived").default(false).notNull(),
+  isTrashed: boolean("is_trashed").default(false).notNull(),
+  trashedAt: timestamp("trashed_at", { withTimezone: true }),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -9506,6 +9508,47 @@ export const inboxCategories = pgTable("inbox_categories", {
   messageIdx: uniqueIndex("inbox_categories_message_user_idx").on(table.userId, table.messageId),
   categoryIdx: index("inbox_categories_category_idx").on(table.userId, table.category),
   isReadIdx: index("inbox_categories_is_read_idx").on(table.userId, table.isRead),
+  isTrashedIdx: index("inbox_categories_is_trashed_idx").on(table.userId, table.isTrashed),
+}));
+
+// Email Drafts - Server-side draft persistence
+export const emailDrafts = pgTable("email_drafts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+  mailboxAccountId: varchar("mailbox_account_id", { length: 36 }).references(() => mailboxAccounts.id, { onDelete: 'set null' }),
+  toEmails: text("to_emails").array(),
+  ccEmails: text("cc_emails").array(),
+  subject: varchar("subject", { length: 512 }),
+  bodyHtml: text("body_html"),
+  bodyPlain: text("body_plain"),
+  attachments: jsonb("attachments").$type<Array<{ name: string; url: string; size: number }>>(),
+  replyToMessageId: varchar("reply_to_message_id", { length: 36 }).references(() => dealMessages.id, { onDelete: 'set null' }),
+  forwardFromMessageId: varchar("forward_from_message_id", { length: 36 }).references(() => dealMessages.id, { onDelete: 'set null' }),
+  composerMode: varchar("composer_mode", { length: 16 }).notNull().default('new'), // new, reply, replyAll, forward
+  lastSavedAt: timestamp("last_saved_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userIdx: index("email_drafts_user_idx").on(table.userId),
+  updatedAtIdx: index("email_drafts_updated_at_idx").on(table.updatedAt.desc()),
+}));
+
+// Inbox Settings - Per-user inbox preferences
+export const inboxSettings = pgTable("inbox_settings", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+  defaultMailboxAccountId: varchar("default_mailbox_account_id", { length: 36 }).references(() => mailboxAccounts.id, { onDelete: 'set null' }),
+  displayDensity: varchar("display_density", { length: 16 }).notNull().default('comfortable'), // comfortable, compact
+  autoReplyEnabled: boolean("auto_reply_enabled").default(false).notNull(),
+  autoReplySubject: varchar("auto_reply_subject", { length: 512 }),
+  autoReplyBody: text("auto_reply_body"),
+  notifyNewEmail: boolean("notify_new_email").default(true).notNull(),
+  notifyDesktop: boolean("notify_desktop").default(false).notNull(),
+  sidebarCollapsed: boolean("sidebar_collapsed").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userUniqueIdx: uniqueIndex("inbox_settings_user_unique_idx").on(table.userId),
 }));
 
 // Deal Score History - Audit trail for score changes
@@ -9734,6 +9777,8 @@ export const insertScheduledEmailSchema = createInsertSchema(scheduledEmails).om
 export const insertEmailAiRewriteSchema = createInsertSchema(emailAiRewrites).omit({ id: true, createdAt: true });
 export const insertEmailSignatureSchema = createInsertSchema(emailSignatures).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertInboxCategorySchema = createInsertSchema(inboxCategories).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertEmailDraftSchema = createInsertSchema(emailDrafts).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertInboxSettingsSchema = createInsertSchema(inboxSettings).omit({ id: true, createdAt: true, updatedAt: true });
 
 // Email Sequences - Automated multi-step email campaigns
 export const emailSequences = pgTable("email_sequences", {
@@ -10209,6 +10254,12 @@ export type InsertEmailSignature = z.infer<typeof insertEmailSignatureSchema>;
 
 export type InboxCategory = typeof inboxCategories.$inferSelect;
 export type InsertInboxCategory = z.infer<typeof insertInboxCategorySchema>;
+
+export type EmailDraft = typeof emailDrafts.$inferSelect;
+export type InsertEmailDraft = z.infer<typeof insertEmailDraftSchema>;
+
+export type InboxSettings = typeof inboxSettings.$inferSelect;
+export type InsertInboxSettings = z.infer<typeof insertInboxSettingsSchema>;
 
 export type VerificationCampaign = typeof verificationCampaigns.$inferSelect;
 export type InsertVerificationCampaign = z.infer<typeof insertVerificationCampaignSchema>;

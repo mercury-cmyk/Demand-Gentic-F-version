@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/rich-text-editor";
@@ -20,7 +19,7 @@ import {
   Sparkles, CheckCircle2, AlertCircle, Zap, Eye, MousePointer,
   Link2, Unlink, Bell, BellDot, BarChart3, Clock, TrendingUp,
   ExternalLink, Activity, Globe, Smartphone, Monitor, MailOpen,
-  MousePointerClick, ArrowUpRight
+  MousePointerClick, ArrowUpRight, RotateCcw
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
@@ -29,6 +28,9 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { SignatureManager } from "@/components/signature-manager";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { InboxSidebar, type InboxFolder } from "@/components/inbox/inbox-sidebar";
+import { InboxSettingsPanel } from "@/components/inbox/inbox-settings-panel";
+import { KeyboardShortcutHelp } from "@/components/inbox/keyboard-shortcut-help";
 
 interface InboxMessage {
   id: string;
@@ -108,9 +110,12 @@ interface BatchTrackingStats {
 
 export default function InboxPage() {
   const { toast } = useToast();
-  const [selectedCategory, setSelectedCategory] = useState<'primary' | 'other' | 'sent'>('primary');
+  const [activeFolder, setActiveFolder] = useState<InboxFolder>('inbox');
   const [selectedEmail, setSelectedEmail] = useState<InboxMessage | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   
   // Email composer state
   const [composerOpen, setComposerOpen] = useState(false);
@@ -341,19 +346,15 @@ export default function InboxPage() {
 
   // Fetch inbox messages (Primary/Other) with hierarchical query key for cache invalidation
   // Using separate segments so invalidateQueries(['/api/inbox/messages']) matches all
+  const inboxCategory = activeFolder === 'inbox' ? 'primary' : activeFolder === 'other' ? 'other' : 'primary';
   const { data: messagesData, isLoading: messagesLoading, refetch } = useQuery<{
     messages: InboxMessage[];
     pagination: { limit: number; offset: number };
   }>({
-    queryKey: ['/api/inbox/messages', selectedCategory, searchQuery || ''],
+    queryKey: ['/api/inbox/messages', inboxCategory, searchQuery || ''],
     queryFn: async () => {
-      // Guard: Should never execute when selectedCategory is 'sent'
-      if (selectedCategory === 'sent') {
-        throw new Error('Inbox query should not run for sent category');
-      }
-
       const params = new URLSearchParams({
-        category: selectedCategory,
+        category: inboxCategory,
         limit: '50',
         offset: '0',
         ...(searchQuery && { searchQuery })
@@ -383,7 +384,7 @@ export default function InboxPage() {
       if (!response.ok) throw new Error('Failed to fetch messages');
       return response.json();
     },
-    enabled: selectedCategory !== 'sent'
+    enabled: activeFolder === 'inbox' || activeFolder === 'other'
   });
 
   // Fetch sent messages
@@ -421,14 +422,75 @@ export default function InboxPage() {
       if (!response.ok) throw new Error('Failed to fetch sent messages');
       return response.json();
     },
-    enabled: selectedCategory === 'sent'
+    enabled: activeFolder === 'sent'
   });
 
-  const messages = selectedCategory === 'sent' 
-    ? (sentMessagesData?.messages || []) 
-    : (messagesData?.messages || []);
+  // Fetch starred messages
+  const { data: starredData, isLoading: starredLoading } = useQuery<{ messages: InboxMessage[] }>({
+    queryKey: ['/api/inbox/starred'],
+    enabled: activeFolder === 'starred',
+  });
+
+  // Fetch trashed messages
+  const { data: trashData, isLoading: trashLoading } = useQuery<{ messages: InboxMessage[] }>({
+    queryKey: ['/api/inbox/trash-messages'],
+    enabled: activeFolder === 'trash',
+  });
+
+  // Fetch archived messages
+  const { data: archiveData, isLoading: archiveLoading } = useQuery<{ messages: InboxMessage[] }>({
+    queryKey: ['/api/inbox/archived'],
+    enabled: activeFolder === 'archive',
+  });
+
+  // Fetch drafts
+  const { data: draftsData, isLoading: draftsLoading } = useQuery<{ drafts: Array<{
+    id: string; subject: string | null; toEmails: string[] | null; bodyPlain: string | null;
+    composerMode: string; lastSavedAt: string; createdAt: string;
+  }> }>({
+    queryKey: ['/api/inbox/drafts'],
+    enabled: activeFolder === 'drafts',
+  });
+
+  // Fetch scheduled emails
+  const { data: scheduledData, isLoading: scheduledLoading } = useQuery<{ scheduledEmails: Array<{
+    id: string; subject: string; toEmails: string[]; scheduledFor: string; status: string;
+  }> }>({
+    queryKey: ['/api/inbox/scheduled'],
+    enabled: activeFolder === 'scheduled',
+  });
+
+  // Derive messages based on active folder
+  const messages = (() => {
+    switch (activeFolder) {
+      case 'inbox':
+      case 'other':
+        return messagesData?.messages || [];
+      case 'sent':
+        return sentMessagesData?.messages || [];
+      case 'starred':
+        return starredData?.messages || [];
+      case 'trash':
+        return trashData?.messages || [];
+      case 'archive':
+        return archiveData?.messages || [];
+      default:
+        return [];
+    }
+  })();
   
-  const isLoadingMessages = selectedCategory === 'sent' ? sentMessagesLoading : messagesLoading;
+  const isLoadingMessages = (() => {
+    switch (activeFolder) {
+      case 'inbox': case 'other': return messagesLoading;
+      case 'sent': return sentMessagesLoading;
+      case 'starred': return starredLoading;
+      case 'trash': return trashLoading;
+      case 'archive': return archiveLoading;
+      case 'drafts': return draftsLoading;
+      case 'scheduled': return scheduledLoading;
+      default: return false;
+    }
+  })();
 
   // Fetch tracking stats for selected email
   const { data: trackingStats } = useQuery<TrackingStats>({
@@ -462,7 +524,7 @@ export default function InboxPage() {
   });
 
   // Fetch batch tracking stats for sent emails in list view
-  const sentMessageIds = (selectedCategory === 'sent' ? messages : []).map(m => m.id);
+  const sentMessageIds = (activeFolder === 'sent' ? messages : []).map(m => m.id);
   const { data: batchTrackingData } = useQuery<BatchTrackingStats>({
     queryKey: ['/api/track/stats/batch', sentMessageIds.join(',')],
     queryFn: async () => {
@@ -480,7 +542,7 @@ export default function InboxPage() {
       if (!response.ok) throw new Error('Failed to fetch batch tracking stats');
       return response.json();
     },
-    enabled: selectedCategory === 'sent' && sentMessageIds.length > 0,
+    enabled: activeFolder === 'sent' && sentMessageIds.length > 0,
     refetchInterval: 30000, // Refresh every 30 seconds for live tracking
   });
   const batchStats = batchTrackingData?.stats || {};
@@ -531,14 +593,67 @@ export default function InboxPage() {
       return await apiRequest("POST", "/api/inbox/archive", { messageId });
     },
     onSuccess: () => {
-      // Invalidate all messages queries to refresh the UI
       queryClient.invalidateQueries({ queryKey: ['/api/inbox/messages'] });
       queryClient.invalidateQueries({ queryKey: ['/api/inbox/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/archived'] });
       setSelectedEmail(null);
       toast({
         title: "Email archived",
         description: "The email has been moved to your archive",
       });
+    }
+  });
+
+  // Trash mutation (soft-delete)
+  const trashMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      return await apiRequest("POST", "/api/inbox/trash", { messageId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/messages'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/stats'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/trash-messages'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/starred'] });
+      setSelectedEmail(null);
+      toast({ title: "Email deleted", description: "Moved to Trash" });
+    }
+  });
+
+  // Restore from trash
+  const untrashMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      return await apiRequest("POST", "/api/inbox/untrash", { messageId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/messages'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/trash-messages'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/stats'] });
+      setSelectedEmail(null);
+      toast({ title: "Email restored", description: "Message restored from trash" });
+    }
+  });
+
+  // Permanent delete
+  const permanentDeleteMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      return await apiRequest("DELETE", "/api/inbox/delete", { messageId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/trash-messages'] });
+      setSelectedEmail(null);
+      toast({ title: "Permanently deleted", description: "Message has been permanently deleted" });
+    }
+  });
+
+  // Empty trash
+  const emptyTrashMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/inbox/empty-trash");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/inbox/trash-messages'] });
+      setSelectedEmail(null);
+      toast({ title: "Trash emptied", description: "All trashed messages have been permanently deleted" });
     }
   });
 
@@ -857,6 +972,71 @@ export default function InboxPage() {
     toggleStarMutation.mutate(messageId);
   };
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ignore when typing in inputs/textareas
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+
+      switch (e.key) {
+        case "?":
+          e.preventDefault();
+          setShortcutsOpen(true);
+          break;
+        case "c":
+          e.preventDefault();
+          handleOpenComposer();
+          break;
+        case "/":
+          e.preventDefault();
+          document.querySelector<HTMLInputElement>('[data-testid="input-search-emails"]')?.focus();
+          break;
+        case "r":
+          if (selectedEmail) {
+            e.preventDefault();
+            handleReply(selectedEmail);
+          }
+          break;
+        case "a":
+          if (selectedEmail) {
+            e.preventDefault();
+            handleReplyAll(selectedEmail);
+          }
+          break;
+        case "f":
+          if (selectedEmail) {
+            e.preventDefault();
+            handleForward(selectedEmail);
+          }
+          break;
+        case "e":
+          if (selectedEmail) {
+            e.preventDefault();
+            archiveMutation.mutate(selectedEmail.id);
+          }
+          break;
+        case "#":
+          if (selectedEmail) {
+            e.preventDefault();
+            trashMutation.mutate(selectedEmail.id);
+          }
+          break;
+        case "s":
+          if (selectedEmail) {
+            e.preventDefault();
+            toggleStarMutation.mutate(selectedEmail.id);
+          }
+          break;
+        case "Escape":
+          setSelectedEmail(null);
+          break;
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedEmail]);
+
   return (
     <PageShell
       title="Revenue Inbox"
@@ -867,7 +1047,7 @@ export default function InboxPage() {
         { label: "Revenue Inbox" },
       ]}
       actions={
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           {/* Notification Bell */}
           <TooltipProvider>
             <Tooltip>
@@ -878,7 +1058,7 @@ export default function InboxPage() {
                   className="relative"
                   onClick={() => {
                     setShowNotificationBell(false);
-                    setSelectedCategory('primary');
+                    setActiveFolder('inbox');
                     refetch();
                   }}
                   data-testid="button-notifications"
@@ -903,100 +1083,42 @@ export default function InboxPage() {
             </Tooltip>
           </TooltipProvider>
 
-          <Separator orientation="vertical" className="h-6" />
-
-          {/* Gmail connection status indicator */}
+          {/* Sync buttons */}
           {gmailStatus?.connected && (
-            <div className="flex items-center gap-1 mr-1">
-              <Badge variant="outline" className="gap-1.5 text-xs font-normal py-1 px-2">
-                <div className="h-2 w-2 rounded-full bg-green-500" />
-                Gmail: {gmailStatus.mailboxEmail}
-                {gmailStatus.lastSyncAt && (
-                  <span className="text-muted-foreground ml-1">
-                    synced {formatDistanceToNow(new Date(gmailStatus.lastSyncAt), { addSuffix: true })}
-                  </span>
-                )}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => syncGmailMutation.mutate()}
-                disabled={syncGmailMutation.isPending}
-                title="Sync Gmail now"
-                data-testid="button-sync-gmail"
-              >
-                <RefreshCw className={cn("h-4 w-4", syncGmailMutation.isPending && "animate-spin")} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => disconnectGmailMutation.mutate()}
-                disabled={disconnectGmailMutation.isPending}
-                title="Disconnect Gmail"
-                data-testid="button-disconnect-gmail"
-              >
-                <Unlink className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => syncGmailMutation.mutate()}
+                    disabled={syncGmailMutation.isPending}
+                    data-testid="button-sync-gmail"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", syncGmailMutation.isPending && "animate-spin")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Sync Gmail</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
-          {!gmailStatus?.connected && !gmailStatusLoading && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleConnectGmail}
-              disabled={isConnecting}
-              data-testid="button-connect-gmail-header"
-            >
-              {isConnecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
-              Connect Gmail
-            </Button>
-          )}
-
-          {/* M365/Outlook connection status indicator */}
           {m365Status?.connected && (
-            <div className="flex items-center gap-1 mr-1">
-              <Badge variant="outline" className="gap-1.5 text-xs font-normal py-1 px-2">
-                <div className="h-2 w-2 rounded-full bg-blue-500" />
-                Outlook: {m365Status.mailboxEmail}
-                {m365Status.lastSyncAt && (
-                  <span className="text-muted-foreground ml-1">
-                    synced {formatDistanceToNow(new Date(m365Status.lastSyncAt), { addSuffix: true })}
-                  </span>
-                )}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => syncM365Mutation.mutate()}
-                disabled={syncM365Mutation.isPending}
-                title="Sync Outlook now"
-                data-testid="button-sync-m365"
-              >
-                <RefreshCw className={cn("h-4 w-4", syncM365Mutation.isPending && "animate-spin")} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => disconnectM365Mutation.mutate()}
-                disabled={disconnectM365Mutation.isPending}
-                title="Disconnect Outlook"
-                data-testid="button-disconnect-m365"
-              >
-                <Unlink className="h-4 w-4 text-muted-foreground" />
-              </Button>
-            </div>
-          )}
-          {!m365Status?.connected && !m365StatusLoading && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleConnectM365}
-              disabled={isConnectingM365}
-              data-testid="button-connect-m365-header"
-            >
-              {isConnectingM365 ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
-              Connect Outlook
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => syncM365Mutation.mutate()}
+                    disabled={syncM365Mutation.isPending}
+                    data-testid="button-sync-m365"
+                  >
+                    <RefreshCw className={cn("h-4 w-4", syncM365Mutation.isPending && "animate-spin")} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Sync Outlook</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
 
           <Button
@@ -1007,25 +1129,6 @@ export default function InboxPage() {
           >
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
-          </Button>
-          {selectedCategory !== 'sent' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => markAllReadMutation.mutate(selectedCategory as 'primary' | 'other')}
-              disabled={markAllReadMutation.isPending}
-              data-testid="button-mark-all-read"
-            >
-              Mark All Read
-            </Button>
-          )}
-          <Button
-            size="sm"
-            onClick={handleOpenComposer}
-            data-testid="button-compose-email"
-          >
-            <Send className="h-4 w-4 mr-2" />
-            Compose
           </Button>
         </div>
       }
@@ -1458,581 +1561,516 @@ export default function InboxPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Email List */}
-        <div className="lg:col-span-1">
-          <Card className="h-[calc(100vh-16rem)] flex flex-col">
-            <div className="p-4 flex-shrink-0 space-y-3">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search emails..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
-                  data-testid="input-search-emails"
-                />
-              </div>
+      <div className="flex h-[calc(100vh-8rem)] border rounded-lg overflow-hidden bg-background">
+        {/* Sidebar */}
+        <InboxSidebar
+          activeFolder={activeFolder}
+          onFolderChange={(f) => { setActiveFolder(f); setSelectedEmail(null); }}
+          onCompose={handleOpenComposer}
+          onOpenSettings={() => setSettingsOpen(true)}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          stats={{
+            primaryUnread: primaryStats.unreadCount || 0,
+            otherUnread: otherStats.unreadCount || 0,
+            draftsCount: draftsData?.drafts?.length ?? 0,
+            scheduledCount: scheduledData?.scheduledEmails?.length ?? 0,
+          }}
+          gmailConnected={gmailStatus?.connected}
+          m365Connected={m365Status?.connected}
+        />
 
-              {/* Primary/Other/Sent Tabs */}
-              <Tabs value={selectedCategory} onValueChange={(v) => setSelectedCategory(v as 'primary' | 'other' | 'sent')}>
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="primary" data-testid="tab-primary" className="relative">
-                    <InboxIcon className="h-4 w-4 mr-2" />
-                    Primary
-                    {primaryStats.unreadCount > 0 && (
-                      <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
-                        {primaryStats.unreadCount}
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="other" data-testid="tab-other" className="relative">
-                    <Mail className="h-4 w-4 mr-2" />
-                    Other
-                    {otherStats.unreadCount > 0 && (
-                      <Badge variant="secondary" className="ml-2 h-5 px-1.5 text-xs">
-                        {otherStats.unreadCount}
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="sent" data-testid="tab-sent" className="relative">
-                    <Send className="h-4 w-4 mr-2" />
-                    Sent
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+        {/* Email List Panel */}
+        <div className="w-[340px] border-r flex flex-col min-w-0">
+          {/* Search + folder header */}
+          <div className="p-3 flex-shrink-0 space-y-2 border-b">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold capitalize">{activeFolder === 'inbox' ? 'Primary' : activeFolder}</h3>
+              {(activeFolder === 'inbox' || activeFolder === 'other') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => markAllReadMutation.mutate(activeFolder === 'inbox' ? 'primary' : 'other')}
+                  disabled={markAllReadMutation.isPending}
+                  data-testid="button-mark-all-read"
+                >
+                  Mark All Read
+                </Button>
+              )}
+              {activeFolder === 'trash' && messages.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-destructive"
+                  onClick={() => emptyTrashMutation.mutate()}
+                  disabled={emptyTrashMutation.isPending}
+                >
+                  Empty Trash
+                </Button>
+              )}
             </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search emails..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-8"
+                data-testid="input-search-emails"
+              />
+            </div>
+          </div>
 
-            <Separator />
-
-            <div className="flex-1 min-h-0">
-              <ScrollArea className="h-full">
-                {isLoadingMessages ? (
+          {/* Message list */}
+          <div className="flex-1 min-h-0">
+            <ScrollArea className="h-full">
+              {/* Drafts folder — special rendering */}
+              {activeFolder === 'drafts' ? (
+                draftsLoading ? (
                   <div className="flex items-center justify-center py-12">
-                    <div className="flex flex-col items-center gap-3">
-                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <div className="text-muted-foreground text-sm">Loading emails...</div>
-                    </div>
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
                   </div>
-                ) : messages.length === 0 ? (
-                  <div className="text-center py-12 px-4">
-                    <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-                      <Mail className="h-8 w-8 text-primary" />
-                    </div>
-                    {searchQuery ? (
-                      <>
-                        <p className="text-foreground text-sm font-medium mb-1">
-                          No emails match your search
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                          Try a different search term
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <h3 className="text-lg font-semibold mb-2">Your Inbox is Empty</h3>
-                        {!gmailStatus?.connected && !m365Status?.connected ? (
-                          <>
-                            <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                              Connect your email account to sync and send emails directly from within the CRM
-                            </p>
-                            <div className="flex flex-col gap-3 items-center">
-                              <Button
-                                size="lg"
-                                onClick={handleConnectGmail}
-                                disabled={isConnecting}
-                                data-testid="button-connect-gmail-empty"
-                              >
-                                {isConnecting ? (
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                  <Mail className="h-4 w-4 mr-2" />
-                                )}
-                                Connect Gmail
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="lg"
-                                onClick={handleConnectM365}
-                                disabled={isConnectingM365}
-                                data-testid="button-connect-m365-empty"
-                              >
-                                {isConnectingM365 ? (
-                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                ) : (
-                                  <Mail className="h-4 w-4 mr-2" />
-                                )}
-                                Connect Outlook
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-muted-foreground text-sm mb-6 max-w-sm mx-auto">
-                              Your email is connected. Sync your emails to see them here.
-                            </p>
-                            <div className="flex flex-col gap-3 items-center">
-                              {gmailStatus?.connected && (
-                                <Button
-                                  size="lg"
-                                  onClick={() => syncGmailMutation.mutate()}
-                                  disabled={syncGmailMutation.isPending}
-                                  data-testid="button-sync-gmail-empty"
-                                >
-                                  <RefreshCw className={cn("h-4 w-4 mr-2", syncGmailMutation.isPending && "animate-spin")} />
-                                  Sync Gmail Now
-                                </Button>
-                              )}
-                              {m365Status?.connected && (
-                                <Button
-                                  size="lg"
-                                  variant={gmailStatus?.connected ? "outline" : "default"}
-                                  onClick={() => syncM365Mutation.mutate()}
-                                  disabled={syncM365Mutation.isPending}
-                                  data-testid="button-sync-m365-empty"
-                                >
-                                  <RefreshCw className={cn("h-4 w-4 mr-2", syncM365Mutation.isPending && "animate-spin")} />
-                                  Sync Outlook Now
-                                </Button>
-                              )}
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => refetch()}
-                                data-testid="button-refresh-inbox-empty"
-                              >
-                                <RefreshCw className="h-4 w-4 mr-2" />
-                                Refresh Inbox
-                              </Button>
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
+                ) : !draftsData?.drafts?.length ? (
+                  <div className="text-center py-12 px-4 text-muted-foreground text-sm">No drafts</div>
                 ) : (
                   <div className="divide-y">
-                    {messages.map((email) => {
-                      const emailStats = selectedCategory === 'sent' ? batchStats[email.id] : null;
-                      return (
+                    {draftsData.drafts.map((draft) => (
                       <div
-                        key={email.id}
-                        className={cn(
-                          "p-4 cursor-pointer transition-all hover:bg-muted/50 group",
-                          selectedEmail?.id === email.id && "bg-primary/5 border-l-2 border-l-primary shadow-sm",
-                          !email.isRead && selectedEmail?.id !== email.id && "bg-muted/20 border-l-2 border-l-blue-400/50"
-                        )}
-                        onClick={() => handleEmailClick(email)}
-                        data-testid={`email-item-${email.id}`}
+                        key={draft.id}
+                        className="p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => {
+                          // Re-open draft in composer — TODO: full draft open
+                          toast({ title: "Draft", description: draft.subject || "(No Subject)" });
+                        }}
                       >
-                        <div className="flex items-start gap-3">
-                          <Avatar className="h-10 w-10 flex-shrink-0 ring-2 ring-background shadow-sm">
-                            <AvatarFallback className={cn(
-                              "text-xs font-medium",
-                              !email.isRead ? "bg-primary/10 text-primary font-semibold" : "bg-muted"
-                            )}>
-                              {getInitials(email.fromName || email.from)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <h4 className={cn(
-                                "text-sm truncate",
-                                !email.isRead && "font-semibold"
-                              )}>
-                                {email.fromName || email.from}
-                              </h4>
-                              <div className="flex items-center gap-1 flex-shrink-0">
-                                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                  {formatDistanceToNow(new Date(email.receivedDateTime), { addSuffix: true })}
-                                </span>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={(e) => handleToggleStar(e, email.id)}
-                                  data-testid={`button-star-${email.id}`}
-                                >
-                                  {email.isStarred ? (
-                                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                                  ) : (
-                                    <StarOff className="h-3.5 w-3.5 text-muted-foreground" />
-                                  )}
-                                </Button>
-                              </div>
-                            </div>
-                            <p className={cn(
-                              "text-sm truncate mb-1",
-                              !email.isRead ? "font-medium text-foreground" : "text-muted-foreground"
-                            )}>
-                              {email.subject || '(No Subject)'}
-                            </p>
-                            {email.bodyPreview && (
-                              <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                                {email.bodyPreview}
-                              </p>
-                            )}
-                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                              {/* Always show star if starred */}
-                              {email.isStarred && (
-                                <Star className="h-3 w-3 fill-amber-400 text-amber-400 flex-shrink-0" />
-                              )}
-                              {!email.isRead && (
-                                <Badge className="text-[10px] h-[18px] px-1.5 bg-blue-500/10 text-blue-600 border-blue-200 hover:bg-blue-500/10">
-                                  New
-                                </Badge>
-                              )}
-                              {email.hasAttachments && (
-                                <Badge variant="outline" className="text-[10px] h-[18px] px-1.5">
-                                  <Paperclip className="h-2.5 w-2.5 mr-0.5" />
-                                  Files
-                                </Badge>
-                              )}
-                              {email.accountName && (
-                                <Badge variant="secondary" className="text-[10px] h-[18px] px-1.5">
-                                  <Building2 className="h-2.5 w-2.5 mr-0.5" />
-                                  {email.accountName}
-                                </Badge>
-                              )}
-                              {email.contactName && (
-                                <Badge variant="secondary" className="text-[10px] h-[18px] px-1.5">
-                                  <User className="h-2.5 w-2.5 mr-0.5" />
-                                  {email.contactName}
-                                </Badge>
-                              )}
-                              {/* Tracking badges for sent emails */}
-                              {emailStats && emailStats.opens > 0 && (
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Badge className="text-[10px] h-[18px] px-1.5 bg-emerald-500/10 text-emerald-600 border-emerald-200 hover:bg-emerald-500/10 cursor-default">
-                                        <Eye className="h-2.5 w-2.5 mr-0.5" />
-                                        {emailStats.uniqueOpens}
-                                      </Badge>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="bottom">
-                                      <p className="text-xs">{emailStats.opens} opens ({emailStats.uniqueOpens} unique)</p>
-                                      {emailStats.lastOpenedAt && (
-                                        <p className="text-xs text-muted-foreground">Last: {formatDistanceToNow(new Date(emailStats.lastOpenedAt), { addSuffix: true })}</p>
-                                      )}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              )}
-                              {emailStats && emailStats.clicks > 0 && (
-                                <TooltipProvider>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <Badge className="text-[10px] h-[18px] px-1.5 bg-violet-500/10 text-violet-600 border-violet-200 hover:bg-violet-500/10 cursor-default">
-                                        <MousePointerClick className="h-2.5 w-2.5 mr-0.5" />
-                                        {emailStats.uniqueClicks}
-                                      </Badge>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="bottom">
-                                      <p className="text-xs">{emailStats.clicks} clicks ({emailStats.uniqueClicks} unique)</p>
-                                      {emailStats.lastClickedAt && (
-                                        <p className="text-xs text-muted-foreground">Last: {formatDistanceToNow(new Date(emailStats.lastClickedAt), { addSuffix: true })}</p>
-                                      )}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              )}
-                              {selectedCategory === 'sent' && emailStats && emailStats.opens === 0 && emailStats.clicks === 0 && (
-                                <Badge variant="outline" className="text-[10px] h-[18px] px-1.5 text-muted-foreground">
-                                  <Clock className="h-2.5 w-2.5 mr-0.5" />
-                                  Awaiting
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="destructive" className="text-[10px] h-[18px] px-1.5">Draft</Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDistanceToNow(new Date(draft.lastSavedAt), { addSuffix: true })}
+                          </span>
                         </div>
+                        <p className="text-sm font-medium truncate">{draft.subject || '(No Subject)'}</p>
+                        <p className="text-xs text-muted-foreground truncate">{draft.toEmails?.join(', ') || 'No recipients'}</p>
                       </div>
-                    );
-                    })}
+                    ))}
                   </div>
-                )}
-              </ScrollArea>
-            </div>
-          </Card>
-        </div>
-
-        {/* Email Detail */}
-        <div className="lg:col-span-2">
-          <Card className="h-[calc(100vh-16rem)] flex flex-col">
-            {selectedEmail ? (
-              <>
-                {/* Email Header */}
-                <div className="p-6 flex-shrink-0">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h2 className="text-2xl font-semibold mb-2">{selectedEmail.subject || '(No Subject)'}</h2>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {selectedEmail.accountName && (
-                          <Badge variant="secondary">
-                            <Building2 className="h-3 w-3 mr-1.5" />
-                            {selectedEmail.accountName}
-                          </Badge>
-                        )}
-                        {selectedEmail.contactName && (
-                          <Badge variant="secondary">
-                            <User className="h-3 w-3 mr-1.5" />
-                            {selectedEmail.contactName}
-                          </Badge>
-                        )}
-                        {selectedEmail.opportunityId && (
-                          <Badge variant="secondary">
-                            <Target className="h-3 w-3 mr-1.5" />
-                            Linked to Deal
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        onClick={() => handleReply(selectedEmail)}
-                        data-testid="button-reply"
-                      >
-                        <Reply className="h-4 w-4 mr-2" />
-                        Reply
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleReplyAll(selectedEmail)}
-                        data-testid="button-reply-all"
-                      >
-                        <Reply className="h-4 w-4 mr-2" />
-                        Reply All
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleForward(selectedEmail)}
-                        data-testid="button-forward"
-                      >
-                        <Forward className="h-4 w-4 mr-2" />
-                        Forward
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => archiveMutation.mutate(selectedEmail.id)}
-                        disabled={archiveMutation.isPending}
-                        data-testid="button-archive"
-                      >
-                        <Archive className="h-4 w-4 mr-2" />
-                        Archive
-                      </Button>
-                    </div>
+                )
+              ) : activeFolder === 'scheduled' ? (
+                scheduledLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
                   </div>
-
-                  {/* Sender Info */}
-                  <div className="flex items-center gap-4 mb-4">
-                    <Avatar className="h-12 w-12 shadow-sm ring-2 ring-background">
-                      <AvatarFallback className="text-lg bg-primary/10 text-primary font-semibold">
-                        {getInitials(selectedEmail.fromName || selectedEmail.from)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <div className="font-semibold text-base">{selectedEmail.fromName || selectedEmail.from}</div>
-                      <div className="text-sm text-muted-foreground font-mono">{selectedEmail.from}</div>
-                      <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
-                        <Clock className="h-3 w-3" />
-                        {format(new Date(selectedEmail.receivedDateTime), 'MMM d, yyyy · h:mm a')}
-                        <span className="text-muted-foreground/50">·</span>
-                        <span>{formatDistanceToNow(new Date(selectedEmail.receivedDateTime), { addSuffix: true })}</span>
+                ) : !scheduledData?.scheduledEmails?.length ? (
+                  <div className="text-center py-12 px-4 text-muted-foreground text-sm">No scheduled emails</div>
+                ) : (
+                  <div className="divide-y">
+                    {scheduledData.scheduledEmails.map((se) => (
+                      <div
+                        key={se.id}
+                        className="p-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="secondary" className="text-[10px] h-[18px] px-1.5">
+                            <Clock className="h-2.5 w-2.5 mr-0.5" />
+                            {format(new Date(se.scheduledFor), 'MMM d, h:mm a')}
+                          </Badge>
+                        </div>
+                        <p className="text-sm font-medium truncate">{se.subject}</p>
+                        <p className="text-xs text-muted-foreground truncate">{se.toEmails.join(', ')}</p>
                       </div>
-                    </div>
+                    ))}
                   </div>
-
-                  {/* Recipients */}
-                  <div className="space-y-2 text-sm">
-                    <div className="flex gap-2">
-                      <span className="text-muted-foreground min-w-12">To:</span>
-                      <span className="font-mono text-xs">{selectedEmail.to.join(', ')}</span>
-                    </div>
-                    {selectedEmail.cc.length > 0 && (
-                      <div className="flex gap-2">
-                        <span className="text-muted-foreground min-w-12">Cc:</span>
-                        <span className="font-mono text-xs">{selectedEmail.cc.join(', ')}</span>
-                      </div>
-                    )}
+                )
+              ) : isLoadingMessages ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <div className="text-muted-foreground text-sm">Loading emails...</div>
                   </div>
                 </div>
-
-                <Separator />
-
-                {/* Email Engagement Tracking Panel */}
-                {trackingStats && (
-                  <>
-                    <div className="px-6 py-4 bg-gradient-to-r from-muted/40 to-muted/20 border-b">
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold flex items-center gap-2">
-                          <BarChart3 className="h-4 w-4 text-primary" />
-                          Email Engagement Tracking
-                        </h3>
-                        {(trackingStats.opens > 0 || trackingStats.clicks > 0) && (
-                          <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-200 text-[10px]">
-                            <Activity className="h-3 w-3 mr-1" />
-                            Active
-                          </Badge>
-                        )}
-                        {trackingStats.opens === 0 && trackingStats.clicks === 0 && (
-                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                            <Clock className="h-3 w-3 mr-1" />
-                            No engagement yet
-                          </Badge>
-                        )}
+              ) : messages.length === 0 ? (
+                <div className="text-center py-12 px-4">
+                  <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                    <Mail className="h-6 w-6 text-primary" />
+                  </div>
+                  {searchQuery ? (
+                    <p className="text-muted-foreground text-sm">No emails match your search</p>
+                  ) : !gmailStatus?.connected && !m365Status?.connected ? (
+                    <div className="space-y-3">
+                      <p className="text-muted-foreground text-sm">Connect your email to get started</p>
+                      <div className="flex flex-col gap-2 items-center">
+                        <Button size="sm" onClick={handleConnectGmail} disabled={isConnecting} data-testid="button-connect-gmail-empty">
+                          {isConnecting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+                          Connect Gmail
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={handleConnectM365} disabled={isConnectingM365} data-testid="button-connect-m365-empty">
+                          {isConnectingM365 ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+                          Connect Outlook
+                        </Button>
                       </div>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {/* Opens Card */}
-                        <div className="rounded-lg border bg-card p-3 shadow-sm">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="h-7 w-7 rounded-md bg-emerald-500/10 flex items-center justify-center">
-                              <MailOpen className="h-3.5 w-3.5 text-emerald-600" />
-                            </div>
-                            <span className="text-xs text-muted-foreground font-medium">Opens</span>
-                          </div>
-                          <div className="text-xl font-bold text-foreground">
-                            {trackingStats.opens}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {trackingStats.uniqueOpens} unique
-                          </div>
-                        </div>
-                        
-                        {/* Unique Opens Card */}
-                        <div className="rounded-lg border bg-card p-3 shadow-sm">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="h-7 w-7 rounded-md bg-blue-500/10 flex items-center justify-center">
-                              <Eye className="h-3.5 w-3.5 text-blue-600" />
-                            </div>
-                            <span className="text-xs text-muted-foreground font-medium">Unique Views</span>
-                          </div>
-                          <div className="text-xl font-bold text-foreground">
-                            {trackingStats.uniqueOpens}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            recipients
-                          </div>
-                        </div>
-                        
-                        {/* Clicks Card */}
-                        <div className="rounded-lg border bg-card p-3 shadow-sm">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="h-7 w-7 rounded-md bg-violet-500/10 flex items-center justify-center">
-                              <MousePointerClick className="h-3.5 w-3.5 text-violet-600" />
-                            </div>
-                            <span className="text-xs text-muted-foreground font-medium">Clicks</span>
-                          </div>
-                          <div className="text-xl font-bold text-foreground">
-                            {trackingStats.clicks}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {trackingStats.uniqueClicks} unique
-                          </div>
-                        </div>
-                        
-                        {/* Click-to-Open Rate */}
-                        <div className="rounded-lg border bg-card p-3 shadow-sm">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="h-7 w-7 rounded-md bg-amber-500/10 flex items-center justify-center">
-                              <TrendingUp className="h-3.5 w-3.5 text-amber-600" />
-                            </div>
-                            <span className="text-xs text-muted-foreground font-medium">CTO Rate</span>
-                          </div>
-                          <div className="text-xl font-bold text-foreground">
-                            {trackingStats.uniqueOpens > 0 
-                              ? `${Math.round((trackingStats.uniqueClicks / trackingStats.uniqueOpens) * 100)}%`
-                              : '—'}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            click-to-open
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Timeline of engagement activity */}
-                      {(trackingStats.lastOpenedAt || trackingStats.lastClickedAt) && (
-                        <div className="mt-3 pt-3 border-t border-border/50 space-y-1.5">
-                          {trackingStats.lastOpenedAt && (
-                            <div className="flex items-center gap-2 text-xs">
-                              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              <span className="text-muted-foreground">Last opened</span>
-                              <span className="font-medium">
-                                {formatDistanceToNow(new Date(trackingStats.lastOpenedAt), { addSuffix: true })}
-                              </span>
-                              <span className="text-muted-foreground/60 text-[10px]">
-                                ({format(new Date(trackingStats.lastOpenedAt), 'MMM d, h:mm a')})
-                              </span>
-                            </div>
-                          )}
-                          {trackingStats.lastClickedAt && (
-                            <div className="flex items-center gap-2 text-xs">
-                              <div className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-                              <span className="text-muted-foreground">Last clicked</span>
-                              <span className="font-medium">
-                                {formatDistanceToNow(new Date(trackingStats.lastClickedAt), { addSuffix: true })}
-                              </span>
-                              <span className="text-muted-foreground/60 text-[10px]">
-                                ({format(new Date(trackingStats.lastClickedAt), 'MMM d, h:mm a')})
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
-                  </>
-                )}
-
-                {/* Email Body */}
-                <div className="flex-1 min-h-0 overflow-y-auto p-6">
-                  {selectedEmail.bodyHtml ? (
-                    <div
-                      className="prose prose-sm dark:prose-invert max-w-none"
-                      dangerouslySetInnerHTML={{ __html: selectedEmail.bodyHtml }}
-                    />
                   ) : (
-                    <div className="whitespace-pre-wrap font-sans text-sm">
-                      {selectedEmail.bodyPreview}
+                    <div className="space-y-3">
+                      <p className="text-muted-foreground text-sm">No emails in this folder</p>
+                      {gmailStatus?.connected && (
+                        <Button size="sm" onClick={() => syncGmailMutation.mutate()} disabled={syncGmailMutation.isPending}>
+                          <RefreshCw className={cn("h-4 w-4 mr-2", syncGmailMutation.isPending && "animate-spin")} />
+                          Sync Gmail
+                        </Button>
+                      )}
+                      {m365Status?.connected && (
+                        <Button size="sm" variant="outline" onClick={() => syncM365Mutation.mutate()} disabled={syncM365Mutation.isPending}>
+                          <RefreshCw className={cn("h-4 w-4 mr-2", syncM365Mutation.isPending && "animate-spin")} />
+                          Sync Outlook
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center max-w-md">
-                  <div className="mb-6 inline-flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/10 to-primary/5 shadow-inner">
-                    <Mail className="h-12 w-12 text-primary/60" />
+              ) : (
+                <div className="divide-y">
+                  {messages.map((email) => {
+                    const emailStats = activeFolder === 'sent' ? batchStats[email.id] : null;
+                    return (
+                    <div
+                      key={email.id}
+                      className={cn(
+                        "p-3 cursor-pointer transition-all hover:bg-muted/50 group",
+                        selectedEmail?.id === email.id && "bg-primary/5 border-l-2 border-l-primary",
+                        !email.isRead && selectedEmail?.id !== email.id && "bg-muted/20"
+                      )}
+                      onClick={() => handleEmailClick(email)}
+                      data-testid={`email-item-${email.id}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        {/* Unread dot */}
+                        <div className="flex flex-col items-center gap-1 pt-1.5">
+                          <div className={cn("h-2 w-2 rounded-full flex-shrink-0", !email.isRead ? "bg-blue-500" : "bg-transparent")} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-0.5">
+                            <h4 className={cn("text-sm truncate", !email.isRead && "font-semibold")}>
+                              {email.fromName || email.from}
+                            </h4>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                                {formatDistanceToNow(new Date(email.receivedDateTime), { addSuffix: true })}
+                              </span>
+                              {email.isStarred && <Star className="h-3 w-3 fill-amber-400 text-amber-400" />}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => handleToggleStar(e, email.id)}
+                                data-testid={`button-star-${email.id}`}
+                              >
+                                {email.isStarred ? (
+                                  <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                ) : (
+                                  <StarOff className="h-3 w-3 text-muted-foreground" />
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                          <p className={cn("text-sm truncate", !email.isRead ? "font-medium text-foreground" : "text-muted-foreground")}>
+                            {email.subject || '(No Subject)'}
+                          </p>
+                          {email.bodyPreview && (
+                            <p className="text-xs text-muted-foreground/70 line-clamp-1 mt-0.5">
+                              {email.bodyPreview}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            {email.hasAttachments && (
+                              <Paperclip className="h-3 w-3 text-muted-foreground" />
+                            )}
+                            {email.accountName && (
+                              <Badge variant="secondary" className="text-[10px] h-[16px] px-1">
+                                {email.accountName}
+                              </Badge>
+                            )}
+                            {/* Tracking badges for sent emails */}
+                            {emailStats && emailStats.opens > 0 && (
+                              <Badge className="text-[10px] h-[16px] px-1 bg-emerald-500/10 text-emerald-600 border-emerald-200">
+                                <Eye className="h-2.5 w-2.5 mr-0.5" />
+                                {emailStats.uniqueOpens}
+                              </Badge>
+                            )}
+                            {emailStats && emailStats.clicks > 0 && (
+                              <Badge className="text-[10px] h-[16px] px-1 bg-violet-500/10 text-violet-600 border-violet-200">
+                                <MousePointerClick className="h-2.5 w-2.5 mr-0.5" />
+                                {emailStats.uniqueClicks}
+                              </Badge>
+                            )}
+                            {activeFolder === 'sent' && emailStats && emailStats.opens === 0 && emailStats.clicks === 0 && (
+                              <Badge variant="outline" className="text-[10px] h-[16px] px-1 text-muted-foreground">
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                Awaiting
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        </div>
+
+        {/* Email Detail Panel */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {selectedEmail ? (
+            <>
+              {/* Email Header */}
+              <div className="p-6 flex-shrink-0 border-b">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-xl font-semibold mb-2 truncate">{selectedEmail.subject || '(No Subject)'}</h2>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {selectedEmail.accountName && (
+                        <Badge variant="secondary">
+                          <Building2 className="h-3 w-3 mr-1.5" />
+                          {selectedEmail.accountName}
+                        </Badge>
+                      )}
+                      {selectedEmail.contactName && (
+                        <Badge variant="secondary">
+                          <User className="h-3 w-3 mr-1.5" />
+                          {selectedEmail.contactName}
+                        </Badge>
+                      )}
+                      {selectedEmail.opportunityId && (
+                        <Badge variant="secondary">
+                          <Target className="h-3 w-3 mr-1.5" />
+                          Linked to Deal
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">Select an Email</h3>
-                  <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
-                    Choose an email from the list to view its content, track engagement, and manage your communications.
-                  </p>
-                  <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
-                      <MailOpen className="h-3 w-3 text-emerald-500" />
-                      Open tracking
-                    </div>
-                    <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
-                      <MousePointerClick className="h-3 w-3 text-violet-500" />
-                      Click tracking
-                    </div>
-                    <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
-                      <Sparkles className="h-3 w-3 text-amber-500" />
-                      AI analysis
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <Button variant="default" size="sm" onClick={() => handleReply(selectedEmail)} data-testid="button-reply">
+                      <Reply className="h-4 w-4 mr-1.5" />Reply
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleReplyAll(selectedEmail)} data-testid="button-reply-all">
+                      <Reply className="h-4 w-4 mr-1.5" />All
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => handleForward(selectedEmail)} data-testid="button-forward">
+                      <Forward className="h-4 w-4 mr-1.5" />Fwd
+                    </Button>
+                    {activeFolder === 'trash' ? (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => untrashMutation.mutate(selectedEmail.id)} disabled={untrashMutation.isPending}>
+                          <RotateCcw className="h-4 w-4 mr-1.5" />Restore
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={() => permanentDeleteMutation.mutate(selectedEmail.id)} disabled={permanentDeleteMutation.isPending}>
+                          <Trash2 className="h-4 w-4 mr-1.5" />Delete Forever
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => archiveMutation.mutate(selectedEmail.id)} disabled={archiveMutation.isPending} data-testid="button-archive">
+                          <Archive className="h-4 w-4 mr-1.5" />Archive
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => trashMutation.mutate(selectedEmail.id)} disabled={trashMutation.isPending}>
+                          <Trash2 className="h-4 w-4 mr-1.5" />Delete
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sender Info */}
+                <div className="flex items-center gap-4 mb-4">
+                  <Avatar className="h-10 w-10 shadow-sm ring-2 ring-background">
+                    <AvatarFallback className="text-sm bg-primary/10 text-primary font-semibold">
+                      {getInitials(selectedEmail.fromName || selectedEmail.from)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="font-semibold text-sm">{selectedEmail.fromName || selectedEmail.from}</div>
+                    <div className="text-xs text-muted-foreground font-mono">{selectedEmail.from}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                      <Clock className="h-3 w-3" />
+                      {format(new Date(selectedEmail.receivedDateTime), 'MMM d, yyyy · h:mm a')}
+                      <span className="text-muted-foreground/50">·</span>
+                      <span>{formatDistanceToNow(new Date(selectedEmail.receivedDateTime), { addSuffix: true })}</span>
                     </div>
                   </div>
                 </div>
+
+                {/* Recipients */}
+                <div className="space-y-1 text-sm">
+                  <div className="flex gap-2">
+                    <span className="text-muted-foreground min-w-10 text-xs">To:</span>
+                    <span className="font-mono text-xs">{selectedEmail.to.join(', ')}</span>
+                  </div>
+                  {selectedEmail.cc.length > 0 && (
+                    <div className="flex gap-2">
+                      <span className="text-muted-foreground min-w-10 text-xs">Cc:</span>
+                      <span className="font-mono text-xs">{selectedEmail.cc.join(', ')}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </Card>
+
+              {/* Email Engagement Tracking Panel */}
+              {trackingStats && (
+                <div className="px-6 py-4 bg-gradient-to-r from-muted/40 to-muted/20 border-b">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4 text-primary" />
+                      Email Engagement Tracking
+                    </h3>
+                    {(trackingStats.opens > 0 || trackingStats.clicks > 0) && (
+                      <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-200 text-[10px]">
+                        <Activity className="h-3 w-3 mr-1" />
+                        Active
+                      </Badge>
+                    )}
+                    {trackingStats.opens === 0 && trackingStats.clicks === 0 && (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        <Clock className="h-3 w-3 mr-1" />
+                        No engagement yet
+                      </Badge>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-lg border bg-card p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="h-7 w-7 rounded-md bg-emerald-500/10 flex items-center justify-center">
+                          <MailOpen className="h-3.5 w-3.5 text-emerald-600" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Opens</span>
+                      </div>
+                      <div className="text-xl font-bold">{trackingStats.opens}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{trackingStats.uniqueOpens} unique</div>
+                    </div>
+                    <div className="rounded-lg border bg-card p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="h-7 w-7 rounded-md bg-blue-500/10 flex items-center justify-center">
+                          <Eye className="h-3.5 w-3.5 text-blue-600" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Unique Views</span>
+                      </div>
+                      <div className="text-xl font-bold">{trackingStats.uniqueOpens}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">recipients</div>
+                    </div>
+                    <div className="rounded-lg border bg-card p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="h-7 w-7 rounded-md bg-violet-500/10 flex items-center justify-center">
+                          <MousePointerClick className="h-3.5 w-3.5 text-violet-600" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">Clicks</span>
+                      </div>
+                      <div className="text-xl font-bold">{trackingStats.clicks}</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">{trackingStats.uniqueClicks} unique</div>
+                    </div>
+                    <div className="rounded-lg border bg-card p-3 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="h-7 w-7 rounded-md bg-amber-500/10 flex items-center justify-center">
+                          <TrendingUp className="h-3.5 w-3.5 text-amber-600" />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-medium">CTO Rate</span>
+                      </div>
+                      <div className="text-xl font-bold">
+                        {trackingStats.uniqueOpens > 0 
+                          ? `${Math.round((trackingStats.uniqueClicks / trackingStats.uniqueOpens) * 100)}%`
+                          : '—'}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">click-to-open</div>
+                    </div>
+                  </div>
+                  
+                  {(trackingStats.lastOpenedAt || trackingStats.lastClickedAt) && (
+                    <div className="mt-3 pt-3 border-t border-border/50 space-y-1.5">
+                      {trackingStats.lastOpenedAt && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          <span className="text-muted-foreground">Last opened</span>
+                          <span className="font-medium">
+                            {formatDistanceToNow(new Date(trackingStats.lastOpenedAt), { addSuffix: true })}
+                          </span>
+                        </div>
+                      )}
+                      {trackingStats.lastClickedAt && (
+                        <div className="flex items-center gap-2 text-xs">
+                          <div className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                          <span className="text-muted-foreground">Last clicked</span>
+                          <span className="font-medium">
+                            {formatDistanceToNow(new Date(trackingStats.lastClickedAt), { addSuffix: true })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Email Body */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-6">
+                {selectedEmail.bodyHtml ? (
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: selectedEmail.bodyHtml }}
+                  />
+                ) : (
+                  <div className="whitespace-pre-wrap font-sans text-sm">
+                    {selectedEmail.bodyPreview}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center max-w-md">
+                <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary/10 to-primary/5 shadow-inner">
+                  <Mail className="h-10 w-10 text-primary/60" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Select an Email</h3>
+                <p className="text-muted-foreground text-sm mb-4 leading-relaxed">
+                  Choose an email from the list to view its content, track engagement, and manage communications.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
+                    <MailOpen className="h-3 w-3 text-emerald-500" />
+                    Open tracking
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
+                    <MousePointerClick className="h-3 w-3 text-violet-500" />
+                    Click tracking
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1.5">
+                    <Sparkles className="h-3 w-3 text-amber-500" />
+                    AI analysis
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Settings Panel */}
+      <InboxSettingsPanel
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        gmailConnected={gmailStatus?.connected}
+        m365Connected={m365Status?.connected}
+        onConnectGmail={handleConnectGmail}
+        onConnectM365={handleConnectM365}
+        onDisconnectGmail={() => disconnectGmailMutation.mutate()}
+        onDisconnectM365={() => disconnectM365Mutation.mutate()}
+        isConnectingGmail={isConnecting}
+        isConnectingM365={isConnectingM365}
+      />
+
+      {/* Keyboard Shortcut Help */}
+      <KeyboardShortcutHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </PageShell>
   );
 }

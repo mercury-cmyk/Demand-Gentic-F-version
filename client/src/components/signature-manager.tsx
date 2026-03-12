@@ -24,7 +24,11 @@ interface EmailSignature {
   updatedAt: Date;
 }
 
-export function SignatureManager() {
+interface SignatureManagerProps {
+  embedded?: boolean;
+}
+
+export function SignatureManager({ embedded = false }: SignatureManagerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | null>(null);
   const [name, setName] = useState('');
@@ -33,7 +37,7 @@ export function SignatureManager() {
 
   const { data: signatures = [], isLoading } = useQuery<EmailSignature[]>({
     queryKey: ['/api/signatures'],
-    enabled: isOpen,
+    enabled: embedded || isOpen,
   });
 
   const createMutation = useMutation({
@@ -156,19 +160,7 @@ export function SignatureManager() {
     setContent('');
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" data-testid="button-manage-signatures">
-          <Settings className="h-4 w-4 mr-2" />
-          Manage Signatures
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Email Signatures</DialogTitle>
-        </DialogHeader>
-
+  const signatureContent = (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -318,6 +310,25 @@ export function SignatureManager() {
             </div>
           </div>
         </div>
+  );
+
+  if (embedded) {
+    return signatureContent;
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" data-testid="button-manage-signatures">
+          <Settings className="h-4 w-4 mr-2" />
+          Manage Signatures
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Email Signatures</DialogTitle>
+        </DialogHeader>
+        {signatureContent}
       </DialogContent>
     </Dialog>
   );
