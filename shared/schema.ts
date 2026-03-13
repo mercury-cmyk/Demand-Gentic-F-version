@@ -10617,6 +10617,7 @@ export const dialerRuns = pgTable("dialer_runs", {
   noAnswers: integer("no_answers").notNull().default(0),
   invalidData: integer("invalid_data").notNull().default(0),
   notInterested: integer("not_interested").notNull().default(0),
+  needsReview: integer("needs_review").notNull().default(0),
   // Configuration
   maxConcurrentCalls: integer("max_concurrent_calls").notNull().default(1),
   callTimeoutSeconds: integer("call_timeout_seconds").notNull().default(30),

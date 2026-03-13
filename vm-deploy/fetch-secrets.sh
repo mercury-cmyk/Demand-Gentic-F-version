@@ -65,7 +65,7 @@ PUBLIC_IP=136.116.91.227
 GOOGLE_CLOUD_PROJECT=gen-lang-client-0789558283
 GCP_PROJECT_ID=gen-lang-client-0789558283
 GCS_PROJECT_ID=gen-lang-client-0789558283
-GCS_BUCKET=demandgentic-ai-storage
+GCS_BUCKET=demandgentic-prod-storage-2026
 USE_VERTEX_AI=true
 
 # Voice

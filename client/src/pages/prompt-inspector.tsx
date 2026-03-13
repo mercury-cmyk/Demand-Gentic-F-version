@@ -516,10 +516,7 @@ export default function PromptInspectorPage() {
             </span>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" asChild>
-                <a href="/settings/knowledge-hub">Knowledge Hub (L2)</a>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <a href="/settings/agent-defaults">Agent Defaults (L1)</a>
+                <a href="/settings/agent-defaults">Agent Defaults</a>
               </Button>
               {selectedCampaignId && (
                 <Button variant="outline" size="sm" asChild>

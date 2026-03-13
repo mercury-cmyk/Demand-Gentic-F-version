@@ -73,6 +73,10 @@ export interface InitiateCallParams {
     sipUsername?: string;
     sipPassword?: string;
   };
+  // AI provider for the media bridge (default: gemini)
+  aiProvider?: 'gemini' | 'openai';
+  openaiApiKey?: string;
+  openaiVoice?: string;
 }
 
 /**
@@ -214,6 +218,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
     if (mediaBridgeClient.isMediaBridgeConfigured() && sipResult.rtpPort && sipResult.remoteAddress && sipResult.remotePort) {
       const systemPrompt = buildSystemPrompt(params, sipResult.callId);
 
+      const aiProvider = params.aiProvider || 'openai'; // Default to OpenAI for new calls
       const bridgeResult = await mediaBridgeClient.createMediaBridge({
         callId: sipResult.callId,
         rtpPort: sipResult.rtpPort,
@@ -238,7 +243,11 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
           voicemailBeepLoopGuard: true,
         },
         maxDurationSeconds: params.maxCallDurationSeconds,
+        provider: aiProvider,
+        openaiApiKey: params.openaiApiKey,
+        openaiVoice: params.openaiVoice || 'shimmer',
       });
+      console.log(`[SIP Dialer] Media bridge provider: ${aiProvider}`);
 
       if (bridgeResult.success) {
         console.log(`[SIP Dialer] Media bridge created for ${sipResult.callId}`);

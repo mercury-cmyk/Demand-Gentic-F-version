@@ -42,11 +42,11 @@ services:
     volumes:
       - ../gcp-service-account.json:/app/gcp-service-account.json:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
-      interval: 15s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
+      test: ["CMD", "curl", "-f", "--max-time", "10", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 15s
+      start_period: 45s
+      retries: 5
 
   # Ops agent - host-side file editing and deployment control for Ops Hub
   ops-agent:
@@ -91,9 +91,12 @@ services:
     environment:
       - MEDIA_BRIDGE_SECRET=bridge-secret
       - MEDIA_BRIDGE_PORT=8090
-      - GOOGLE_CLOUD_PROJECT=gen-lang-client-0789558283
+      - GOOGLE_CLOUD_PROJECT=demandgentic
       - GOOGLE_CLOUD_LOCATION=us-central1
       - GEMINI_LIVE_MODEL=gemini-live-2.5-flash-native-audio
+      # OpenAI Realtime support for SIP calls
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - AI_INTEGRATIONS_OPENAI_API_KEY=${AI_INTEGRATIONS_OPENAI_API_KEY:-}
       # After migration: callback goes direct to local API, no internet round-trip
       - CLOUD_RUN_API_URL=http://localhost:8080
     healthcheck:

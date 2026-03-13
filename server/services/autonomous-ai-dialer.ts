@@ -191,6 +191,7 @@ class AutonomousAIDialerService {
           id: c.id,
           maxConcurrentWorkers: (ext.maxConcurrentWorkers || 1) as number,
           fromNumber: (ext.fromNumber || '') as string,
+          voiceProvider: (ext.voiceProvider || null) as string | null,
         };
       });
 
@@ -238,16 +239,22 @@ class AutonomousAIDialerService {
 
         if (slotsAvailable <= 0) continue;
 
-        // Guard: check global Gemini Live session limit to prevent rate exceeded errors
-        const sessionStats = getGeminiSessionStats();
-        if (sessionStats.active >= sessionStats.max) {
-          console.warn(`${LOG_PREFIX} Skipping campaign ${campaign.id}: Gemini session limit reached (${sessionStats.active}/${sessionStats.max})`);
-          continue;
+        // Guard: check global Gemini Live session limit ONLY for Gemini-based campaigns.
+        // OpenAI campaigns are not subject to the Gemini session limiter.
+        const isGeminiCampaign = !campaign.voiceProvider || campaign.voiceProvider === 'google';
+        let effectiveSlots = slotsAvailable;
+
+        if (isGeminiCampaign) {
+          const sessionStats = getGeminiSessionStats();
+          if (sessionStats.active >= sessionStats.max) {
+            console.warn(`${LOG_PREFIX} Skipping campaign ${campaign.id}: Gemini session limit reached (${sessionStats.active}/${sessionStats.max})`);
+            continue;
+          }
+          const globalSlotsLeft = sessionStats.max - sessionStats.active;
+          effectiveSlots = Math.min(slotsAvailable, globalSlotsLeft);
         }
 
-        // 3. Pull queue items and place calls (cap by global session availability)
-        const globalSlotsLeft = sessionStats.max - sessionStats.active;
-        const effectiveSlots = Math.min(slotsAvailable, globalSlotsLeft);
+        // 3. Pull queue items and place calls
         await this.fillSlots(campaign.id, effectiveSlots, campaign.fromNumber || '');
       }
 

@@ -169,7 +169,7 @@ describe('Stream Endpoint — Never Returns JSON', () => {
   it('supports server-side GCS streaming path (gcs-internal source)', () => {
     const resolved = {
       source: 'gcs',
-      url: 'gcs-internal://demandgentic-ai-storage/recordings/lead-123.mp3',
+      url: 'gcs-internal://demandgentic-prod-storage-2026/recordings/lead-123.mp3',
     };
     expect(resolved.source).toBe('gcs');
     expect(resolved.url.startsWith('gcs-internal://')).toBe(true);

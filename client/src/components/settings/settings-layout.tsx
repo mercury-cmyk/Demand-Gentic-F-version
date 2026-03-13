@@ -19,7 +19,6 @@ import {
   Settings,
   ChevronRight,
   Crown,
-  Brain,
   Eye,
   GitBranch,
   Bot,
@@ -107,14 +106,6 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     href: ROUTES.SETTINGS_AI_GOVERNANCE,
     icon: Bot,
     description: 'Task-based model routing',
-    category: 'infrastructure',
-  },
-  {
-    id: 'knowledge-hub',
-    label: 'Knowledge Hub',
-    href: ROUTES.SETTINGS_KNOWLEDGE_HUB,
-    icon: Brain,
-    description: 'Unified AI knowledge source',
     category: 'infrastructure',
   },
   {

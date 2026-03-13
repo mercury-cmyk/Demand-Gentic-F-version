@@ -101,7 +101,7 @@ GOOGLE_CLOUD_PROJECT=your-gcp-project-id
 
 2. **Verify bucket name** in `.env`:
 ```bash
-GCS_BUCKET=demandgentic-ai-storage
+GCS_BUCKET=demandgentic-prod-storage-2026
 ```
 
 3. **Authenticate** with GCS:

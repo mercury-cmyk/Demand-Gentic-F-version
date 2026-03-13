@@ -71,6 +71,9 @@ export default function PhoneCampaignEditPage() {
   // Max Call Duration state (in seconds, default 240 = 4 minutes)
   const [maxCallDurationSeconds, setMaxCallDurationSeconds] = useState<number>(240);
 
+  // Voice Provider per-campaign (null = use system default)
+  const [voiceProvider, setVoiceProvider] = useState<string | null>(null);
+
   // Organization selection state
   const [problemIntelligenceOrgId, setProblemIntelligenceOrgId] = useState<string | null>(null);
 
@@ -178,6 +181,9 @@ export default function PhoneCampaignEditPage() {
 
       // Initialize max call duration
       setMaxCallDurationSeconds(campaign.maxCallDurationSeconds || 240);
+
+      // Initialize voice provider
+      setVoiceProvider(campaign.voiceProvider || null);
 
       // Initialize organization
       setProblemIntelligenceOrgId(campaign.problemIntelligenceOrgId || null);
@@ -320,6 +326,8 @@ export default function PhoneCampaignEditPage() {
       deliveryTemplateId,
       // Max call duration enforcement
       maxCallDurationSeconds,
+      // Voice provider per-campaign
+      voiceProvider: voiceProvider || null,
       // Organization assignment
       problemIntelligenceOrgId,
       // Dial mode
@@ -935,6 +943,39 @@ export default function PhoneCampaignEditPage() {
                   </div>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Voice Provider */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Mic className="h-4 w-4" /> Voice Provider</CardTitle>
+              <CardDescription>
+                Select which AI voice provider this campaign uses. Set per-campaign to run OpenAI and Google simultaneously across campaigns.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="voice-provider">Provider</Label>
+                <Select
+                  value={voiceProvider || "default"}
+                  onValueChange={(value) => setVoiceProvider(value === "default" ? null : value)}
+                >
+                  <SelectTrigger id="voice-provider" data-testid="select-campaign-voice-provider">
+                    <SelectValue placeholder="System Default" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">System Default</SelectItem>
+                    <SelectItem value="openai">OpenAI Realtime</SelectItem>
+                    <SelectItem value="google">Google Gemini</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  {voiceProvider
+                    ? `This campaign will use ${voiceProvider === 'openai' ? 'OpenAI Realtime' : 'Google Gemini'} for all calls.`
+                    : 'Using the system-wide default voice provider.'}
+                </p>
+              </div>
             </CardContent>
           </Card>
 

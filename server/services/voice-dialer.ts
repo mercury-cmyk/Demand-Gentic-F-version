@@ -210,7 +210,7 @@ const HARD_MAX_CALL_DURATION_SECONDS = 240;
 // resolution, TCP handshake, TLS negotiation, OAuth token fetch, and the
 // WebSocket upgrade — all of which compete for the event loop. Opening 10+
 // connections at once (e.g. after a container restart) can freeze the process.
-const MAX_CONCURRENT_GEMINI_CONNECTIONS = 3;
+const MAX_CONCURRENT_GEMINI_CONNECTIONS = 10;
 let _activeGeminiConnections = 0;
 const _geminiConnectionQueue: Array<{ resolve: () => void }> = [];
 
@@ -1987,10 +1987,18 @@ export function initializeVoiceDialer(server: HttpServer): WebSocketServer {
             && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
           const isTestSession = isTestCallFlag || isTestIdPattern;
 
-          const requestedProvider = (customParams.provider || (urlParams as any).provider || 'google')
-            .toString()
-            .toLowerCase();
-          const voiceGovernance = await resolveVoiceGovernance(requestedProvider);
+          // Provider priority: explicit param > campaign setting > default
+          let requestedProvider = (customParams.provider || (urlParams as any).provider || '').toString().toLowerCase();
+          if (!requestedProvider && campaignId) {
+            try {
+              const [cpRow] = await db.select({ voiceProvider: campaigns.voiceProvider }).from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+              if (cpRow?.voiceProvider) {
+                requestedProvider = cpRow.voiceProvider;
+                console.log(`${LOG_PREFIX} Using campaign-level voiceProvider: ${requestedProvider}`);
+              }
+            } catch (_e) { /* non-fatal */ }
+          }
+          const voiceGovernance = await resolveVoiceGovernance(requestedProvider || undefined);
           const provider: 'openai' | 'google' | 'kimi' = voiceGovernance.selectedProvider as any;
           for (const warning of voiceGovernance.warnings) {
             console.warn(`${LOG_PREFIX} ${warning}`);
@@ -4120,7 +4128,7 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
             const gatekeeperReminder = `[GATEKEEPER DETECTED] You are speaking with a gatekeeper/receptionist, NOT ${contactFirstName}. ` +
               `Do NOT repeat "May I speak with ${contactFirstName}?" again â€” they already heard you. ` +
               `ENGAGE with the gatekeeper warmly and answer their questions: ` +
-              `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer. Is ${contactFirstName} available?" ` +
+              `If asked "What is this regarding?", say: "My name is ${agentName}, calling on behalf of ${orgName}. It's regarding ${session.campaignType === 'content_syndication' ? 'a report we are sharing with business leaders' : 'something relevant to their role'}. Is ${contactFirstName} available?" ` +
               `If asked "Who is calling?", say: "My name is ${agentName}, calling from ${orgName}." ` +
               `Be kind, polite, and professional. Make no more than 2 polite attempts. If refused, thank them sincerely and end the call.`;
             provider.sendTextMessage(gatekeeperReminder);
@@ -9900,6 +9908,9 @@ async function getCampaignConfig(campaignId: string): Promise<any> {
       callFlow: campaign.callFlow,
       // Max call duration enforcement (campaign-level)
       maxCallDurationSeconds: campaign.maxCallDurationSeconds,
+      // Voice provider per-campaign
+      voiceProvider: campaign.voiceProvider || null,
+      voiceProviderFallback: campaign.voiceProviderFallback ?? true,
     };
   } catch (error) {
     console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
@@ -11144,7 +11155,7 @@ If the response is any of:
 **CRITICAL: You are now talking to a gatekeeper. Do NOT repeat "May I speak with ${firstName}?" â€” they already heard you. ANSWER THEIR QUESTIONS.**
 
 **When Asked “What is this regarding?”, “What's this about?”, “What is this in regards to?”, or similar:**
-- Answer warmly: “Of course â€” my name is ${agentName}, calling on behalf of ${orgName}. It's regarding some of the services we offer that may be relevant to your team. Is ${firstName} available?”
+- Answer warmly: “Of course â€” my name is ${agentName}, calling on behalf of ${orgName}. ${campaignType === 'content_syndication' ? "It's regarding a report we're sharing with business leaders in this space." : "It's regarding something relevant to their role."} Is ${firstName} available?”
 - Do NOT dodge the question. Do NOT just repeat the name request.
 - If pressed further: “I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?”
 - NEVER say “let me get you over to someone” or attempt to transfer â€” YOU are the representative on this call. Answer directly.
@@ -11176,7 +11187,7 @@ If you hear ANY of these phrases, this is an AUTOMATED SCREENER, not a human:
 - "Before I try to connect you"
 
 **Respond EXACTLY ONCE:**
-"This is ${agentName} calling from ${orgName} for ${firstName} regarding a business opportunity."
+"This is ${agentName} calling from ${orgName} for ${firstName} regarding ${campaignType === 'content_syndication' ? 'a report we are sharing with business leaders' : 'a brief professional matter'}."
 
 **Then WAIT IN COMPLETE SILENCE. Do NOT repeat yourself. Do NOT ask questions.**
 - If a human connects â†’ restart identity check: "Hi, am I speaking with ${firstName}?"
