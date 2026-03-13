@@ -11,7 +11,7 @@ This script checks:
 4. If redirect URIs are properly registered
 #>
 
-$projectId = "gen-lang-client-0789558283"
+$projectId = "demandgentic"
 $region = "us-central1"
 
 Write-Host "=== Google OAuth Diagnostic Tool ===" -ForegroundColor Cyan
@@ -107,7 +107,7 @@ Write-Host "If any checks failed, follow these steps:"
 Write-Host ""
 Write-Host "A. If GOOGLE_AUTH_CLIENT_ID or GOOGLE_CLIENT_SECRET are missing:"
 Write-Host "   1. Go to https://console.cloud.google.com/apis/credentials"
-Write-Host "   2. Select project: gen-lang-client-0789558283"
+Write-Host "   2. Select project: demandgentic"
 Write-Host "   3. Find or create an OAuth 2.0 Client ID (Web application)"
 Write-Host "   4. Copy the Client ID and Client Secret"
 Write-Host ""

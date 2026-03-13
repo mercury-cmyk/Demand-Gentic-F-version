@@ -35,9 +35,12 @@ export interface VertexAIConfig {
   };
 }
 
+// Use centralized GCP config for project/location defaults
+import { getGcpProjectId, getGcpLocation } from "../../lib/gcp-config";
+
 const defaultConfig: VertexAIConfig = {
-  projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || "gen-lang-client-0789558283",
-  location: process.env.VERTEX_AI_LOCATION || "us-central1",
+  projectId: getGcpProjectId(),
+  location: getGcpLocation(),
   models: {
     chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",
     reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-3-pro-preview",

@@ -198,7 +198,7 @@ const PROJECTS: Project[] = [
     icon: '☁️',
     deployTarget: 'cloud-run',
     services: [
-      { name: 'demandgentic-api', label: 'API (Cloud Run)', cloudRunService: 'demandgentic-api', imageUrl: 'gcr.io/gen-lang-client-0789558283/demandgentic-api:latest' },
+      { name: 'demandgentic-api', label: 'API (Cloud Run)', cloudRunService: 'demandgentic-api', imageUrl: 'gcr.io/demandgentic/demandgentic-api:latest' },
     ],
   },
 ];
@@ -965,8 +965,8 @@ export default function OpsHub() {
         mode: 'general',
         preferredProvider: 'kimi',
       }, { timeout: 60000 });
-      if (data.success && data.response?.summary) {
-        return data.response.summary;
+      if (data.success && data.optimizedPrompt) {
+        return data.optimizedPrompt;
       }
       return rawPrompt;
     } catch {
@@ -1674,7 +1674,7 @@ export default function OpsHub() {
                   </button>
                   {/* Send button */}
                   <button
-                    onClick={handleChatSend}
+                    onClick={() => handleChatSend()}
                     disabled={chatSending || !chatInput.trim()}
                     className="rounded-xl bg-slate-900 p-2 shadow-sm transition-all hover:bg-slate-800 disabled:opacity-30"
                   >

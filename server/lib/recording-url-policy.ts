@@ -1,4 +1,8 @@
-const DEFAULT_RECORDINGS_BUCKET = 'demandgentic-prod-storage-2026';
+import { getGcsBucket } from './gcp-config';
+
+function getDefaultRecordingsBucket(): string {
+  return getGcsBucket();
+}
 
 function encodeObjectPath(path: string): string {
   return path
@@ -35,7 +39,7 @@ export function buildCanonicalGcsUrlFromKey(recordingKey: string | null | undefi
     return `https://storage.googleapis.com/${bucket}/${encodeObjectPath(objectPath)}`;
   }
 
-  const bucket = (process.env.GCS_BUCKET || process.env.S3_BUCKET || DEFAULT_RECORDINGS_BUCKET).trim();
+  const bucket = (process.env.GCS_BUCKET || process.env.S3_BUCKET || getDefaultRecordingsBucket()).trim();
   const normalizedPath = trimmedKey.replace(/^\/+/, '');
   if (!normalizedPath) return null;
   return `https://storage.googleapis.com/${bucket}/${encodeObjectPath(normalizedPath)}`;

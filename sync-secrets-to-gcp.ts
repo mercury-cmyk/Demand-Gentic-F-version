@@ -13,7 +13,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PROJECT_ID = 'gen-lang-client-0789558283';
+const PROJECT_ID = 'demandgentic';
 const PRODUCTION_DOMAIN = 'https://demandgentic.ai';
 const NGROK_PATTERN = /https:\/\/[a-z-]+\.ngrok-free\.dev/gi;
 

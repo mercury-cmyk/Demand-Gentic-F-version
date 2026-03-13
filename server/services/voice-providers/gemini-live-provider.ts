@@ -132,8 +132,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   }
 
   async connect(): Promise<void> {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
-    const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
+    const { getGcpProjectId, getGcpLocation } = await import('../../lib/gcp-config');
+    const projectId = getGcpProjectId();
+    const location = getGcpLocation();
     const model = this.modelOverride || await getVoiceModelForProvider('google');
     this.activeModel = model;
 
@@ -605,8 +606,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         return;
       }
 
-      const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
-      const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
+      const { getGcpProjectId: _getProjectId, getGcpLocation: _getLocation } = await import('../../lib/gcp-config');
+      const projectId = _getProjectId();
+      const location = _getLocation();
       // Use the model that successfully connected (activeModel), not governance default
       const model = this.activeModel || await getVoiceModelForProvider('google');
       // Prefer Vertex AI when project ID is available (required for native audio models)

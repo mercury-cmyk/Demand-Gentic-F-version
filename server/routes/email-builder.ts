@@ -81,7 +81,8 @@ router.get('/images/serve/:id', async (req: Request, res: Response) => {
         key = gcsMatch[1];
       } else {
         // Fallback to legacy replacement
-        const bucketName = process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026';
+        const { getGcsBucket } = await import('../lib/gcp-config');
+        const bucketName = getGcsBucket();
         key = image.storedUrl.replace(`https://storage.googleapis.com/${bucketName}/`, '');
       }
 

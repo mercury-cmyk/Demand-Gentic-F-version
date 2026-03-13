@@ -3523,7 +3523,8 @@ async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise<
 
   // Check for required environment variables
   const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+  const { getGcpProjectId: _gcp } = await import('../lib/gcp-config');
+  const projectId = _gcp();
 
   if (!apiKey && !projectId) {
     console.error(`${LOG_PREFIX} âŒ GEMINI CONFIG ERROR: No API key or Project ID found`);

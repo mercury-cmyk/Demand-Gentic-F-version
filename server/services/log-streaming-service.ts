@@ -3,11 +3,9 @@ import { Logging } from '@google-cloud/logging';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getOpsAgentRequestInfo } from './ops/runtime';
 import { parseVmLogLine } from './vm-log-service';
+import { getGcpProjectId } from '../lib/gcp-config';
 
-const PROJECT_ID =
-  process.env.GOOGLE_CLOUD_PROJECT ||
-  process.env.GCP_PROJECT_ID ||
-  'gen-lang-client-0789558283';
+let PROJECT_ID = getGcpProjectId();
 const TOPIC_NAME = 'cloud-logging-stream';
 const SINK_NAME = 'cloud-logging-stream-sink';
 const SUBSCRIPTION_NAME = 'cloud-logging-stream-sub';

@@ -22,18 +22,21 @@ import { Storage } from '@google-cloud/storage';
 
 const router = Router();
 
-// GCS client for direct file download (bypasses presigned URL signing)
+// GCS client for direct file download — uses centralized storage singleton
+import { getStorageClient } from '../lib/storage';
+import { onGcpConfigChange } from '../lib/gcp-config';
+
 let gcsDirectStorage: InstanceType<typeof Storage> | null = null;
 try {
-  const GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-  const GCS_KEY_FILE = process.env.GCS_KEY_FILE;
-  gcsDirectStorage = new Storage({
-    projectId: GCS_PROJECT_ID,
-    ...(GCS_KEY_FILE ? { keyFilename: GCS_KEY_FILE } : {}),
-  });
+  gcsDirectStorage = getStorageClient();
 } catch (e) {
   console.warn('[CallIntelligence] GCS Storage init failed — Strategy F unavailable:', (e as Error).message);
 }
+
+// Refresh on account switch
+onGcpConfigChange(() => {
+  try { gcsDirectStorage = getStorageClient(); } catch {}
+});
 
 /**
  * Download audio directly from GCS using service account read access.
