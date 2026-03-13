@@ -913,7 +913,6 @@ export async function processPendingTranscriptions(): Promise<void> {
     // Skip recordings older than 7 days — S3 presigned URLs expire and will never succeed
     const failedLeads = await db.select()
       .from(leads)
-      .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),
         lt(leads.updatedAt, sql`NOW() - INTERVAL '10 minutes'`),
