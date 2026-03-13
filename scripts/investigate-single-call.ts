@@ -6,7 +6,7 @@ import { Storage } from "@google-cloud/storage";
 import * as fs from 'fs';
 
 // We import the bucket from storage to check file existence
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026';
 const storage = new Storage();
 const bucket = storage.bucket(GCS_BUCKET);
 

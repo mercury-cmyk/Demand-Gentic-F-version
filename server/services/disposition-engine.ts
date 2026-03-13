@@ -466,7 +466,12 @@ export async function processDisposition(
     result.actions.push(`Contact suppression updated for outcome: ${finalDisposition}`);
 
     // Update dialer run statistics
-    await updateDialerRunStats(callAttempt.dialerRunId, finalDisposition);
+    try {
+      await updateDialerRunStats(callAttempt.dialerRunId, finalDisposition);
+    } catch (statsErr) {
+      console.error(`[DispositionEngine] Failed to update dialer run stats for ${callAttempt.dialerRunId}:`, statsErr);
+      result.errors.push(`Stats update failed: ${statsErr instanceof Error ? statsErr.message : 'Unknown error'}`);
+    }
 
     // Queue post-call analyzer for all dispositions (SIP + TeXML)
     // This guarantees analyzer chaining even when transcript arrives via in-session/native paths.
@@ -1663,11 +1668,19 @@ async function updateDialerRunStats(
 ): Promise<void> {
   const updateField = dispositionToStatField(disposition);
   
+  // Dispositions that indicate a live conversation (contact actually picked up)
+  const connectedDispositions: CanonicalDisposition[] = [
+    'qualified_lead', 'not_interested', 'do_not_call',
+    'callback_requested', 'needs_review', 'invalid_data'
+  ];
+  const isConnected = connectedDispositions.includes(disposition);
+
   await db.execute(sql`
     UPDATE dialer_runs 
     SET 
       ${sql.raw(updateField)} = ${sql.raw(updateField)} + 1,
       contacts_processed = contacts_processed + 1,
+      ${isConnected ? sql`contacts_connected = contacts_connected + 1,` : sql``}
       updated_at = NOW()
     WHERE id = ${dialerRunId}
   `);

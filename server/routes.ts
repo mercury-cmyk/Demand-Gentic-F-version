@@ -71,6 +71,7 @@ import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } fro
 import domainManagementRouter from './routes/domain-management';
 import emailManagementRouter from './routes/email-management';
 import brevoWebhookRouter from './routes/brevo-webhook';
+import brevoContactSyncRouter from './routes/brevo-contact-sync-routes';
 import deliverabilityRouter from './routes/deliverability';
 import unifiedEmailRoutes from './routes/unified-email-routes';
 import unifiedEmailSystemRouter from './routes/unified-email-system';
@@ -1041,7 +1042,7 @@ export function registerRoutes(app: Express) {
 
       if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
         const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
-        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-ai-storage'}/`, '');
+        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026'}/`, '');
 
         res.setHeader('Content-Type', image.mimeType || 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -9852,6 +9853,9 @@ export function registerRoutes(app: Express) {
 
   // Brevo webhook endpoint (no auth required - Brevo sends events directly)
   app.use('/api/brevo/webhooks', brevoWebhookRouter);
+
+  // Brevo contact sync endpoints (auth required)
+  app.use('/api/brevo-sync', requireAuth, brevoContactSyncRouter);
 
   // Mailgun webhook endpoint (no auth required - verified by signature)
   app.post("/api/mailgun/webhooks", async (req, res) => {

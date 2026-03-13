@@ -2,7 +2,7 @@ import { db } from './server/db';
 import { sql } from 'drizzle-orm';
 import { Storage } from '@google-cloud/storage';
 
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026';
 const storage = new Storage();
 const bucket = storage.bucket(GCS_BUCKET);
 

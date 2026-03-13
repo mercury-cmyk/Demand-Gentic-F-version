@@ -106,7 +106,7 @@ update_secret "MAILGUN_DOMAIN" "mail.pivotal-b2b.info"
 
 echo ""
 echo "=== Google Cloud Configuration ==="
-update_secret "GCS_BUCKET" "demandgentic-ai-storage"
+update_secret "GCS_BUCKET" "demandgentic-prod-storage-2026"
 update_secret "S3_REGION" "ap-south-1"
 
 echo ""

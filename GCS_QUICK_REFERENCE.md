@@ -7,7 +7,7 @@
 # Already configured and working:
 GOOGLE_CLOUD_PROJECT="pivotalb2b-2026"
 GCP_PROJECT_ID="pivotalb2b-2026"
-GCS_BUCKET="demandgentic-ai-storage"
+GCS_BUCKET="demandgentic-prod-storage-2026"
 
 # Redis (GCP Memorystore)
 REDIS_URL="redis://10.181.0.35:6379"
@@ -24,12 +24,12 @@ REDIS_URL="redis://10.181.0.35:6379"
 
 ### Upload File to GCS
 ```bash
-gsutil cp myfile.txt gs://demandgentic-ai-storage/uploads/
+gsutil cp myfile.txt gs://demandgentic-prod-storage-2026/uploads/
 ```
 
 ### List GCS Bucket Contents
 ```bash
-gsutil ls gs://demandgentic-ai-storage/
+gsutil ls gs://demandgentic-prod-storage-2026/
 ```
 
 ### Transcribe a Recording
@@ -72,7 +72,7 @@ gcloud projects add-iam-policy-binding pivotalb2b-2026 \
 ```
 
 ### Transcription Fails
-1. Check bucket exists: `gsutil ls gs://demandgentic-ai-storage`
+1. Check bucket exists: `gsutil ls gs://demandgentic-prod-storage-2026`
 2. Check recording URL is accessible: `curl -I <URL>`
 3. Verify GCP project has Speech API enabled: `gcloud services list | grep speech`
 
@@ -85,7 +85,7 @@ psql $DATABASE_URL -c "SELECT 1"
 redis-cli -u $REDIS_URL PING
 
 # Test GCS:
-gcloud storage ls gs://demandgentic-ai-storage/
+gcloud storage ls gs://demandgentic-prod-storage-2026/
 ```
 
 ---

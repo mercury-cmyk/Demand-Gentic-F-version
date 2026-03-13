@@ -8,7 +8,7 @@ import * as os from 'os';
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 const TELNYX_API_BASE = 'https://api.telnyx.com/v2';
-const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-ai-storage';
+const GCS_BUCKET = process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026';
 
 interface LeadInfo {
   id: string;
