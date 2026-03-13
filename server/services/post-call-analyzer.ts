@@ -921,6 +921,8 @@ export async function runPostCallAnalysis(
           });
           if (basicResult && basicResult.transcript) {
             // Convert basic transcript to structured format (no precise timing — best effort)
+            // WARNING: This creates a single utterance spanning the entire call.
+            // Turn metrics will show totalTurns=1 which is inaccurate for real conversations.
             structuredTranscript = {
               text: basicResult.transcript,
               utterances: [{
@@ -930,7 +932,7 @@ export async function runPostCallAnalysis(
                 end: callDurationSec || 0,
               }],
             };
-            console.log(`${LOG_PREFIX} Using basic transcription fallback: ${basicResult.transcript.length} chars`);
+            console.warn(`${LOG_PREFIX} ⚠️ BASIC TRANSCRIPTION FALLBACK: Created single-utterance transcript (${basicResult.transcript.length} chars, duration ${callDurationSec}s). Turn metrics will be inaccurate. Structured/diarized transcription failed for this recording.`);
           }
         } catch (basicError: any) {
           console.error(`${LOG_PREFIX} Basic transcription also failed: ${basicError.message}`);
@@ -970,7 +972,7 @@ export async function runPostCallAnalysis(
                     end: callDurationSec || 0,
                   }],
                 };
-                console.log(`${LOG_PREFIX} Using basic transcription fallback after fresh URL retry: ${retryBasicResult.transcript.length} chars`);
+                console.warn(`${LOG_PREFIX} ⚠️ BASIC TRANSCRIPTION FALLBACK (fresh URL retry): Created single-utterance transcript (${retryBasicResult.transcript.length} chars, duration ${callDurationSec}s). Turn metrics will be inaccurate.`);
               }
             } catch (retryBasicError: any) {
               console.error(`${LOG_PREFIX} Basic retry failed: ${retryBasicError.message}`);

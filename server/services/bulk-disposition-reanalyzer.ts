@@ -28,6 +28,7 @@ import {
   type CanonicalDisposition,
 } from "@shared/schema";
 import { eq, and, sql, gte, lte, isNotNull, inArray, desc } from "drizzle-orm";
+import { adjustDialerRunStatsForCorrection, isValidCanonicalDisposition } from "./disposition-engine";
 import {
   loadCampaignQualificationContext,
   determineSmartDisposition,
@@ -351,7 +352,7 @@ export async function reanalyzeBatch(
 
   // Get call attempt IDs for all sessions
   const sessionIds = sessions.map((s) => s.id);
-  let attemptMap = new Map<string, { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null }>();
+  let attemptMap = new Map<string, { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null; dialerRunId: string | null }>();
   if (sessionIds.length > 0) {
     const attempts = await db
       .select({
@@ -360,6 +361,7 @@ export async function reanalyzeBatch(
         disposition: dialerCallAttempts.disposition,
         phoneDialed: dialerCallAttempts.phoneDialed,
         queueItemId: dialerCallAttempts.queueItemId,
+        dialerRunId: dialerCallAttempts.dialerRunId,
       })
       .from(dialerCallAttempts)
       .where(
@@ -376,6 +378,7 @@ export async function reanalyzeBatch(
           disposition: a.disposition,
           phoneDialed: a.phoneDialed,
           queueItemId: a.queueItemId,
+          dialerRunId: a.dialerRunId,
         });
       }
     }
@@ -608,7 +611,7 @@ async function applyDispositionChange(
     recordingUrl: string | null;
     toNumberE164: string;
   },
-  attempt: { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null } | undefined,
+  attempt: { id: string; disposition: string | null; phoneDialed: string; queueItemId: string | null; dialerRunId?: string | null } | undefined,
   newDisposition: CanonicalDisposition,
   existingLeadId: string | null,
   oldDisposition: string
@@ -770,7 +773,21 @@ async function applyDispositionChange(
         break;
     }
 
-    // 4. Log activity
+    // 4. Adjust dialer run stats (decrement old, increment new)
+    if (attempt?.dialerRunId && isValidCanonicalDisposition(oldDisposition)) {
+      try {
+        await adjustDialerRunStatsForCorrection(
+          attempt.dialerRunId,
+          oldDisposition as CanonicalDisposition,
+          newDisposition
+        );
+        action += ` | Stats adjusted: ${oldDisposition} -1, ${newDisposition} +1`;
+      } catch (statsErr) {
+        console.error(`${LOG_PREFIX} Failed to adjust dialer run stats for ${attempt.dialerRunId}:`, statsErr);
+      }
+    }
+
+    // 5. Log activity
     try {
       await db.insert(activityLog).values({
         entityType: "call_session",
@@ -838,6 +855,7 @@ export async function overrideSingleDisposition(
       disposition: dialerCallAttempts.disposition,
       phoneDialed: dialerCallAttempts.phoneDialed,
       queueItemId: dialerCallAttempts.queueItemId,
+      dialerRunId: dialerCallAttempts.dialerRunId,
     })
     .from(dialerCallAttempts)
     .where(eq(dialerCallAttempts.callSessionId, callSessionId))
