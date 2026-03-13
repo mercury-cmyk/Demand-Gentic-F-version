@@ -50,6 +50,7 @@ export interface ReanalysisFilter {
   maxDurationSec?: number;           // Only calls shorter than N seconds
   hasTranscript?: boolean;           // Only calls with transcripts
   hasRecording?: boolean;            // Only calls with recordings
+  excludeAnalyzed?: boolean;         // Skip calls with completed AI analysis (cost optimization)
   limit?: number;                    // Max calls to process (default 100)
   offset?: number;
 }
@@ -306,6 +307,11 @@ export async function reanalyzeBatch(
 
   if (filters.hasRecording) {
     conditions.push(isNotNull(callSessions.recordingUrl));
+  }
+
+  // Cost optimization: skip calls that already have completed AI analysis
+  if (filters.excludeAnalyzed) {
+    conditions.push(sql`(${callSessions.aiAnalysis} IS NULL OR ${callSessions.analysisStatus} != 'completed')`);
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : isNotNull(callSessions.aiTranscript);

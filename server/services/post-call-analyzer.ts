@@ -14,7 +14,8 @@
 import { db } from "../db";
 import { callSessions, dialerCallAttempts, campaigns, callQualityRecords, leads, type CanonicalDisposition } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
-import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./deepgram-postcall-transcription";
+import { submitStructuredTranscription, transcribeFromRecording, type StructuredTranscript } from "./google-transcription";
+import { submitStructuredTranscription as submitDeepgramTranscription, transcribeFromRecording as transcribeFromRecordingDeepgram } from "./deepgram-postcall-transcription";
 import { type ConversationQualityAnalysis } from "./conversation-quality-analyzer";
 import { logCallIntelligence } from "./call-intelligence-logger";
 import { overrideSingleDisposition } from "./bulk-disposition-reanalyzer";
@@ -749,6 +750,8 @@ export async function runPostCallAnalysis(
     geminiTranscript?: string;
     /** Optional GCS URI (gs://bucket/key) to avoid inline download limits for long audio */
     gcsUri?: string;
+    /** Force re-analysis even if already completed (default: false) */
+    forceReanalysis?: boolean;
   }
 ): Promise<PostCallAnalysisResult> {
   const startTime = Date.now();
@@ -783,6 +786,9 @@ export async function runPostCallAnalysis(
         recordingStatus: callSessions.recordingStatus,
         durationSec: callSessions.durationSec,
         aiDisposition: callSessions.aiDisposition,
+        aiAnalysis: callSessions.aiAnalysis,
+        aiTranscript: callSessions.aiTranscript,
+        analysisStatus: callSessions.analysisStatus,
         campaignId: callSessions.campaignId,
         contactId: callSessions.contactId,
         telnyxCallId: callSessions.telnyxCallId,
@@ -794,6 +800,21 @@ export async function runPostCallAnalysis(
     if (!session) {
       result.error = `Call session not found: ${callSessionId}`;
       console.error(`${LOG_PREFIX} ${result.error}`);
+      return result;
+    }
+
+    // ⚡ COST GUARD: Skip if already fully analyzed (has aiAnalysis + completed status)
+    // Callers can pass forceReanalysis=true to override this guard.
+    const existingAnalysis = session.aiAnalysis as Record<string, unknown> | null;
+    if (
+      !options?.forceReanalysis &&
+      existingAnalysis?.postCallAnalysis &&
+      session.analysisStatus === 'completed'
+    ) {
+      console.log(`${LOG_PREFIX} ⏭️ Analysis already completed for session ${callSessionId} — skipping (use forceReanalysis to override)`);
+      result.success = true;
+      result.skipped = true;
+      result.skipReason = 'Analysis already completed';
       return result;
     }
 
@@ -896,23 +917,70 @@ export async function runPostCallAnalysis(
       }
     }
 
+    // ⚡ COST GUARD: Reuse existing transcript from DB if available (avoid re-transcription)
+    if (!structuredTranscript && session.aiTranscript && typeof session.aiTranscript === 'string' && session.aiTranscript.length >= 30) {
+      console.log(`${LOG_PREFIX} ♻️ Reusing existing transcript from DB (${session.aiTranscript.length} chars) — skipping transcription API calls`);
+      // Parse the stored transcript into structured format for analysis
+      const lines = session.aiTranscript.split('\n').filter((l: string) => l.trim().length > 0);
+      const utterances = lines.map((line: string) => {
+        const match = line.match(/^(Agent|Contact):\s*(.+)$/i);
+        if (match) {
+          return {
+            speaker: match[1].toLowerCase() === 'agent' ? 'agent' : 'contact',
+            text: match[2].trim(),
+            start: 0,
+            end: 0,
+          };
+        }
+        return null;
+      }).filter(Boolean) as Array<{speaker: string; text: string; start: number; end: number}>;
+
+      if (utterances.length > 0) {
+        const normalizedUtterances = normalizeTranscriptUtterances(utterances);
+        structuredTranscript = {
+          text: session.aiTranscript,
+          utterances: normalizedUtterances,
+        };
+        transcriptionMetricSource = 'fallback';
+      }
+    }
+
     // 3. Transcribe with structured diarization (skip if native Gemini transcript available)
+    //    Primary: Google Cloud Speech-to-Text (telephony model, better accuracy)
+    //    Fallback: Deepgram (nova-2-phonecall) if Google fails
     if (!structuredTranscript && audioUrl) {
+      // 3a. Try Google Cloud Speech-to-Text (primary)
       try {
-        const deepgramResult = await submitStructuredTranscription(audioUrl, {
+        const googleResult = await submitStructuredTranscription(audioUrl, {
           telnyxCallId: session.telnyxCallId || undefined,
           recordingS3Key: session.recordingS3Key || undefined,
         });
 
-        if (deepgramResult) {
-          structuredTranscript = deepgramResult;
-          console.log(`${LOG_PREFIX} ✅ Structured transcription completed: ${structuredTranscript.utterances.length} utterances, ${structuredTranscript.text.length} chars`);
+        if (googleResult) {
+          structuredTranscript = googleResult;
+          console.log(`${LOG_PREFIX} ✅ Google STT structured transcription completed: ${structuredTranscript.utterances.length} utterances, ${structuredTranscript.text.length} chars`);
         }
       } catch (transcriptionError: any) {
-        console.error(`${LOG_PREFIX} Structured transcription failed: ${transcriptionError.message}`);
+        console.error(`${LOG_PREFIX} Google STT structured transcription failed: ${transcriptionError.message}`);
       }
 
-      // If structured failed, try basic transcription
+      // 3b. If Google failed, try Deepgram as fallback
+      if (!structuredTranscript) {
+        try {
+          const deepgramResult = await submitDeepgramTranscription(audioUrl, {
+            telnyxCallId: session.telnyxCallId || undefined,
+            recordingS3Key: session.recordingS3Key || undefined,
+          });
+          if (deepgramResult) {
+            structuredTranscript = deepgramResult;
+            console.log(`${LOG_PREFIX} ✅ Deepgram fallback structured transcription completed: ${structuredTranscript.utterances.length} utterances, ${structuredTranscript.text.length} chars`);
+          }
+        } catch (deepgramError: any) {
+          console.error(`${LOG_PREFIX} Deepgram fallback structured transcription also failed: ${deepgramError.message}`);
+        }
+      }
+
+      // 3c. If both structured services failed, try basic (Google then Deepgram)
       if (!structuredTranscript) {
         try {
           const basicResult = await transcribeFromRecording(audioUrl, {
@@ -920,9 +988,6 @@ export async function runPostCallAnalysis(
             recordingS3Key: session.recordingS3Key || undefined,
           });
           if (basicResult && basicResult.transcript) {
-            // Convert basic transcript to structured format (no precise timing — best effort)
-            // WARNING: This creates a single utterance spanning the entire call.
-            // Turn metrics will show totalTurns=1 which is inaccurate for real conversations.
             structuredTranscript = {
               text: basicResult.transcript,
               utterances: [{
@@ -932,7 +997,7 @@ export async function runPostCallAnalysis(
                 end: callDurationSec || 0,
               }],
             };
-            console.warn(`${LOG_PREFIX} ⚠️ BASIC TRANSCRIPTION FALLBACK: Created single-utterance transcript (${basicResult.transcript.length} chars, duration ${callDurationSec}s). Turn metrics will be inaccurate. Structured/diarized transcription failed for this recording.`);
+            console.warn(`${LOG_PREFIX} ⚠️ BASIC TRANSCRIPTION FALLBACK: Created single-utterance transcript (${basicResult.transcript.length} chars, duration ${callDurationSec}s). Turn metrics will be inaccurate.`);
           }
         } catch (basicError: any) {
           console.error(`${LOG_PREFIX} Basic transcription also failed: ${basicError.message}`);
@@ -947,15 +1012,32 @@ export async function runPostCallAnalysis(
         if (freshAudioUrl && freshAudioUrl !== audioUrl) {
           console.log(`${LOG_PREFIX} Retrying transcription with fresh resolved recording URL`);
 
+          // Try Google STT first
           try {
             structuredTranscript = await submitStructuredTranscription(freshAudioUrl, {
               telnyxCallId: session.telnyxCallId || undefined,
               recordingS3Key: session.recordingS3Key || undefined,
             });
           } catch (retryStructuredError: any) {
-            console.error(`${LOG_PREFIX} Structured retry failed: ${retryStructuredError.message}`);
+            console.error(`${LOG_PREFIX} Google STT retry failed: ${retryStructuredError.message}`);
           }
 
+          // Try Deepgram fallback
+          if (!structuredTranscript) {
+            try {
+              structuredTranscript = await submitDeepgramTranscription(freshAudioUrl, {
+                telnyxCallId: session.telnyxCallId || undefined,
+                recordingS3Key: session.recordingS3Key || undefined,
+              });
+              if (structuredTranscript) {
+                console.log(`${LOG_PREFIX} ✅ Deepgram fallback retry succeeded: ${structuredTranscript.utterances.length} utterances`);
+              }
+            } catch (deepgramRetryErr: any) {
+              console.error(`${LOG_PREFIX} Deepgram fallback retry also failed: ${deepgramRetryErr.message}`);
+            }
+          }
+
+          // Basic transcription as last resort
           if (!structuredTranscript) {
             try {
               const retryBasicResult = await transcribeFromRecording(freshAudioUrl, {

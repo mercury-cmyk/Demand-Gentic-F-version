@@ -370,8 +370,8 @@ async function runPhase3Analysis(
         )`,
         // No analysis on the session
         sql`${callSessions.aiAnalysis} IS NULL`,
-        // Not currently being processed (avoid conflicts)
-        sql`(${callSessions.analysisStatus} IS NULL OR ${callSessions.analysisStatus} NOT IN ('processing'))`,
+        // Not currently being processed or already completed (avoid conflicts and re-processing)
+        sql`(${callSessions.analysisStatus} IS NULL OR ${callSessions.analysisStatus} NOT IN ('processing', 'completed'))`,
         // Within lookback window
         gte(dialerCallAttempts.createdAt, lookbackDate),
         sql`${dialerCallAttempts.createdAt} < ${graceDate}`,

@@ -157,7 +157,10 @@ export default function CloudLogsMonitor() {
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/log-stream`;
+    const wsUrl = `${protocol}//${host}/log-stream?service=${encodeURIComponent(selectedService)}`;
+
+    // Clear real-time logs when service changes to avoid mixing
+    setRealTimeLogs([]);
 
     const connectWebSocket = () => {
       if (wsRef.current) {
@@ -234,7 +237,7 @@ export default function CloudLogsMonitor() {
         wsRef.current.close();
       }
     };
-  }, [autoRefresh, addActivityEvent]);
+  }, [autoRefresh, addActivityEvent, selectedService]);
 
   // Fetch recent logs (Historical)
   const { data: recentLogsData, refetch: refetchRecent } = useQuery<{ logs: LogEntry[]; count: number }>({

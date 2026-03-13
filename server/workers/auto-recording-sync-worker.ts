@@ -5,7 +5,7 @@ import { leads, dialerCallAttempts, campaignTestCalls, callSessions } from '@sha
 import { eq } from 'drizzle-orm';
 import type { AutoRecordingSyncJobData } from '../lib/auto-recording-sync-queue';
 import axios from 'axios';
-import { submitStructuredTranscription } from '../services/deepgram-postcall-transcription';
+import { submitStructuredTranscription } from '../services/google-transcription';
 import { getRedisUrl, getRedisConnectionOptions } from '../lib/redis-config';
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from '../services/recording-storage';
 import { fetchTelnyxRecording } from '../services/telnyx-recordings';
@@ -120,9 +120,9 @@ async function transcribeWithSpeakers(
   telnyxCallId?: string | null
 ): Promise<{ transcript: string; structuredTranscript: any; transcriptTurns: any[] } | null> {
   try {
-    console.log('[AutoRecordingSyncWorker] 🎤 Starting Deepgram post-call transcription...');
+    console.log('[AutoRecordingSyncWorker] 🎤 Starting Google STT post-call transcription...');
     
-    // Use Deepgram service with structured output
+    // Use Google Speech-to-Text service with structured output
     const result = await submitStructuredTranscription(recordingUrl, { telnyxCallId });
     
     if (!result) {
@@ -288,7 +288,7 @@ async function transcribeWithSpeakers(
       };
     }
 
-    console.log('[AutoRecordingSyncWorker] ✅ Deepgram transcription completed');
+    console.log('[AutoRecordingSyncWorker] ✅ Google STT transcription completed');
     return {
       transcript: plainTranscript,
       structuredTranscript,
