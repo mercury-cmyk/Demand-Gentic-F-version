@@ -28,15 +28,25 @@ const router = Router();
 router.use(requireAuth);
 router.use(requireRole('admin', 'campaign_manager', 'manager'));
 
-// Initialize GCP managers
-const projectId = process.env.GCP_PROJECT_ID || '';
-const region = process.env.GCP_REGION || 'us-central1';
+import { getGcpProjectId, getGcpLocation, onGcpConfigChange } from '../lib/gcp-config';
+
+// Initialize GCP managers using centralized config (supports dynamic account switching)
+let projectId = getGcpProjectId();
+let region = process.env.GCP_REGION || getGcpLocation();
 
 const buildManager = new CloudBuildManager(projectId);
 const deploymentManager = new CloudRunDeploymentManager(projectId, region);
 const domainMapper = new DomainMapper(projectId);
 const costTracker = new CostTracker(projectId);
-const workstationsManager = new CloudWorkstationsManager(projectId, region);
+let workstationsManager = new CloudWorkstationsManager(projectId, region);
+
+// Re-initialize workstations manager when GCP account changes
+onGcpConfigChange((config) => {
+  projectId = config.projectId;
+  region = process.env.GCP_REGION || config.location;
+  workstationsManager = new CloudWorkstationsManager(projectId, region);
+  console.log(`[Workstations] Reinitialized for project=${projectId} region=${region}`);
+});
 
 function getOpsPermissionError(error: unknown): { status: number; message: string } | null {
   const code = typeof (error as { code?: unknown })?.code === 'number'
@@ -1456,6 +1466,323 @@ router.put('/workstations/clusters/:clusterId/configs/:configId/workstations/:wo
     res.json({ success: true, path: filePath });
   } catch (error) {
     handleOpsError(res, error, 'Failed to write file to workstation');
+  }
+});
+
+// ===== GIT OPERATIONS ON WORKSTATIONS =====
+
+const WS_GIT_BASE = '/workstations/clusters/:clusterId/configs/:configId/workstations/:workstationId/git';
+
+/** Helper: run a git command on a workstation and return structured result */
+async function runGitCommand(
+  clusterId: string, configId: string, workstationId: string,
+  gitArgs: string, cwd?: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const cdPrefix = cwd ? `cd '${cwd.replace(/'/g, "'\\''")}' && ` : '';
+  return workstationsManager.execCommand(clusterId, configId, workstationId, `${cdPrefix}git ${gitArgs}`);
+}
+
+/**
+ * GET /git/status — git status (porcelain + branch)
+ */
+router.get(`${WS_GIT_BASE}/status`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const cwd = (req.query.cwd as string) || '/home/user';
+
+    const [statusResult, branchResult] = await Promise.all([
+      runGitCommand(clusterId, configId, workstationId, 'status --porcelain=v1', cwd),
+      runGitCommand(clusterId, configId, workstationId, 'rev-parse --abbrev-ref HEAD', cwd),
+    ]);
+
+    const branch = branchResult.stdout.trim();
+    const files = statusResult.stdout.split('\n').filter(Boolean).map(line => {
+      const status = line.substring(0, 2);
+      const path = line.substring(3);
+      return {
+        path,
+        status,
+        staged: status[0] !== ' ' && status[0] !== '?',
+        modified: status[1] === 'M' || status[0] === 'M',
+        untracked: status === '??',
+        deleted: status[0] === 'D' || status[1] === 'D',
+        added: status[0] === 'A',
+      };
+    });
+
+    res.json({ success: true, branch, files, clean: files.length === 0 });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to get git status');
+  }
+});
+
+/**
+ * GET /git/log — recent commits
+ */
+router.get(`${WS_GIT_BASE}/log`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const cwd = (req.query.cwd as string) || '/home/user';
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+
+    const result = await runGitCommand(
+      clusterId, configId, workstationId,
+      `log --oneline --format='%H|||%h|||%an|||%ae|||%ar|||%s' -n ${limit}`,
+      cwd,
+    );
+
+    const commits = result.stdout.split('\n').filter(Boolean).map(line => {
+      const [hash, shortHash, author, email, relativeDate, ...msgParts] = line.split('|||');
+      return { hash, shortHash, author, email, relativeDate, message: msgParts.join('|||') };
+    });
+
+    res.json({ success: true, commits });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to get git log');
+  }
+});
+
+/**
+ * GET /git/branches — list branches
+ */
+router.get(`${WS_GIT_BASE}/branches`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const cwd = (req.query.cwd as string) || '/home/user';
+
+    const result = await runGitCommand(clusterId, configId, workstationId, 'branch -a --no-color', cwd);
+
+    const branches = result.stdout.split('\n').filter(Boolean).map(line => {
+      const current = line.startsWith('*');
+      const name = line.replace(/^\*?\s+/, '').trim();
+      const remote = name.startsWith('remotes/');
+      return { name: remote ? name.replace('remotes/', '') : name, current, remote };
+    });
+
+    res.json({ success: true, branches });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to list git branches');
+  }
+});
+
+/**
+ * GET /git/diff — diff for a file or all changes
+ */
+router.get(`${WS_GIT_BASE}/diff`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const cwd = (req.query.cwd as string) || '/home/user';
+    const filePath = req.query.file as string;
+    const staged = req.query.staged === 'true';
+
+    const args = staged ? 'diff --cached' : 'diff';
+    const fileArg = filePath ? ` -- '${filePath.replace(/'/g, "'\\''")}'` : '';
+
+    const result = await runGitCommand(clusterId, configId, workstationId, `${args}${fileArg}`, cwd);
+    res.json({ success: true, diff: result.stdout });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to get git diff');
+  }
+});
+
+/**
+ * POST /git/clone — clone a repository
+ */
+router.post(`${WS_GIT_BASE}/clone`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { url, directory, branch } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ success: false, error: 'url is required' });
+    }
+
+    // Validate URL format to prevent command injection
+    if (!/^(https?:\/\/|git@)[\w.@:\/~-]+\.git$/i.test(url) && !/^(https?:\/\/|git@)[\w.@:\/~-]+$/i.test(url)) {
+      return res.status(400).json({ success: false, error: 'Invalid repository URL format' });
+    }
+
+    const targetDir = directory ? `'${String(directory).replace(/'/g, "'\\''")}'` : '';
+    const branchArg = branch ? ` -b '${String(branch).replace(/'/g, "'\\''")}'` : '';
+
+    const result = await workstationsManager.execCommand(
+      clusterId, configId, workstationId,
+      `cd /home/user && git clone${branchArg} '${url.replace(/'/g, "'\\''")}' ${targetDir}`,
+    );
+
+    res.json({ success: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to clone repository');
+  }
+});
+
+/**
+ * POST /git/stage — stage files (git add)
+ */
+router.post(`${WS_GIT_BASE}/stage`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { files, cwd } = req.body;
+    const workDir = cwd || '/home/user';
+
+    const fileArgs = Array.isArray(files) && files.length > 0
+      ? files.map((f: string) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
+      : '.';
+
+    const result = await runGitCommand(clusterId, configId, workstationId, `add ${fileArgs}`, workDir);
+    res.json({ success: result.exitCode === 0, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to stage files');
+  }
+});
+
+/**
+ * POST /git/unstage — unstage files (git reset HEAD)
+ */
+router.post(`${WS_GIT_BASE}/unstage`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { files, cwd } = req.body;
+    const workDir = cwd || '/home/user';
+
+    const fileArgs = Array.isArray(files) && files.length > 0
+      ? files.map((f: string) => `'${f.replace(/'/g, "'\\''")}'`).join(' ')
+      : '.';
+
+    const result = await runGitCommand(clusterId, configId, workstationId, `reset HEAD ${fileArgs}`, workDir);
+    res.json({ success: result.exitCode === 0, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to unstage files');
+  }
+});
+
+/**
+ * POST /git/commit — commit staged changes
+ */
+router.post(`${WS_GIT_BASE}/commit`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { message, cwd } = req.body;
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ success: false, error: 'commit message is required' });
+    }
+
+    const workDir = cwd || '/home/user';
+    const escapedMsg = message.replace(/'/g, "'\\''");
+    const result = await runGitCommand(clusterId, configId, workstationId, `commit -m '${escapedMsg}'`, workDir);
+
+    res.json({ success: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to commit');
+  }
+});
+
+/**
+ * POST /git/push — push to remote
+ */
+router.post(`${WS_GIT_BASE}/push`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { remote, branch: pushBranch, cwd } = req.body;
+    const workDir = cwd || '/home/user';
+    const remoteArg = remote || 'origin';
+    const branchArg = pushBranch ? ` '${String(pushBranch).replace(/'/g, "'\\''")}'` : '';
+
+    const result = await runGitCommand(
+      clusterId, configId, workstationId,
+      `push '${remoteArg.replace(/'/g, "'\\''")}'${branchArg}`,
+      workDir,
+    );
+
+    res.json({ success: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to push');
+  }
+});
+
+/**
+ * POST /git/pull — pull from remote
+ */
+router.post(`${WS_GIT_BASE}/pull`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { remote, branch: pullBranch, cwd } = req.body;
+    const workDir = cwd || '/home/user';
+    const remoteArg = remote || 'origin';
+    const branchArg = pullBranch ? ` '${String(pullBranch).replace(/'/g, "'\\''")}'` : '';
+
+    const result = await runGitCommand(
+      clusterId, configId, workstationId,
+      `pull '${remoteArg.replace(/'/g, "'\\''")}'${branchArg}`,
+      workDir,
+    );
+
+    res.json({ success: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to pull');
+  }
+});
+
+/**
+ * POST /git/checkout — switch branch or create new
+ */
+router.post(`${WS_GIT_BASE}/checkout`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { branch: checkoutBranch, create, cwd } = req.body;
+    if (!checkoutBranch || typeof checkoutBranch !== 'string') {
+      return res.status(400).json({ success: false, error: 'branch is required' });
+    }
+
+    const workDir = cwd || '/home/user';
+    const createFlag = create ? '-b ' : '';
+    const escaped = checkoutBranch.replace(/'/g, "'\\''");
+
+    const result = await runGitCommand(clusterId, configId, workstationId, `checkout ${createFlag}'${escaped}'`, workDir);
+    res.json({ success: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to checkout branch');
+  }
+});
+
+/**
+ * POST /git/init — initialize a git repo
+ */
+router.post(`${WS_GIT_BASE}/init`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { cwd } = req.body;
+    const workDir = cwd || '/home/user';
+
+    const result = await runGitCommand(clusterId, configId, workstationId, 'init', workDir);
+    res.json({ success: result.exitCode === 0, stdout: result.stdout, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to init git repo');
+  }
+});
+
+/**
+ * POST /git/remote — add or set remote URL
+ */
+router.post(`${WS_GIT_BASE}/remote`, async (req: Request, res: Response) => {
+  try {
+    const { clusterId, configId, workstationId } = req.params;
+    const { name, url, cwd } = req.body;
+    if (!name || !url) {
+      return res.status(400).json({ success: false, error: 'name and url are required' });
+    }
+    const workDir = cwd || '/home/user';
+    const escapedName = String(name).replace(/'/g, "'\\''");
+    const escapedUrl = String(url).replace(/'/g, "'\\''");
+
+    // Try add first, fall back to set-url
+    let result = await runGitCommand(clusterId, configId, workstationId, `remote add '${escapedName}' '${escapedUrl}'`, workDir);
+    if (result.exitCode !== 0 && result.stderr.includes('already exists')) {
+      result = await runGitCommand(clusterId, configId, workstationId, `remote set-url '${escapedName}' '${escapedUrl}'`, workDir);
+    }
+
+    res.json({ success: result.exitCode === 0, stderr: result.stderr });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to configure remote');
   }
 });
 
