@@ -42,7 +42,14 @@ export function ContactAutocomplete({ value, onChange, placeholder = "Add recipi
     queryFn: async () => {
       if (!debouncedQuery || debouncedQuery.length < 2) return [];
       const res = await apiRequest("GET", `/api/inbox/contacts/autocomplete?q=${encodeURIComponent(debouncedQuery)}`);
-      return res.json();
+      const data = await res.json();
+      const contacts = data.contacts ?? data ?? [];
+      return contacts.map((c: any) => ({
+        id: c.id,
+        name: c.fullName || c.name || c.email,
+        email: c.email,
+        company: c.jobTitle || c.company || '',
+      }));
     },
     enabled: debouncedQuery.length >= 2,
     staleTime: 30_000,

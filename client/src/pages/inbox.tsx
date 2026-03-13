@@ -15,8 +15,8 @@ import { Progress } from "@/components/ui/progress";
 import {
   Mail, Inbox as InboxIcon, Send, Archive, Star, StarOff,
   RefreshCw, Reply, Forward, Trash2, Paperclip,
-  Search, Building2, User, Target, ChevronRight, Loader2, X, Plus,
-  Sparkles, CheckCircle2, AlertCircle, Zap, Eye, MousePointer,
+  Search, Building2, User, Target, ChevronRight, ChevronDown, Loader2, X, Plus,
+  Sparkles, AlertCircle, Eye, MousePointer,
   Link2, Unlink, Bell, BellDot, BarChart3, Clock, TrendingUp,
   ExternalLink, Activity, Globe, Smartphone, Monitor, MailOpen,
   MousePointerClick, ArrowUpRight, RotateCcw
@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { InboxSidebar, type InboxFolder } from "@/components/inbox/inbox-sidebar";
 import { InboxSettingsPanel } from "@/components/inbox/inbox-settings-panel";
 import { KeyboardShortcutHelp } from "@/components/inbox/keyboard-shortcut-help";
+import { ContactAutocomplete } from "@/components/inbox/contact-autocomplete";
 
 interface InboxMessage {
   id: string;
@@ -113,7 +114,7 @@ export default function InboxPage() {
   const [activeFolder, setActiveFolder] = useState<InboxFolder>('inbox');
   const [selectedEmail, setSelectedEmail] = useState<InboxMessage | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   
@@ -121,8 +122,8 @@ export default function InboxPage() {
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<null | 'reply' | 'replyAll' | 'forward'>(null);
   const [replyingToEmail, setReplyingToEmail] = useState<InboxMessage | null>(null);
-  const [to, setTo] = useState("");
-  const [cc, setCc] = useState("");
+  const [to, setTo] = useState<string[]>([]);
+  const [cc, setCc] = useState<string[]>([]);
   const [showCc, setShowCc] = useState(false);
   const [selectedSignatureId, setSelectedSignatureId] = useState<string | null>(null);
   const [selectedMailboxId, setSelectedMailboxId] = useState<string | null>(null);
@@ -132,16 +133,7 @@ export default function InboxPage() {
   // Track the last injected signature HTML to enable proper removal when switching/editing
   const lastInjectedSignatureRef = useRef<string | null>(null);
   
-  // AI Analysis state
-  const [showAiAnalysis, setShowAiAnalysis] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState<{
-    overallScore: number;
-    toneScore: number;
-    clarityScore: number;
-    professionalismScore: number;
-    sentiment: string;
-    suggestions: string[];
-  } | null>(null);
+  const [trackingEventsExpanded, setTrackingEventsExpanded] = useState(false);
 
   // Gmail connection status
   const { data: gmailStatus, isLoading: gmailStatusLoading } = useQuery<GmailConnectionStatus>({
@@ -523,6 +515,32 @@ export default function InboxPage() {
     enabled: !!selectedEmail?.id,
   });
 
+  // Fetch detailed tracking events (lazy - only when expanded)
+  interface TrackingEvent {
+    id: number;
+    recipientEmail: string;
+    openedAt?: string;
+    clickedAt?: string;
+    ipAddress: string | null;
+    userAgent: string | null;
+    deviceType: string | null;
+    location?: { city?: string; region?: string; country?: string } | null;
+    linkUrl?: string | null;
+    linkText?: string | null;
+  }
+  const { data: trackingEvents, isLoading: trackingEventsLoading } = useQuery<{ opens: TrackingEvent[]; clicks: TrackingEvent[] }>({
+    queryKey: ['/api/track/events', selectedEmail?.id],
+    queryFn: async () => {
+      const token = localStorage.getItem('authToken');
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const response = await fetch(`/api/track/events/${selectedEmail!.id}`, { headers, credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch tracking events');
+      return response.json();
+    },
+    enabled: !!selectedEmail?.id && trackingEventsExpanded,
+  });
+
   // Fetch batch tracking stats for sent emails in list view
   const sentMessageIds = (activeFolder === 'sent' ? messages : []).map(m => m.id);
   const { data: batchTrackingData } = useQuery<BatchTrackingStats>({
@@ -704,49 +722,86 @@ export default function InboxPage() {
     }
   });
 
-  // AI Analysis mutation
-  const analyzeEmailMutation = useMutation({
-    mutationFn: async (emailData: { subject: string; body: string }) => {
-      const response = await apiRequest("POST", "/api/email-ai/analyze", emailData);
-      return await response.json();
-    },
-    onSuccess: (data) => {
-      setAiAnalysis(data);
-      setShowAiAnalysis(true);
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Analysis failed",
-        description: error.message || "Could not analyze email",
-        variant: "destructive",
-      });
-    }
-  });
+  // AI Compose mutation (DeepSeek → Kimi → OpenAI)
+  const [aiComposeOpen, setAiComposeOpen] = useState(false);
+  const [aiComposePrompt, setAiComposePrompt] = useState("");
+  const [grammarExpanded, setGrammarExpanded] = useState(false);
+  const grammarDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCheckedBodyRef = useRef<string>("");
+  const [grammarResult, setGrammarResult] = useState<{
+    corrected: string;
+    changes: Array<{ original: string; suggestion: string; reason: string }>;
+  } | null>(null);
+  const [rewritePromptOpen, setRewritePromptOpen] = useState(false);
+  const [rewriteInstructions, setRewriteInstructions] = useState("");
 
-  // AI Rewrite mutation
-  const rewriteEmailMutation = useMutation({
-    mutationFn: async (data: { subject: string; body: string; improvements: string[] }) => {
-      const response = await apiRequest("POST", "/api/email-ai/rewrite", data);
+  const aiComposeMutation = useMutation({
+    mutationFn: async (data: { prompt: string; tone?: string; replyTo?: string }) => {
+      const response = await apiRequest("POST", "/api/email-ai/compose", data, { timeout: 60000 });
       return await response.json();
     },
     onSuccess: (data: { subject: string; body: string }) => {
-      setSubject(data.subject);
-      setBody(data.body);
-      setShowAiAnalysis(false);
-      setAiAnalysis(null);
-      toast({
-        title: "Email rewritten",
-        description: "Your email has been improved by AI",
-      });
+      if (data.subject) setSubject(data.subject);
+      if (data.body) setBody(data.body);
+      setAiComposeOpen(false);
+      setAiComposePrompt("");
+      toast({ title: "Email composed", description: "AI has generated your email" });
     },
     onError: (error: Error) => {
-      toast({
-        title: "Rewrite failed",
-        description: error.message || "Could not rewrite email",
-        variant: "destructive",
-      });
-    }
+      toast({ title: "Compose failed", description: error.message || "Could not compose email", variant: "destructive" });
+    },
   });
+
+  const aiRewriteBodyMutation = useMutation({
+    mutationFn: async (data: { body: string; instructions: string }) => {
+      const response = await apiRequest("POST", "/api/email-ai/rewrite-body", data, { timeout: 60000 });
+      return await response.json();
+    },
+    onSuccess: (data: { body: string }) => {
+      if (data.body) setBody(data.body);
+      setRewritePromptOpen(false);
+      setRewriteInstructions("");
+      toast({ title: "Email rewritten", description: "AI has improved your email" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Rewrite failed", description: error.message || "Could not rewrite email", variant: "destructive" });
+    },
+  });
+
+  const grammarCheckMutation = useMutation({
+    mutationFn: async (data: { text: string }) => {
+      const response = await apiRequest("POST", "/api/email-ai/grammar", data, { timeout: 60000 });
+      return await response.json();
+    },
+    onSuccess: (data: { corrected: string; changes: Array<{ original: string; suggestion: string; reason: string }> }) => {
+      setGrammarResult(data);
+    },
+    onError: () => {
+      // Silent during auto-check — no disruptive error toasts
+    },
+  });
+
+  // Live grammar checking — debounce 3s after body changes
+  useEffect(() => {
+    if (grammarDebounceRef.current) {
+      clearTimeout(grammarDebounceRef.current);
+    }
+    // Strip HTML tags to get plain text length
+    const plainText = body.replace(/<[^>]*>/g, '').trim();
+    if (plainText.length < 30 || !composerOpen) return;
+    // Don't re-check if body hasn't meaningfully changed
+    if (body === lastCheckedBodyRef.current) return;
+
+    grammarDebounceRef.current = setTimeout(() => {
+      lastCheckedBodyRef.current = body;
+      grammarCheckMutation.mutate({ text: body });
+    }, 3000);
+
+    return () => {
+      if (grammarDebounceRef.current) clearTimeout(grammarDebounceRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [body, composerOpen]);
 
   const handleOpenComposer = () => {
     setComposerOpen(true);
@@ -798,8 +853,8 @@ export default function InboxPage() {
     setComposerOpen(false);
     setComposerMode(null);
     setReplyingToEmail(null);
-    setTo("");
-    setCc("");
+    setTo([]);
+    setCc([]);
     setShowCc(false);
     setSubject("");
     setBody("");
@@ -814,7 +869,7 @@ export default function InboxPage() {
   const handleReply = (email: InboxMessage) => {
     setComposerMode('reply');
     setReplyingToEmail(email);
-    setTo(email.from);
+    setTo([email.from]);
     setSubject(email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`);
     
     // Quote original message
@@ -832,14 +887,14 @@ export default function InboxPage() {
   const handleReplyAll = (email: InboxMessage) => {
     setComposerMode('replyAll');
     setReplyingToEmail(email);
-    setTo(email.from);
+    setTo([email.from]);
     
     // Include all other recipients in CC except the current user
     const otherRecipients = [...email.to, ...email.cc].filter(recipient => 
       recipient.toLowerCase() !== email.from.toLowerCase()
     );
     if (otherRecipients.length > 0) {
-      setCc(otherRecipients.join(', '));
+      setCc(otherRecipients);
       setShowCc(true);
     }
     
@@ -860,7 +915,7 @@ export default function InboxPage() {
   const handleForward = (email: InboxMessage) => {
     setComposerMode('forward');
     setReplyingToEmail(email);
-    setTo('');
+    setTo([]);
     setSubject(email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`);
     
     // Forward original message
@@ -881,31 +936,8 @@ export default function InboxPage() {
     setComposerOpen(true);
   };
 
-  const handleAnalyzeEmail = () => {
-    if (!subject.trim() || !body.trim()) {
-      toast({
-        title: "Cannot analyze",
-        description: "Please enter both subject and message",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    analyzeEmailMutation.mutate({ subject, body });
-  };
-
-  const handleRewriteEmail = () => {
-    if (!aiAnalysis) return;
-
-    rewriteEmailMutation.mutate({
-      subject,
-      body,
-      improvements: aiAnalysis.suggestions,
-    });
-  };
-
   const handleSendEmail = () => {
-    if (!to.trim()) {
+    if (to.length === 0) {
       toast({
         title: "Recipient required",
         description: "Please enter at least one recipient email address",
@@ -942,8 +974,8 @@ export default function InboxPage() {
     }
 
     sendEmailMutation.mutate({
-      to,
-      cc: cc.trim() || undefined,
+      to: to.join(', '),
+      cc: cc.length > 0 ? cc.join(', ') : undefined,
       subject,
       body: finalBody,
       mailboxAccountId: selectedMailboxId,
@@ -1135,7 +1167,7 @@ export default function InboxPage() {
     >
       {/* Email Composer Dialog */}
       <Dialog open={composerOpen} onOpenChange={setComposerOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0">
+        <DialogContent className="max-w-4xl w-[95vw] h-[90vh] flex flex-col p-0">
           <DialogHeader className="px-6 pt-6 pb-4">
             <DialogTitle className="text-xl font-semibold">New Email</DialogTitle>
             <DialogDescription className="sr-only">
@@ -1229,14 +1261,10 @@ export default function InboxPage() {
               <Label htmlFor="to" className="text-sm font-medium">
                 To <span className="text-destructive">*</span>
               </Label>
-              <Input
-                id="to"
-                type="email"
-                placeholder="recipient@example.com"
+              <ContactAutocomplete
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
-                data-testid="input-email-to"
-                className="font-mono text-sm"
+                onChange={setTo}
+                placeholder="recipient@example.com"
               />
             </div>
 
@@ -1267,21 +1295,17 @@ export default function InboxPage() {
                     className="h-6 w-6"
                     onClick={() => {
                       setShowCc(false);
-                      setCc("");
+                      setCc([]);
                     }}
                     data-testid="button-hide-cc"
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
-                <Input
-                  id="cc"
-                  type="email"
-                  placeholder="cc@example.com (separate multiple with commas)"
+                <ContactAutocomplete
                   value={cc}
-                  onChange={(e) => setCc(e.target.value)}
-                  data-testid="input-email-cc"
-                  className="font-mono text-sm"
+                  onChange={setCc}
+                  placeholder="cc@example.com"
                 />
               </div>
             )}
@@ -1302,15 +1326,152 @@ export default function InboxPage() {
             </div>
 
             {/* Body Field - Rich Text Editor */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
+            <div className="space-y-2 flex-1 flex flex-col min-h-0">
+              <Label className="text-sm font-medium flex-shrink-0">
                 Message <span className="text-destructive">*</span>
               </Label>
+
+              {/* Inline AI Compose Bar */}
+              {aiComposeOpen && (
+                <div className="flex items-center gap-2 p-2 rounded-md border border-blue-200 bg-blue-50/50 flex-shrink-0">
+                  <Sparkles className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                  <Input
+                    placeholder="Describe the email you want to write..."
+                    value={aiComposePrompt}
+                    onChange={(e) => setAiComposePrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && aiComposePrompt.trim()) {
+                        aiComposeMutation.mutate({ prompt: aiComposePrompt });
+                      }
+                      if (e.key === 'Escape') { setAiComposeOpen(false); setAiComposePrompt(""); }
+                    }}
+                    className="h-8 text-sm flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+                    autoFocus
+                    disabled={aiComposeMutation.isPending}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 px-3 text-xs"
+                    onClick={() => aiComposeMutation.mutate({ prompt: aiComposePrompt })}
+                    disabled={aiComposeMutation.isPending || !aiComposePrompt.trim()}
+                  >
+                    {aiComposeMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Generate"}
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={() => { setAiComposeOpen(false); setAiComposePrompt(""); }}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+
+              {/* Inline AI Rewrite Bar */}
+              {rewritePromptOpen && (
+                <div className="flex items-center gap-2 p-2 rounded-md border border-violet-200 bg-violet-50/50 flex-shrink-0">
+                  <RotateCcw className="h-4 w-4 text-violet-500 flex-shrink-0" />
+                  <Input
+                    placeholder="e.g., Make it more formal, shorten it, add urgency..."
+                    value={rewriteInstructions}
+                    onChange={(e) => setRewriteInstructions(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && rewriteInstructions.trim() && body.trim()) {
+                        aiRewriteBodyMutation.mutate({ body, instructions: rewriteInstructions });
+                      }
+                      if (e.key === 'Escape') { setRewritePromptOpen(false); setRewriteInstructions(""); }
+                    }}
+                    className="h-8 text-sm flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
+                    autoFocus
+                    disabled={aiRewriteBodyMutation.isPending}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 px-3 text-xs"
+                    onClick={() => aiRewriteBodyMutation.mutate({ body, instructions: rewriteInstructions })}
+                    disabled={aiRewriteBodyMutation.isPending || !rewriteInstructions.trim() || !body.trim()}
+                  >
+                    {aiRewriteBodyMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Rewrite"}
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 flex-shrink-0" onClick={() => { setRewritePromptOpen(false); setRewriteInstructions(""); }}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              )}
+
               <RichTextEditor
                 content={body}
                 onChange={setBody}
                 placeholder="Write your message here..."
+                className="flex-1 min-h-[300px]"
               />
+
+              {/* Live Grammar Suggestions Strip */}
+              {grammarCheckMutation.isPending && (
+                <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground flex-shrink-0">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span>Checking grammar...</span>
+                </div>
+              )}
+              {grammarResult && grammarResult.changes.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50/50 flex-shrink-0">
+                  <div className="flex items-center justify-between px-3 py-1.5">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 text-xs font-medium text-amber-700 hover:text-amber-900"
+                      onClick={() => setGrammarExpanded(!grammarExpanded)}
+                    >
+                      <AlertCircle className="h-3 w-3" />
+                      <span>{grammarResult.changes.length} grammar {grammarResult.changes.length === 1 ? 'issue' : 'issues'} found</span>
+                      <ChevronDown className={cn("h-3 w-3 transition-transform", grammarExpanded && "rotate-180")} />
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-emerald-600 hover:text-emerald-700"
+                        onClick={() => {
+                          setBody(grammarResult.corrected);
+                          setGrammarResult(null);
+                          toast({ title: "Grammar applied", description: "All corrections applied" });
+                        }}
+                      >
+                        Apply All
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setGrammarResult(null)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                  {grammarExpanded && (
+                    <div className="px-3 pb-2 space-y-1.5 max-h-32 overflow-y-auto border-t border-amber-200/50">
+                      {grammarResult.changes.map((change, i) => (
+                        <div key={i} className="flex items-start justify-between gap-2 text-xs py-1">
+                          <div className="flex-1 min-w-0">
+                            <span className="line-through text-red-500">{change.original}</span>
+                            <span className="text-muted-foreground mx-1">{'\u2192'}</span>
+                            <span className="text-emerald-600 font-medium">{change.suggestion}</span>
+                            {change.reason && <span className="text-muted-foreground ml-1">({change.reason})</span>}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 px-1.5 text-[10px] text-emerald-600 hover:text-emerald-700 flex-shrink-0"
+                            onClick={() => {
+                              const updated = body.replace(change.original, change.suggestion);
+                              setBody(updated);
+                              const remaining = grammarResult.changes.filter((_, idx) => idx !== i);
+                              if (remaining.length === 0) {
+                                setGrammarResult(null);
+                              } else {
+                                setGrammarResult({ ...grammarResult, changes: remaining });
+                              }
+                            }}
+                          >
+                            Fix
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Attachment Chips */}
@@ -1339,120 +1500,7 @@ export default function InboxPage() {
               </div>
             )}
 
-            {/* AI Analysis Results */}
-            {showAiAnalysis && aiAnalysis && (
-              <Card className="border-primary/20 bg-primary/5">
-                <CardContent className="p-4 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-5 w-5 text-primary" />
-                      <h3 className="font-semibold">AI Email Analysis</h3>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => {
-                        setShowAiAnalysis(false);
-                        setAiAnalysis(null);
-                      }}
-                      data-testid="button-close-analysis"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
 
-                  {/* Overall Score */}
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium">Overall Quality</span>
-                        <span className="text-sm font-semibold">{aiAnalysis.overallScore}/100</span>
-                      </div>
-                      <div className="h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={cn(
-                            "h-full transition-all",
-                            aiAnalysis.overallScore >= 70 ? "bg-green-500" : 
-                            aiAnalysis.overallScore >= 50 ? "bg-yellow-500" : "bg-red-500"
-                          )}
-                          style={{ width: `${aiAnalysis.overallScore}%` }}
-                        />
-                      </div>
-                    </div>
-                    {aiAnalysis.overallScore >= 70 ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    ) : (
-                      <AlertCircle className="h-5 w-5 text-yellow-500" />
-                    )}
-                  </div>
-
-                  {/* Detailed Scores */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-1">Tone</div>
-                      <div className="text-sm font-semibold">{aiAnalysis.toneScore}/100</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-1">Clarity</div>
-                      <div className="text-sm font-semibold">{aiAnalysis.clarityScore}/100</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-1">Professional</div>
-                      <div className="text-sm font-semibold">{aiAnalysis.professionalismScore}/100</div>
-                    </div>
-                  </div>
-
-                  {/* Sentiment Badge */}
-                  <div>
-                    <Badge variant={
-                      aiAnalysis.sentiment === 'positive' ? 'default' :
-                      aiAnalysis.sentiment === 'neutral' ? 'secondary' : 'destructive'
-                    }>
-                      {aiAnalysis.sentiment.charAt(0).toUpperCase() + aiAnalysis.sentiment.slice(1)} Sentiment
-                    </Badge>
-                  </div>
-
-                  {/* Suggestions */}
-                  {aiAnalysis.suggestions && aiAnalysis.suggestions.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium">Suggestions for Improvement:</h4>
-                      <ul className="space-y-1.5">
-                        {aiAnalysis.suggestions.map((suggestion, index) => (
-                          <li key={index} className="text-sm text-muted-foreground flex gap-2">
-                            <span className="text-primary">•</span>
-                            <span>{suggestion}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  {/* Rewrite Button */}
-                  {aiAnalysis.overallScore < 80 && (
-                    <Button
-                      onClick={handleRewriteEmail}
-                      disabled={rewriteEmailMutation.isPending}
-                      size="sm"
-                      className="w-full"
-                      data-testid="button-ai-rewrite"
-                    >
-                      {rewriteEmailMutation.isPending ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Rewriting...
-                        </>
-                      ) : (
-                        <>
-                          <Zap className="h-4 w-4 mr-2" />
-                          Apply AI Improvements
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            )}
           </div>
 
           <Separator />
@@ -1488,21 +1536,20 @@ export default function InboxPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleAnalyzeEmail}
-                disabled={analyzeEmailMutation.isPending || !subject.trim() || !body.trim()}
-                data-testid="button-analyze-email"
+                onClick={() => setAiComposeOpen(!aiComposeOpen)}
+                disabled={aiComposeMutation.isPending}
               >
-                {analyzeEmailMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Analyzing...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Analyze with AI
-                  </>
-                )}
+                <Sparkles className="h-4 w-4 mr-2" />
+                AI Compose
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRewritePromptOpen(!rewritePromptOpen)}
+                disabled={aiRewriteBodyMutation.isPending || !body.trim()}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Rewrite
               </Button>
               
               <Separator orientation="vertical" className="h-6" />
@@ -2005,6 +2052,99 @@ export default function InboxPage() {
                             {formatDistanceToNow(new Date(trackingStats.lastClickedAt), { addSuffix: true })}
                           </span>
                         </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Detailed Tracking Events Panel */}
+              {trackingStats && (trackingStats.opens > 0 || trackingStats.clicks > 0) && (
+                <div className="border-b">
+                  <button
+                    type="button"
+                    className="w-full px-6 py-2.5 flex items-center justify-between text-xs font-medium text-muted-foreground hover:bg-muted/30 transition-colors"
+                    onClick={() => setTrackingEventsExpanded(!trackingEventsExpanded)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Eye className="h-3.5 w-3.5" />
+                      Tracking Details
+                    </span>
+                    {trackingEventsExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  </button>
+                  {trackingEventsExpanded && (
+                    <div className="px-6 pb-4 space-y-3">
+                      {trackingEventsLoading && (
+                        <div className="flex items-center justify-center py-4">
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        </div>
+                      )}
+                      {trackingEvents && (
+                        <>
+                          {trackingEvents.opens.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                                <MailOpen className="h-3 w-3 text-emerald-500" />
+                                Opens ({trackingEvents.opens.length})
+                              </h4>
+                              <div className="space-y-1.5">
+                                {trackingEvents.opens.map((evt) => (
+                                  <div key={evt.id} className="flex items-center gap-3 text-[11px] py-1.5 px-2.5 rounded-md bg-muted/30">
+                                    <span className="text-muted-foreground w-28 flex-shrink-0">
+                                      {evt.openedAt ? format(new Date(evt.openedAt), 'MMM d, h:mm a') : '—'}
+                                    </span>
+                                    <span className="flex items-center gap-1 w-16 flex-shrink-0">
+                                      {evt.deviceType === 'mobile' ? <Smartphone className="h-3 w-3" /> :
+                                       evt.deviceType === 'tablet' ? <Smartphone className="h-3 w-3" /> :
+                                       <Monitor className="h-3 w-3" />}
+                                      <span className="capitalize">{evt.deviceType || 'unknown'}</span>
+                                    </span>
+                                    <span className="font-mono text-muted-foreground flex-shrink-0">{evt.ipAddress || '—'}</span>
+                                    {evt.location && (evt.location.city || evt.location.country) && (
+                                      <span className="flex items-center gap-1 text-muted-foreground">
+                                        <Globe className="h-3 w-3" />
+                                        {[evt.location.city, evt.location.country].filter(Boolean).join(', ')}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {trackingEvents.clicks.length > 0 && (
+                            <div>
+                              <h4 className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+                                <MousePointerClick className="h-3 w-3 text-violet-500" />
+                                Clicks ({trackingEvents.clicks.length})
+                              </h4>
+                              <div className="space-y-1.5">
+                                {trackingEvents.clicks.map((evt) => (
+                                  <div key={evt.id} className="flex items-center gap-3 text-[11px] py-1.5 px-2.5 rounded-md bg-muted/30">
+                                    <span className="text-muted-foreground w-28 flex-shrink-0">
+                                      {evt.clickedAt ? format(new Date(evt.clickedAt), 'MMM d, h:mm a') : '—'}
+                                    </span>
+                                    <span className="flex items-center gap-1 w-16 flex-shrink-0">
+                                      {evt.deviceType === 'mobile' ? <Smartphone className="h-3 w-3" /> :
+                                       evt.deviceType === 'tablet' ? <Smartphone className="h-3 w-3" /> :
+                                       <Monitor className="h-3 w-3" />}
+                                      <span className="capitalize">{evt.deviceType || 'unknown'}</span>
+                                    </span>
+                                    <span className="font-mono text-muted-foreground flex-shrink-0">{evt.ipAddress || '—'}</span>
+                                    {evt.linkUrl && (
+                                      <span className="truncate max-w-[200px] text-blue-500 flex items-center gap-1">
+                                        <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                                        {evt.linkText || evt.linkUrl}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {trackingEvents.opens.length === 0 && trackingEvents.clicks.length === 0 && (
+                            <p className="text-xs text-muted-foreground py-2">No detailed events recorded yet.</p>
+                          )}
+                        </>
                       )}
                     </div>
                   )}

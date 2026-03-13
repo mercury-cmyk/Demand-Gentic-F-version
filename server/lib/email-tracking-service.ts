@@ -443,6 +443,72 @@ export class EmailTrackingService {
       return {};
     }
   }
+
+  /**
+   * Get detailed individual tracking events for a message (opens + clicks)
+   */
+  async getDetailedTrackingEvents(messageId: string): Promise<{
+    opens: Array<{
+      id: number;
+      recipientEmail: string;
+      openedAt: Date;
+      ipAddress: string | null;
+      userAgent: string | null;
+      deviceType: string | null;
+      location: { city?: string; region?: string; country?: string } | null;
+    }>;
+    clicks: Array<{
+      id: number;
+      recipientEmail: string;
+      clickedAt: Date;
+      ipAddress: string | null;
+      userAgent: string | null;
+      deviceType: string | null;
+      linkUrl: string | null;
+      linkText: string | null;
+    }>;
+  }> {
+    try {
+      const opens = await db
+        .select({
+          id: emailOpens.id,
+          recipientEmail: emailOpens.recipientEmail,
+          openedAt: emailOpens.openedAt,
+          ipAddress: emailOpens.ipAddress,
+          userAgent: emailOpens.userAgent,
+          deviceType: emailOpens.deviceType,
+          location: emailOpens.location,
+        })
+        .from(emailOpens)
+        .where(eq(emailOpens.messageId, messageId))
+        .orderBy(sql`${emailOpens.openedAt} DESC`)
+        .limit(50);
+
+      const clicks = await db
+        .select({
+          id: emailLinkClicks.id,
+          recipientEmail: emailLinkClicks.recipientEmail,
+          clickedAt: emailLinkClicks.clickedAt,
+          ipAddress: emailLinkClicks.ipAddress,
+          userAgent: emailLinkClicks.userAgent,
+          deviceType: emailLinkClicks.deviceType,
+          linkUrl: emailLinkClicks.linkUrl,
+          linkText: emailLinkClicks.linkText,
+        })
+        .from(emailLinkClicks)
+        .where(eq(emailLinkClicks.messageId, messageId))
+        .orderBy(sql`${emailLinkClicks.clickedAt} DESC`)
+        .limit(50);
+
+      return {
+        opens: opens as any[],
+        clicks: clicks as any[],
+      };
+    } catch (error) {
+      console.error('[EMAIL-TRACKING] Error getting detailed events:', error);
+      return { opens: [], clicks: [] };
+    }
+  }
 }
 
 export const emailTrackingService = new EmailTrackingService();

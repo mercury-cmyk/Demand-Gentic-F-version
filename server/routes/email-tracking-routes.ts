@@ -164,4 +164,22 @@ router.post('/stats/batch', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+/**
+ * Get detailed tracking events for a message (individual opens + clicks)
+ * GET /api/track/events/:messageId
+ */
+router.get('/events/:messageId', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { messageId } = req.params;
+    if (!messageId || typeof messageId !== 'string') {
+      return res.status(400).json({ error: 'messageId is required' });
+    }
+    const events = await emailTrackingService.getDetailedTrackingEvents(messageId);
+    res.json(events);
+  } catch (error) {
+    console.error('[TRACKING-EVENTS] Error:', error);
+    res.status(500).json({ error: 'Failed to get tracking events' });
+  }
+});
+
 export default router;

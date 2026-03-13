@@ -908,24 +908,9 @@ export async function processPendingTranscriptions(): Promise<void> {
       ))
       .limit(10);
 
-<<<<<<< HEAD
-    // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
-    const failedLeads = await db.select({ id: leads.id })
-=======
-<<<<<<< HEAD
-    // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
-    const failedLeads = await db.select({ id: leads.id })
-=======
-<<<<<<< HEAD
-    // Also retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
-    const failedLeads = await db.select({ id: leads.id })
-=======
     // Retry failed transcriptions (older than 10 minutes, up to 3 per cycle)
     // Skip recordings older than 7 days — S3 presigned URLs expire and will never succeed
-    const failedLeads = await db.select()
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
->>>>>>> 8024a99d239228c98a7fe2e422cbc78b1039c3f0
+    const failedLeads = await db.select({ id: leads.id })
       .from(leads)
       .where(and(
         eq(leads.transcriptionStatus, 'failed'),

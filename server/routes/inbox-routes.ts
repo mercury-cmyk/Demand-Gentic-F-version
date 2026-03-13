@@ -21,7 +21,7 @@ import {
   type InboxStats
 } from "../lib/inbox-service";
 import { db } from "../db";
-import { contacts } from "@shared/schema";
+import { contacts, dealMessages } from "@shared/schema";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -394,13 +394,15 @@ router.get('/archived', requireAuth, apiLimiter, async (req, res) => {
 
 /**
  * GET /api/inbox/contacts/autocomplete?q=
- * Search contacts by name or email (top 10)
+ * Search contacts by name or email, plus past conversation recipients (top 10)
  */
 router.get('/contacts/autocomplete', requireAuth, apiLimiter, async (req, res) => {
   try {
     const q = z.string().min(1).max(100).parse(req.query.q);
     const pattern = `%${q}%`;
-    const results = await db
+
+    // Search contacts table
+    const contactResults = await db
       .select({
         id: contacts.id,
         fullName: contacts.fullName,
@@ -414,7 +416,58 @@ router.get('/contacts/autocomplete', requireAuth, apiLimiter, async (req, res) =
         sql`(${contacts.fullName} ILIKE ${pattern} OR ${contacts.email} ILIKE ${pattern} OR ${contacts.firstName} ILIKE ${pattern} OR ${contacts.lastName} ILIKE ${pattern})`
       )
       .limit(10);
-    res.json({ contacts: results });
+
+    // Search past conversation recipients from dealMessages (toEmails + ccEmails arrays)
+    const conversationEmails = await db.execute(sql`
+      SELECT DISTINCT unnested_email AS email
+      FROM (
+        SELECT unnest(${dealMessages.toEmails}) AS unnested_email FROM ${dealMessages}
+        UNION
+        SELECT unnest(${dealMessages.ccEmails}) AS unnested_email FROM ${dealMessages}
+      ) AS all_emails
+      WHERE unnested_email ILIKE ${pattern}
+      LIMIT 10
+    `);
+
+    // Merge and deduplicate by email
+    const seenEmails = new Set<string>();
+    const merged: Array<{
+      id: number | null;
+      fullName: string | null;
+      email: string;
+      jobTitle: string | null;
+      source: 'contact' | 'conversation';
+    }> = [];
+
+    for (const c of contactResults) {
+      if (c.email && !seenEmails.has(c.email.toLowerCase())) {
+        seenEmails.add(c.email.toLowerCase());
+        merged.push({
+          id: c.id,
+          fullName: c.fullName,
+          email: c.email,
+          jobTitle: c.jobTitle,
+          source: 'contact',
+        });
+      }
+    }
+
+    const convRows = (conversationEmails as any).rows ?? conversationEmails;
+    for (const row of convRows) {
+      const email = row.email as string;
+      if (email && !seenEmails.has(email.toLowerCase())) {
+        seenEmails.add(email.toLowerCase());
+        merged.push({
+          id: null,
+          fullName: null,
+          email,
+          jobTitle: null,
+          source: 'conversation',
+        });
+      }
+    }
+
+    res.json({ contacts: merged.slice(0, 10) });
   } catch (error) {
     if (error instanceof z.ZodError)
       return res.status(400).json({ message: 'Query parameter q is required' });

@@ -107,6 +107,7 @@ const envSchema = z.object({
   TELNYX_FROM_NUMBER: z.string().optional(),
   TELNYX_TEXML_APP_ID: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
   GOOGLE_AI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
