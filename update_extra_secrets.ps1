@@ -13,4 +13,4 @@ function Update-Secret ($name, $val) {
 Update-Secret "TELNYX_SIP_USERNAME" "usermercury63270"
 Update-Secret "TELNYX_SIP_PASSWORD" "zahid1234"
 Update-Secret "TELNYX_SIP_CONNECTION_ID" "2845920641004078445"
-Update-Secret "DEEPGRAM_API_KEY" "916b51cfcc227862f2d2db4d6fe7a4106aedbfec"
+Update-Secret "DEEPGRAM_API_KEY" "43b56ac08b7da33bc845cc6c04a73605156e7011"

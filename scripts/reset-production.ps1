@@ -50,8 +50,8 @@ function Update-Secret {
         [string]$SecretValue
     )
 
-    # Check if secret exists
-    $exists = gcloud secrets describe $SecretName --project=$PROJECT_ID 2>$null
+    # Check if secret exists (sets $LASTEXITCODE)
+    gcloud secrets describe $SecretName --project=$PROJECT_ID 2>$null | Out-Null
 
     if ($LASTEXITCODE -eq 0) {
         # Add new version
@@ -70,7 +70,7 @@ function Update-Secret {
 Write-Host ""
 Write-Host "[Step 1/4] Deleting existing Cloud Run service..." -ForegroundColor Blue
 
-$serviceExists = gcloud run services describe $SERVICE_NAME --region=$REGION --project=$PROJECT_ID 2>$null
+gcloud run services describe $SERVICE_NAME --region=$REGION --project=$PROJECT_ID 2>$null | Out-Null
 if ($LASTEXITCODE -eq 0) {
     gcloud run services delete $SERVICE_NAME --region=$REGION --project=$PROJECT_ID --quiet
     Write-Host "Service deleted" -ForegroundColor Green
@@ -118,6 +118,7 @@ Update-Secret "AI_INTEGRATIONS_GEMINI_API_KEY" "AQ.Ab8RN6K1oAE_NMvFs5uY_WQiKnKgd
 Update-Secret "AI_INTEGRATIONS_GEMINI_BASE_URL" "https://generativelanguage.googleapis.com"
 Update-Secret "GEMINI_API_KEY" "AIzaSyB5Teiib8c_o2rzrRK_6oA4gM_NTzLTmjY"
 Update-Secret "DEEPSEEK_API_KEY" "sk-c91fdfca02014defaf5e228537003685"
+Update-Secret "DEEPGRAM_API_KEY" "43b56ac08b7da33bc845cc6c04a73605156e7011"
 
 # ElevenLabs
 Write-Host "Updating ElevenLabs secrets..." -ForegroundColor Yellow

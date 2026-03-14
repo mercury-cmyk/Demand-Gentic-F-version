@@ -1687,6 +1687,48 @@ async function updateDialerRunStats(
 }
 
 /**
+ * Adjust dialer run statistics when a disposition is corrected post-call.
+ * Decrements the old disposition counter and increments the new one.
+ * Also adjusts contacts_connected if the connected status changed.
+ */
+export async function adjustDialerRunStatsForCorrection(
+  dialerRunId: string,
+  oldDisposition: CanonicalDisposition,
+  newDisposition: CanonicalDisposition
+): Promise<void> {
+  if (oldDisposition === newDisposition) return;
+
+  const oldField = dispositionToStatField(oldDisposition);
+  const newField = dispositionToStatField(newDisposition);
+
+  const connectedDispositions: CanonicalDisposition[] = [
+    'qualified_lead', 'not_interested', 'do_not_call',
+    'callback_requested', 'needs_review', 'invalid_data'
+  ];
+  const wasConnected = connectedDispositions.includes(oldDisposition);
+  const isNowConnected = connectedDispositions.includes(newDisposition);
+
+  let connectedAdjustment = sql``;
+  if (!wasConnected && isNowConnected) {
+    connectedAdjustment = sql`contacts_connected = contacts_connected + 1,`;
+  } else if (wasConnected && !isNowConnected) {
+    connectedAdjustment = sql`contacts_connected = GREATEST(contacts_connected - 1, 0),`;
+  }
+
+  await db.execute(sql`
+    UPDATE dialer_runs
+    SET
+      ${sql.raw(oldField)} = GREATEST(${sql.raw(oldField)} - 1, 0),
+      ${sql.raw(newField)} = ${sql.raw(newField)} + 1,
+      ${connectedAdjustment}
+      updated_at = NOW()
+    WHERE id = ${dialerRunId}
+  `);
+
+  console.log(`[DispositionEngine] Stats adjusted for run ${dialerRunId}: ${oldField} -1, ${newField} +1`);
+}
+
+/**
  * Map disposition to statistics field name
  */
 function dispositionToStatField(disposition: CanonicalDisposition): string {

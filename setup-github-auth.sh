@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJECT_ID="gen-lang-client-0789558283"
+PROJECT_ID="demandgentic"
 GITHUB_REPO="zahid-mohammadi/DemanGent.ai-2026" # Case sensitive!
 SERVICE_ACCOUNT_NAME="github-actions-deployer"
 POOL_NAME="github-actions-pool-2" # Using suffix to ensure unique

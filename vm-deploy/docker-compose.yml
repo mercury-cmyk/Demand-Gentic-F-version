@@ -75,7 +75,7 @@ services:
     command: >
       drachtio
       --contact "sip:*:5060;transport=udp"
-      --external-ip 136.116.91.227
+      --external-ip 35.239.173.4
       --admin-port 9022
       --admin-secret cymru
 

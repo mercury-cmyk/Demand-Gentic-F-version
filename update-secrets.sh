@@ -5,7 +5,7 @@
 
 set -e
 
-PROJECT_ID="gen-lang-client-0789558283"
+PROJECT_ID="demandgentic"
 echo "Updating secrets in project: $PROJECT_ID"
 
 # Function to create or update a secret

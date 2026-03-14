@@ -46,13 +46,23 @@ import { analyzeVoicemailTranscript } from "./voicemail-detection";
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
 // Model name - strip 'models/' prefix if present for Vertex AI
-const RAW_GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.0-flash-live-001";
+const RAW_GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 const GEMINI_MODEL_ID = RAW_GEMINI_MODEL.replace(/^models\//, '');
 
 // Vertex AI configuration - prefer Vertex AI (paid) over Google AI Studio (free/limited)
-const GOOGLE_CLOUD_PROJECT = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
-const VERTEX_AI_LOCATION = process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
-const USE_VERTEX_AI = !!GOOGLE_CLOUD_PROJECT;
+// Uses centralized GCP config so account switches propagate automatically
+import { getGcpProjectId, getGcpLocation, onGcpConfigChange } from '../lib/gcp-config';
+
+let GOOGLE_CLOUD_PROJECT: string | undefined = getGcpProjectId();
+let VERTEX_AI_LOCATION = getGcpLocation();
+let USE_VERTEX_AI = !!GOOGLE_CLOUD_PROJECT;
+
+onGcpConfigChange((cfg) => {
+  GOOGLE_CLOUD_PROJECT = cfg.projectId;
+  VERTEX_AI_LOCATION = cfg.location;
+  USE_VERTEX_AI = !!GOOGLE_CLOUD_PROJECT;
+  googleAuth = null; // Force re-auth with new credentials
+});
 
 // Google Auth for Vertex AI OAuth2
 let googleAuth: GoogleAuth | null = null;

@@ -491,16 +491,21 @@ function convertToGeminiFunctionDeclarations() {
 }
 
 // Initialize Vertex AI client (lazy loaded)
+import { getGcpProjectId, getGcpLocation, onGcpConfigChange } from '../lib/gcp-config';
+
 let vertexAIClient: VertexAI | null = null;
 function getVertexAI(): VertexAI {
   if (!vertexAIClient) {
     vertexAIClient = new VertexAI({
-      project: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'gen-lang-client-0789558283',
-      location: process.env.VERTEX_AI_LOCATION || 'us-central1',
+      project: getGcpProjectId(),
+      location: getGcpLocation(),
     });
   }
   return vertexAIClient;
 }
+
+// Reset Vertex client on account switch so it picks up new project/credentials
+onGcpConfigChange(() => { vertexAIClient = null; });
 
 // Check if Vertex AI should be used
 function useVertexAI(): boolean {

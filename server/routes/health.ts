@@ -292,8 +292,9 @@ router.get("/gemini-connectivity", async (req, res) => {
     const policy = snapshot.policies.voice_realtime;
     const model = policy.primaryModel;
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY || '';
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || '';
-    const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
+    const { getGcpProjectId, getGcpLocation } = await import('../lib/gcp-config');
+    const projectId = getGcpProjectId();
+    const location = getGcpLocation();
     const useVertexAI = !!projectId;
 
     const result: Record<string, unknown> = {

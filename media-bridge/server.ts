@@ -1057,6 +1057,7 @@ async function connectToOpenAI(session: BridgeSession): Promise<void> {
             threshold: 0.5,
             prefix_padding_ms: 300,
             silence_duration_ms: 500,
+            create_response: true,
           },
           tools: [
             {

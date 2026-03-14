@@ -9,6 +9,7 @@ import { Globe } from "lucide-react";
 import GenerationForm from "./shared/generation-form";
 import ContentPreview from "./shared/content-preview";
 import PublishDialog from "./shared/publish-dialog";
+import ProxyFormSubmissionPanel from "./proxy-form-submission-panel";
 
 import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 
@@ -293,6 +294,17 @@ export default function LandingPageTab({
                 <p className="text-xs text-muted-foreground">No submissions yet.</p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Proxy form submission panel (visible when campaign + published page exist) */}
+        {publishedSlug && campaignId && (
+          <div className="mt-4">
+            <ProxyFormSubmissionPanel
+              campaignId={campaignId}
+              pageSlug={publishedSlug}
+              campaignName={campaignDetails?.name}
+            />
           </div>
         )}
       </div>

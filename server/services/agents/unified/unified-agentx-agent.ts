@@ -568,7 +568,7 @@ export class UnifiedAgentXAgent extends UnifiedBaseAgent {
       topP: 0.9,
       frequencyPenalty: 0.3,
       presencePenalty: 0.2,
-      modelPreference: 'gemini-2.0-flash-live',
+      modelPreference: 'gemini-2.5-flash-native-audio-latest',
     },
 
     knowledgeConfig: {

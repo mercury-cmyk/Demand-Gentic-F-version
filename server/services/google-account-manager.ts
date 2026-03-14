@@ -17,6 +17,7 @@ import { googleCloudAccounts, GoogleCloudAccount } from "@shared/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { encryptJson, decryptJson } from "../lib/encryption";
 import { clearSecretCache } from "./secret-loader";
+import { updateGcpConfig } from "../lib/gcp-config";
 import { Storage } from "@google-cloud/storage";
 import { VertexAI } from "@google-cloud/vertexai";
 import { GoogleAuth } from "google-auth-library";
@@ -216,6 +217,16 @@ export async function applyAccount(account: GoogleCloudAccount): Promise<ApplyRe
     }
 
     reloaded.push("env");
+
+    // 2b. Update centralized GCP config — notifies all registered listeners
+    //     (cloud-logging, log-streaming, gemini-live-dialer, etc.)
+    await updateGcpConfig({
+      projectId: account.projectId,
+      gcsBucket: account.gcsBucket,
+      location: account.location,
+      keyFilename: keyFilePath,
+    });
+    reloaded.push("gcp-config-listeners");
 
     // 3. Reinitialise Vertex AI singleton
     try {

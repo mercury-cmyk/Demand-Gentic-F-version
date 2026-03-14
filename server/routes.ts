@@ -1044,7 +1044,8 @@ export function registerRoutes(app: Express) {
 
       if (image.storedUrl && image.storedUrl.includes('storage.googleapis.com')) {
         const gcsMatch = image.storedUrl.match(/https:\/\/storage\.googleapis\.com\/[^\/]+\/(.+)/);
-        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026'}/`, '');
+        const { getGcsBucket: _getGcsBucket } = await import('./lib/gcp-config');
+        const key = gcsMatch?.[1] || image.storedUrl.replace(`https://storage.googleapis.com/${_getGcsBucket()}/`, '');
 
         res.setHeader('Content-Type', image.mimeType || 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');

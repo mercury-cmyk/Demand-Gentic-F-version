@@ -11,7 +11,7 @@ const secrets = [
   'REDIS_URL', 'PUBLIC_WEBSOCKET_URL'
 ];
 
-const project = 'gen-lang-client-0789558283';
+const project = 'demandgentic';
 
 for (const name of secrets) {
   try {

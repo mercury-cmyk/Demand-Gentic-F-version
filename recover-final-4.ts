@@ -5,7 +5,7 @@ import { Storage } from '@google-cloud/storage';
 const sql = neon(process.env.DATABASE_URL!);
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY!;
 
-const storage = new Storage({ projectId: process.env.GCS_PROJECT_ID || 'gen-lang-client-0789558283' });
+const storage = new Storage({ projectId: process.env.GCS_PROJECT_ID || 'demandgentic' });
 const bucket = storage.bucket(process.env.GCS_BUCKET || 'demandgentic-prod-storage-2026');
 
 // These 4 leads have expired S3 URLs in call_session.recording_url (not on lead or DCA)

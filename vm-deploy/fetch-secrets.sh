@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ENV_FILE="vm-deploy/.env"
-PROJECT="gen-lang-client-0789558283"
+PROJECT="demandgentic"
 
 echo "Fetching OAuth token from metadata server..."
 TOKEN=$(curl -sf "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
@@ -59,12 +59,12 @@ MEDIA_BRIDGE_SECRET=bridge-secret
 DRACHTIO_HOST=127.0.0.1
 DRACHTIO_PORT=9022
 DRACHTIO_SECRET=cymru
-PUBLIC_IP=136.116.91.227
+PUBLIC_IP=35.239.173.4
 
 # Google Cloud
-GOOGLE_CLOUD_PROJECT=gen-lang-client-0789558283
-GCP_PROJECT_ID=gen-lang-client-0789558283
-GCS_PROJECT_ID=gen-lang-client-0789558283
+GOOGLE_CLOUD_PROJECT=demandgentic
+GCP_PROJECT_ID=demandgentic
+GCS_PROJECT_ID=demandgentic
 GCS_BUCKET=demandgentic-prod-storage-2026
 USE_VERTEX_AI=true
 

@@ -13,6 +13,7 @@
 
 import WebSocket from "ws";
 import { EventEmitter } from "events";
+import { getGcpProjectId, getGcpLocation } from "../../lib/gcp-config";
 import { GoogleAuth } from "google-auth-library";
 import { generateJSON, chat } from "./vertex-client";
 import { wrapPromptWithOI } from "../../lib/org-intelligence-helper";
@@ -195,9 +196,9 @@ Remember: You are simulating a REAL prospect. Make this a valuable training exer
    * Connect to Gemini Live API
    */
   async connect(): Promise<void> {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
-    const location = process.env.VERTEX_AI_LOCATION || "us-central1";
-    const model = process.env.GEMINI_LIVE_MODEL || "gemini-live-2.5-flash-native-audio";
+    const projectId = getGcpProjectId();
+    const location = getGcpLocation();
+    const model = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 
     if (!projectId) {
       throw new Error("GOOGLE_CLOUD_PROJECT or GCP_PROJECT_ID required for Gemini Live");
@@ -277,9 +278,9 @@ Remember: You are simulating a REAL prospect. Make this a valuable training exer
   private sendSetupMessage(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
-    const location = process.env.VERTEX_AI_LOCATION || "us-central1";
-    const model = process.env.GEMINI_LIVE_MODEL || "gemini-live-2.5-flash-native-audio";
+    const projectId = getGcpProjectId();
+    const location = getGcpLocation();
+    const model = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 
     const setupMessage = {
       setup: {

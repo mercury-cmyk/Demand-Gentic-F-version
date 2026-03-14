@@ -7,10 +7,18 @@
  */
 
 import { Logging, LogEntry as GCloudLogEntry } from '@google-cloud/logging';
+import { getGcpProjectId, getGcpLocation, onGcpConfigChange } from '../lib/gcp-config';
 
-const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID || 'gen-lang-client-0789558283';
+let PROJECT_ID = getGcpProjectId();
 const SERVICE_NAME = 'demandgentic-api';
-const REGION = 'us-central1';
+let REGION = getGcpLocation();
+
+// Re-create singleton on account switch
+onGcpConfigChange((cfg) => {
+  PROJECT_ID = cfg.projectId;
+  REGION = cfg.location;
+  cloudLoggingService.reinitialize();
+});
 
 interface LogEntry {
   timestamp: string;
@@ -42,6 +50,11 @@ export class CloudLoggingService {
   private logging: Logging;
 
   constructor() {
+    this.logging = new Logging({ projectId: PROJECT_ID });
+  }
+
+  /** Reinitialize with updated GCP project (called on account switch) */
+  reinitialize() {
     this.logging = new Logging({ projectId: PROJECT_ID });
   }
 

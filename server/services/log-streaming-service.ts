@@ -2,12 +2,11 @@ import { PubSub } from '@google-cloud/pubsub';
 import { Logging } from '@google-cloud/logging';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getOpsAgentRequestInfo } from './ops/runtime';
+import { getLocalDeploymentLogs } from './ops/local-runtime';
 import { parseVmLogLine } from './vm-log-service';
+import { getGcpProjectId } from '../lib/gcp-config';
 
-const PROJECT_ID =
-  process.env.GOOGLE_CLOUD_PROJECT ||
-  process.env.GCP_PROJECT_ID ||
-  'gen-lang-client-0789558283';
+let PROJECT_ID = getGcpProjectId();
 const TOPIC_NAME = 'cloud-logging-stream';
 const SINK_NAME = 'cloud-logging-stream-sink';
 const SUBSCRIPTION_NAME = 'cloud-logging-stream-sub';
@@ -65,7 +64,8 @@ export class LogStreamingService {
     this.wss = new WebSocketServer({ noServer: true });
     this.setupWebSocketServer();
 
-    if (!this.vmMode) {
+    if (!this.vmMode || !this.opsAgentBaseUrl) {
+      // Intercept console in non-VM mode or VM mode without ops agent (local dev)
       this.interceptConsole();
     }
   }
@@ -220,21 +220,14 @@ export class LogStreamingService {
   private async attachVmLogStream(ws: WebSocket, options: VmStreamOptions) {
     this.stopVmLogStream(ws);
 
-    if (!this.opsAgentBaseUrl) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          timestamp: new Date().toISOString(),
-          severity: 'ERROR',
-          message: 'VM log stream is unavailable because the ops agent URL is not configured.',
-          resource: 'vm-log-stream',
-        }));
-        ws.close(1011, 'ops agent unavailable');
-      }
-      return;
-    }
-
     const controller = new AbortController();
     this.vmStreamControllers.set(ws, controller);
+
+    if (!this.opsAgentBaseUrl) {
+      // Local fallback: poll Docker logs directly
+      await this.attachLocalLogStream(ws, options, controller);
+      return;
+    }
 
     try {
       const params = new URLSearchParams({
@@ -313,21 +306,94 @@ export class LogStreamingService {
         return;
       }
 
-      console.error('[LogStreaming] VM log proxy failed:', error);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          timestamp: new Date().toISOString(),
-          severity: 'ERROR',
-          message: error instanceof Error ? error.message : 'VM log stream failed',
-          resource: 'vm-log-stream',
-        }));
-        ws.close(1011, 'log stream error');
-      }
+      console.error('[LogStreaming] VM log proxy failed, falling back to local polling:', error);
+      // Fall back to local polling if ops agent stream fails
+      await this.attachLocalLogStream(ws, options, controller);
     } finally {
       if (this.vmStreamControllers.get(ws) === controller) {
         this.vmStreamControllers.delete(ws);
       }
     }
+  }
+
+  /**
+   * Local fallback: poll Docker compose logs and push new lines to the WebSocket.
+   * Runs every 3 seconds, deduplicating against previously seen lines.
+   */
+  private async attachLocalLogStream(
+    ws: WebSocket,
+    options: VmStreamOptions,
+    controller: AbortController,
+  ) {
+    const seenLines = new Set<string>();
+    const POLL_INTERVAL_MS = 3000;
+
+    // Send initial batch
+    try {
+      const snapshot = await getLocalDeploymentLogs(options.service, {
+        tail: options.tail,
+        since: options.since,
+        grep: options.grep,
+      });
+
+      for (const rawLine of snapshot.lines) {
+        seenLines.add(rawLine);
+        const entry = parseVmLogLine(rawLine, options.service);
+        if (entry && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(entry));
+        }
+      }
+    } catch (err) {
+      console.warn('[LogStreaming] Initial local log fetch failed:', err);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          severity: 'WARNING',
+          message: 'Docker logs not available locally. Ensure Docker is running.',
+          resource: 'vm-log-stream',
+        }));
+      }
+    }
+
+    // Poll loop
+    const poll = async () => {
+      if (controller.signal.aborted || ws.readyState !== WebSocket.OPEN) return;
+
+      try {
+        const snapshot = await getLocalDeploymentLogs(options.service, {
+          tail: 100,
+          since: '1m',
+          grep: options.grep,
+        });
+
+        for (const rawLine of snapshot.lines) {
+          if (seenLines.has(rawLine)) continue;
+          seenLines.add(rawLine);
+
+          const entry = parseVmLogLine(rawLine, options.service);
+          if (entry && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(entry));
+          }
+        }
+
+        // Cap the dedup set to prevent unbounded growth
+        if (seenLines.size > 5000) {
+          const arr = Array.from(seenLines);
+          seenLines.clear();
+          for (const line of arr.slice(arr.length - 2000)) {
+            seenLines.add(line);
+          }
+        }
+      } catch {
+        // Silently retry on next poll
+      }
+
+      if (!controller.signal.aborted && ws.readyState === WebSocket.OPEN) {
+        setTimeout(poll, POLL_INTERVAL_MS);
+      }
+    };
+
+    setTimeout(poll, POLL_INTERVAL_MS);
   }
 
   private interceptConsole() {

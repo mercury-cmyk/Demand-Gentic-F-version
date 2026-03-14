@@ -304,5 +304,10 @@ export function normalizeAiModelPolicies(input: unknown): AiModelPolicyMap {
     }
   }
 
-  return aiGovernancePoliciesSchema.parse(merged);
+  const result = aiGovernancePoliciesSchema.safeParse(merged);
+  if (!result.success) {
+    console.error("[AiGovernance] Stored policies failed validation, using defaults:", result.error.issues);
+    return base;
+  }
+  return result.data;
 }

@@ -6,10 +6,11 @@
 
 import { Storage, Bucket } from '@google-cloud/storage';
 import { Readable } from 'stream';
+import { getGcpProjectId, getGcsBucket, getGcpKeyFilename } from './gcp-config';
 
-// Environment configuration
-let GCS_PROJECT_ID = process.env.GCS_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
-let GCS_BUCKET = process.env.GCS_BUCKET || process.env.S3_BUCKET || 'demandgentic-prod-storage-2026';
+// Environment configuration — sourced from centralized GCP config
+let GCS_PROJECT_ID = getGcpProjectId();
+let GCS_BUCKET = getGcsBucket();
 let GCS_KEY_FILE = process.env.GCS_KEY_FILE; // Optional: path to service account key file
 
 function buildStorageClient(projectId?: string, keyFilename?: string) {

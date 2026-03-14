@@ -147,6 +147,8 @@ export async function sweepUnanalyzedCalls(): Promise<SweepResult> {
           sql`${callSessions.aiTranscript} IS NOT NULL AND LENGTH(${callSessions.aiTranscript}) >= 30`,
           // No analysis yet
           sql`${callSessions.aiAnalysis} IS NULL`,
+          // Not already completed (prevent re-processing)
+          sql`(${callSessions.analysisStatus} IS NULL OR ${callSessions.analysisStatus} NOT IN ('completed', 'processing'))`,
           // Has a recording (needed for Deepgram turn-by-turn)
           sql`(${callSessions.recordingUrl} IS NOT NULL OR ${callSessions.recordingS3Key} IS NOT NULL)`,
         )

@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { apiJsonRequest } from '@/lib/queryClient';
+import WorkstationIDE from './workstation-ide';
 import {
   Plus,
   Play,
@@ -617,7 +618,7 @@ export default function WorkstationsTab() {
   /* ── IDE View ── */
   if (viewMode === 'ide' && connectedWs) {
     return (
-      <CloudIDE
+      <WorkstationIDE
         workstation={connectedWs}
         config={connectedConfig}
         onDisconnect={() => {
