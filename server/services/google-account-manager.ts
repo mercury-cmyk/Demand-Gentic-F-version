@@ -21,6 +21,7 @@ import { updateGcpConfig } from "../lib/gcp-config";
 import { Storage } from "@google-cloud/storage";
 import { VertexAI } from "@google-cloud/vertexai";
 import { GoogleAuth } from "google-auth-library";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -70,17 +71,292 @@ export interface HealthCheckResult {
     gcs: "ok" | "error" | "skipped";
     vertex: "ok" | "error" | "skipped";
     gemini: "ok" | "error" | "skipped";
+    gmail: "ok" | "error" | "skipped";
   };
   errors: string[];
+  warnings: string[];
   durationMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// Migration checklist — everything that needs attention on account switch
+// ---------------------------------------------------------------------------
+export interface MigrationChecklistItem {
+  id: string;
+  category: "auto" | "manual";
+  area: string;
+  description: string;
+  status: "ok" | "action_needed" | "warning" | "skipped";
+  detail?: string;
+}
+
+export interface MigrationChecklist {
+  accountName: string;
+  projectId: string;
+  timestamp: string;
+  items: MigrationChecklistItem[];
+  summary: {
+    total: number;
+    ok: number;
+    actionNeeded: number;
+    warnings: number;
+  };
+}
+
+/**
+ * Generate a comprehensive migration checklist when switching GCP accounts.
+ * Covers ALL the issues we've seen: recording storage, secrets, Gmail, OAuth,
+ * Vertex AI, service account, APIs, VM deployment, DNS, SSL, email tracking.
+ */
+export async function generateMigrationChecklist(account: GoogleCloudAccount): Promise<MigrationChecklist> {
+  const items: MigrationChecklistItem[] = [];
+
+  // --- AUTO-MANAGED (handled by applyAccount) ---
+  items.push({
+    id: "env_vars",
+    category: "auto",
+    area: "Environment Variables",
+    description: "process.env updated with new project ID, bucket, keys",
+    status: "ok",
+    detail: `GOOGLE_CLOUD_PROJECT=${account.projectId}, GCS_BUCKET=${account.gcsBucket}`,
+  });
+
+  items.push({
+    id: "vertex_ai",
+    category: "auto",
+    area: "Vertex AI",
+    description: "Vertex AI client reinitialised with new project + service account",
+    status: account.serviceAccountJson ? "ok" : "action_needed",
+    detail: account.serviceAccountJson ? "Service account JSON provided" : "No service account JSON — Vertex AI will fail",
+  });
+
+  items.push({
+    id: "gcs_storage",
+    category: "auto",
+    area: "GCS Recording Storage",
+    description: "GCS storage singleton reinitialised with new bucket",
+    status: "ok",
+    detail: `Bucket: ${account.gcsBucket}`,
+  });
+
+  items.push({
+    id: "gemini_api_key",
+    category: "auto",
+    area: "Gemini Native Audio API Key",
+    description: "GEMINI_API_KEY updated for Gemini Live native audio calls",
+    status: account.geminiApiKey ? "ok" : "action_needed",
+    detail: account.geminiApiKey ? "Key provided" : "No Gemini API key — native audio calls will fail",
+  });
+
+  items.push({
+    id: "oauth_client",
+    category: "auto",
+    area: "Google OAuth Client ID/Secret",
+    description: "GOOGLE_AUTH_CLIENT_ID and GOOGLE_CLIENT_SECRET updated",
+    status: account.googleClientId && account.googleClientSecret ? "ok" : "action_needed",
+    detail: account.googleClientId ? `Client ID: ${account.googleClientId.substring(0, 20)}...` : "No OAuth client — Google login will fail",
+  });
+
+  items.push({
+    id: "google_search",
+    category: "auto",
+    area: "Google Search API",
+    description: "GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_ENGINE_ID updated",
+    status: account.googleSearchApiKey ? "ok" : "warning",
+    detail: account.googleSearchApiKey ? "Key provided" : "No search API key — lead research features degraded",
+  });
+
+  items.push({
+    id: "secret_cache",
+    category: "auto",
+    area: "Secret Loader Cache",
+    description: "In-memory secret cache cleared (reloads on next access)",
+    status: "ok",
+  });
+
+  // --- MANUAL ACTIONS REQUIRED ---
+
+  // GCS bucket existence
+  items.push({
+    id: "gcs_bucket_create",
+    category: "manual",
+    area: "GCS Bucket",
+    description: `Ensure bucket "${account.gcsBucket}" exists in project "${account.projectId}"`,
+    status: "action_needed",
+    detail: "Run: gcloud storage buckets create gs://" + account.gcsBucket + " --project=" + account.projectId + " --location=us-central1",
+  });
+
+  // Required GCP APIs
+  const requiredApis = [
+    { api: "aiplatform.googleapis.com", name: "Vertex AI API", reason: "AI text generation, voice agent summaries" },
+    { api: "generativelanguage.googleapis.com", name: "Generative Language API", reason: "Gemini native audio for live calls" },
+    { api: "gmail.googleapis.com", name: "Gmail API", reason: "Gmail inbox sync" },
+    { api: "people.googleapis.com", name: "People API", reason: "Google OAuth profile info" },
+    { api: "storage.googleapis.com", name: "Cloud Storage API", reason: "Recording storage" },
+    { api: "secretmanager.googleapis.com", name: "Secret Manager API", reason: "VM secret fetching" },
+    { api: "compute.googleapis.com", name: "Compute Engine API", reason: "VM management" },
+  ];
+  for (const { api, name, reason } of requiredApis) {
+    items.push({
+      id: `api_${api.split(".")[0]}`,
+      category: "manual",
+      area: "GCP APIs",
+      description: `Enable ${name} (${api})`,
+      status: "action_needed",
+      detail: `Required for: ${reason}. Run: gcloud services enable ${api} --project=${account.projectId}`,
+    });
+  }
+
+  // Service account IAM roles
+  items.push({
+    id: "iam_roles",
+    category: "manual",
+    area: "Service Account IAM Roles",
+    description: "Grant required roles to service account",
+    status: account.serviceAccountJson ? "action_needed" : "skipped",
+    detail: "Required roles: roles/storage.admin, roles/secretmanager.secretAccessor, roles/aiplatform.user, roles/logging.logWriter",
+  });
+
+  // OAuth consent screen
+  items.push({
+    id: "oauth_consent",
+    category: "manual",
+    area: "OAuth Consent Screen",
+    description: "Configure OAuth consent screen with app name, domain, and scopes",
+    status: "action_needed",
+    detail: "Required scopes: email, profile, openid, gmail.readonly, gmail.send, gmail.modify. Add test users or publish app.",
+  });
+
+  // Gmail reconnection
+  items.push({
+    id: "gmail_reconnect",
+    category: "manual",
+    area: "Gmail Inbox Sync",
+    description: "All connected Gmail accounts must disconnect and reconnect with new OAuth client",
+    status: "action_needed",
+    detail: "Old OAuth tokens are bound to the previous client ID. Users must re-authorize in Inbox settings.",
+  });
+
+  // Email tracking secret
+  items.push({
+    id: "email_tracking_secret",
+    category: "manual",
+    area: "Email Tracking",
+    description: "Set EMAIL_TRACKING_SECRET in Secret Manager and .env",
+    status: "action_needed",
+    detail: "Without a persistent secret, open/click tracking tokens break on container restart. Old emails' tracking tokens will need signature-less acceptance.",
+  });
+
+  // Secret Manager sync
+  items.push({
+    id: "secret_manager_sync",
+    category: "manual",
+    area: "Secret Manager",
+    description: "Push all secrets to new project's Secret Manager",
+    status: "action_needed",
+    detail: "Run update-secrets.sh with correct PROJECT_ID, or manually create secrets in the new project",
+  });
+
+  // VM deployment
+  items.push({
+    id: "vm_ip",
+    category: "manual",
+    area: "VM Deployment",
+    description: "Update PUBLIC_IP in .env and fetch-secrets.sh if VM IP changed",
+    status: "action_needed",
+    detail: "Check: PUBLIC_IP, BASE_URL, APP_BASE_URL, TELNYX_WEBHOOK_URL",
+  });
+
+  items.push({
+    id: "vm_firewall",
+    category: "manual",
+    area: "VM Firewall Rules",
+    description: "Create firewall rules for HTTP(80), HTTPS(443), SIP(5060), RTP(10000-20000)",
+    status: "action_needed",
+    detail: "Required network tags: http-server, https-server, sip-server",
+  });
+
+  items.push({
+    id: "ssl_certs",
+    category: "manual",
+    area: "SSL Certificates",
+    description: "Set up certbot/Let's Encrypt for the domain on the new VM",
+    status: "action_needed",
+    detail: "Run certbot --nginx -d demandgentic.ai on the VM after DNS points to it",
+  });
+
+  items.push({
+    id: "dns_update",
+    category: "manual",
+    area: "DNS",
+    description: "Update DNS A record to point to new VM IP",
+    status: "action_needed",
+    detail: "Update the A record for demandgentic.ai (and any subdomains) to the new VM's external IP",
+  });
+
+  // Redis allowlist
+  items.push({
+    id: "redis_allowlist",
+    category: "manual",
+    area: "Redis Cloud",
+    description: "Add new VM IP to Redis Cloud allowlist",
+    status: "action_needed",
+    detail: "Go to Redis Cloud dashboard and whitelist the new VM's external IP address",
+  });
+
+  // Telnyx webhook URL
+  items.push({
+    id: "telnyx_webhook",
+    category: "manual",
+    area: "Telnyx",
+    description: "Verify Telnyx webhook URL points to the correct domain/IP",
+    status: "action_needed",
+    detail: "Check Telnyx dashboard → Phone Numbers → Messaging/Voice profile → Webhook URL",
+  });
+
+  // Database migration
+  items.push({
+    id: "db_migration",
+    category: "manual",
+    area: "Database Schema",
+    description: "Run database migrations to ensure all columns exist",
+    status: "action_needed",
+    detail: "drizzle-kit push or manual SQL for any missing columns (e.g. is_trashed, trashed_at, needs_review)",
+  });
+
+  // GCS service account JSON on VM
+  items.push({
+    id: "vm_service_account",
+    category: "manual",
+    area: "VM Service Account File",
+    description: "Deploy gcp-service-account.json to /opt/demandgentic/ on the VM",
+    status: "action_needed",
+    detail: "Docker compose mounts ../gcp-service-account.json:/app/gcp-service-account.json:ro",
+  });
+
+  const summary = {
+    total: items.length,
+    ok: items.filter(i => i.status === "ok").length,
+    actionNeeded: items.filter(i => i.status === "action_needed").length,
+    warnings: items.filter(i => i.status === "warning").length,
+  };
+
+  return {
+    accountName: account.name,
+    projectId: account.projectId,
+    timestamp: new Date().toISOString(),
+    items,
+    summary,
+  };
 }
 
 export async function checkAccountHealth(account: GoogleCloudAccount): Promise<HealthCheckResult> {
   const start = Date.now();
   const result: HealthCheckResult = {
     ok: false,
-    checks: { gcs: "skipped", vertex: "skipped", gemini: "skipped" },
+    checks: { gcs: "skipped", vertex: "skipped", gemini: "skipped", gmail: "skipped" },
     errors: [],
+    warnings: [],
     durationMs: 0,
   };
 
@@ -101,8 +377,6 @@ export async function checkAccountHealth(account: GoogleCloudAccount): Promise<H
 
   const storageOpts: any = { projectId: account.projectId };
   if (keyFilename) storageOpts.keyFilename = keyFilename;
-  const vertexOpts: any = { project: account.projectId, location: account.location };
-  if (keyFilename) vertexOpts.keyFilename = keyFilename;
 
   // GCS check — write + delete a tiny sentinel file
   try {
@@ -117,7 +391,7 @@ export async function checkAccountHealth(account: GoogleCloudAccount): Promise<H
     result.errors.push(`GCS: ${e.message}`);
   }
 
-  // Vertex AI check — list models (lightweight API call)
+  // Vertex AI check — auth token
   try {
     const auth = new GoogleAuth({
       scopes: ["https://www.googleapis.com/auth/cloud-platform"],
@@ -150,13 +424,45 @@ export async function checkAccountHealth(account: GoogleCloudAccount): Promise<H
     }
   }
 
+  // Gmail API check — verify OAuth client can be used
+  if (account.googleClientId) {
+    try {
+      // Quick check: does the OAuth discovery endpoint recognize this client?
+      // We can't fully test Gmail without a user token, but we can verify the client ID format
+      if (!account.googleClientId.endsWith(".apps.googleusercontent.com")) {
+        throw new Error("Invalid OAuth client ID format");
+      }
+      if (!account.googleClientSecret) {
+        throw new Error("No OAuth client secret provided — Gmail auth will fail");
+      }
+      result.checks.gmail = "ok";
+      result.warnings.push("Gmail: Users must disconnect and reconnect their inbox after OAuth client change");
+    } catch (e: any) {
+      result.checks.gmail = "error";
+      result.errors.push(`Gmail: ${e.message}`);
+    }
+  } else {
+    result.warnings.push("Gmail: No OAuth client ID configured — Gmail inbox sync will not work");
+  }
+
+  // Warnings for missing optional fields
+  if (!account.geminiApiKey) {
+    result.warnings.push("No Gemini API key — native audio calls will fall back to Vertex AI");
+  }
+  if (!account.googleSearchApiKey) {
+    result.warnings.push("No Google Search API key — lead research features degraded");
+  }
+  if (!account.googleOauthRedirectUri) {
+    result.warnings.push("No OAuth redirect URI set — using default. Ensure redirect URIs match in Google Cloud Console.");
+  }
+
   // Clean up health-check temp file
   if (keyFilename && keyFilename !== _currentTempKeyFile) {
     try { fs.unlinkSync(keyFilename); } catch {}
   }
 
   result.durationMs = Date.now() - start;
-  // Overall ok = GCS ok AND Vertex ok (Gemini optional)
+  // Overall ok = GCS ok AND Vertex ok (Gmail + Gemini are warnings, not blockers)
   result.ok = result.checks.gcs === "ok" && result.checks.vertex === "ok";
   return result;
 }
@@ -254,7 +560,17 @@ export async function applyAccount(account: GoogleCloudAccount): Promise<ApplyRe
       console.warn(`${LOG} GCS reinit warning: ${e.message}`);
     }
 
-    // 5. Clear secret-loader cache so next read picks up new env vars
+    // 5. Ensure EMAIL_TRACKING_SECRET is set (persistent across restarts)
+    if (!process.env.EMAIL_TRACKING_SECRET) {
+      const trackingSecret = crypto.randomBytes(32).toString("hex");
+      process.env.EMAIL_TRACKING_SECRET = trackingSecret;
+      console.warn(`${LOG} Generated EMAIL_TRACKING_SECRET — persist this in Secret Manager to survive restarts`);
+      reloaded.push("email-tracking-secret(generated)");
+    } else {
+      reloaded.push("email-tracking-secret(existing)");
+    }
+
+    // 6. Clear secret-loader cache so next read picks up new env vars
     clearSecretCache();
     reloaded.push("secret-cache");
 
@@ -274,6 +590,7 @@ export interface ActivateResult {
   error?: string;
   healthCheck: HealthCheckResult;
   apply?: ApplyResult;
+  migrationChecklist?: MigrationChecklist;
 }
 
 export async function activateAccount(

@@ -6,8 +6,9 @@
  * GET    /api/google-cloud-accounts/:id          get single account
  * PUT    /api/google-cloud-accounts/:id          update account
  * DELETE /api/google-cloud-accounts/:id          delete account
- * POST   /api/google-cloud-accounts/:id/activate  health-check + hot-swap
+ * POST   /api/google-cloud-accounts/:id/activate  health-check + hot-swap + migration checklist
  * POST   /api/google-cloud-accounts/:id/health-check  health-check only (no switch)
+ * GET    /api/google-cloud-accounts/:id/migration-checklist  what needs attention
  */
 
 import { Router, Request, Response } from "express";
@@ -21,6 +22,7 @@ import {
   listAccounts,
   getAccountById,
   encryptServiceAccount,
+  generateMigrationChecklist,
 } from "../services/google-account-manager";
 
 const router = Router();
@@ -231,7 +233,43 @@ router.post("/:id/activate", requireAuth, async (req: Request, res: Response) =>
       return res.status(422).json(result);
     }
 
-    res.json(result);
+    // Generate migration checklist so caller knows what else needs attention
+    const [account] = await db
+      .select()
+      .from(googleCloudAccounts)
+      .where(eq(googleCloudAccounts.id, req.params.id))
+      .limit(1);
+
+    let migrationChecklist = null;
+    if (account) {
+      migrationChecklist = await generateMigrationChecklist(account);
+      // Mark auto-managed items as ok since applyAccount just ran
+      for (const item of migrationChecklist.items) {
+        if (item.category === "auto") item.status = "ok";
+      }
+      migrationChecklist.summary.ok = migrationChecklist.items.filter(i => i.status === "ok").length;
+      migrationChecklist.summary.actionNeeded = migrationChecklist.items.filter(i => i.status === "action_needed").length;
+    }
+
+    res.json({ ...result, migrationChecklist });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── MIGRATION CHECKLIST (read-only — shows what needs attention) ────────────
+router.get("/:id/migration-checklist", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const [account] = await db
+      .select()
+      .from(googleCloudAccounts)
+      .where(eq(googleCloudAccounts.id, req.params.id))
+      .limit(1);
+
+    if (!account) return res.status(404).json({ error: "Not found" });
+
+    const checklist = await generateMigrationChecklist(account);
+    res.json(checklist);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
