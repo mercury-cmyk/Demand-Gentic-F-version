@@ -42,10 +42,10 @@ const defaultConfig: VertexAIConfig = {
   projectId: getGcpProjectId(),
   location: getGcpLocation(),
   models: {
-    chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",
-    reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-3-pro-preview",
+    chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.5-flash-preview-05-20",
+    reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-2.5-pro-preview-05-06",
     embedding: process.env.VERTEX_EMBEDDING_MODEL || "text-embedding-004",
-    multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.0-flash-001",
+    multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.5-flash-preview-05-20",
     image: process.env.VERTEX_IMAGE_MODEL || "imagen-3.0-generate-001",
   },
   safetySettings: {
