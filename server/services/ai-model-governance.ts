@@ -118,22 +118,28 @@ export async function getAiModelGovernanceSnapshot(
     return governanceCache.snapshot;
   }
 
-  const [record] = await db
-    .select()
-    .from(aiModelGovernance)
-    .orderBy(desc(aiModelGovernance.updatedAt))
-    .limit(1);
+  let snapshot: AiGovernanceSnapshot;
+  try {
+    const [record] = await db
+      .select()
+      .from(aiModelGovernance)
+      .orderBy(desc(aiModelGovernance.updatedAt))
+      .limit(1);
 
-  const snapshot = record
-    ? {
-        id: record.id,
-        version: record.version,
-        policies: normalizeAiModelPolicies(record.policies),
-        updatedAt: record.updatedAt?.toISOString() ?? null,
-        updatedBy: record.updatedBy ?? null,
-        isSystemDefault: false,
-      }
-    : buildDefaultSnapshot();
+    snapshot = record
+      ? {
+          id: record.id,
+          version: record.version,
+          policies: normalizeAiModelPolicies(record.policies),
+          updatedAt: record.updatedAt?.toISOString() ?? null,
+          updatedBy: record.updatedBy ?? null,
+          isSystemDefault: false,
+        }
+      : buildDefaultSnapshot();
+  } catch (error) {
+    console.error("[AiGovernance] DB query failed, using defaults:", error);
+    snapshot = buildDefaultSnapshot();
+  }
 
   governanceCache = {
     expiresAt: now + CACHE_TTL_MS,

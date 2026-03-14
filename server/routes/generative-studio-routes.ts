@@ -1096,4 +1096,139 @@ router.post("/public/:slug/track-submit", async (req: Request, res: Response) =>
   }
 });
 
+// ============================================================
+// PROXY FORM SUBMISSION ROUTES (authenticated)
+// ============================================================
+
+import { z } from "zod";
+import {
+  getCampaignClickers,
+  createProxySubmissionJob,
+  processProxySubmissionJob,
+  getProxySubmissionJobStatus,
+  listProxySubmissionJobs,
+  cancelProxySubmissionJob,
+} from "../services/proxy-form-submission-service";
+
+/**
+ * GET /proxy-submissions/campaign/:campaignId/clickers
+ * Get contacts who clicked email links in a campaign (candidates for proxy submission)
+ */
+router.get("/proxy-submissions/campaign/:campaignId/clickers", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const clickers = await getCampaignClickers(req.params.campaignId);
+    return res.json({ clickers, total: clickers.length });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'get campaign clickers');
+  }
+});
+
+const createProxyJobSchema = z.object({
+  pageSlug: z.string().min(1),
+  campaignId: z.string().min(1),
+  contactIds: z.array(z.string().min(1)).min(1).max(500),
+  utmDefaults: z.object({
+    utmSource: z.string().optional(),
+    utmMedium: z.string().optional(),
+    utmCampaign: z.string().optional(),
+    utmTerm: z.string().optional(),
+    utmContent: z.string().optional(),
+  }).optional(),
+  minDelayMs: z.number().int().min(1000).max(60000).optional(),
+  maxDelayMs: z.number().int().min(2000).max(120000).optional(),
+});
+
+/**
+ * POST /proxy-submissions/jobs
+ * Create a proxy form submission job from selected campaign clickers
+ */
+router.post("/proxy-submissions/jobs", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const parsed = createProxyJobSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    const userId = (req as any).userId || (req as any).user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+
+    const { pageSlug, campaignId, contactIds, utmDefaults, minDelayMs, maxDelayMs } = parsed.data;
+
+    const result = await createProxySubmissionJob({
+      pageSlug,
+      campaignId,
+      createdBy: userId,
+      contactIds,
+      utmDefaults,
+      minDelayMs,
+      maxDelayMs,
+    });
+
+    // Start processing in the background (non-blocking)
+    processProxySubmissionJob(result.jobId).catch((err) =>
+      console.error(`[ProxyFormSubmit] Background processing failed for job ${result.jobId}:`, err)
+    );
+
+    return res.status(201).json({
+      message: 'Proxy submission job created and processing started',
+      jobId: result.jobId,
+      itemCount: result.itemCount,
+    });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'create proxy submission job');
+  }
+});
+
+/**
+ * GET /proxy-submissions/jobs
+ * List proxy submission jobs (optionally filtered by campaignId)
+ */
+router.get("/proxy-submissions/jobs", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const campaignId = req.query.campaignId as string | undefined;
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const jobs = await listProxySubmissionJobs(campaignId, limit);
+    return res.json({ jobs });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'list proxy submission jobs');
+  }
+});
+
+/**
+ * GET /proxy-submissions/jobs/:jobId
+ * Get detailed status of a specific job including item-level results
+ */
+router.get("/proxy-submissions/jobs/:jobId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const job = await getProxySubmissionJobStatus(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+    return res.json(job);
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'get proxy submission job');
+  }
+});
+
+/**
+ * POST /proxy-submissions/jobs/:jobId/cancel
+ * Cancel a pending or processing job
+ */
+router.post("/proxy-submissions/jobs/:jobId/cancel", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const cancelled = await cancelProxySubmissionJob(req.params.jobId);
+    if (!cancelled) {
+      return res.status(400).json({ error: 'Job cannot be cancelled (not in pending/processing state)' });
+    }
+    return res.json({ message: 'Job cancelled', jobId: req.params.jobId });
+  } catch (error: any) {
+    return sendGenerativeStudioError(res, error, 'cancel proxy submission job');
+  }
+});
+
 export default router;

@@ -14691,6 +14691,128 @@ export type ContentPromotionPageView = typeof contentPromotionPageViews.$inferSe
 export type InsertContentPromotionPageView = z.infer<typeof insertContentPromotionPageViewSchema>;
 
 // ============================================================
+// PROXY FORM SUBMISSION (Email Campaign → Landing Page Engagement)
+// ============================================================
+
+export const proxySubmissionJobStatusEnum = pgEnum("proxy_submission_job_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export const proxySubmissionItemStatusEnum = pgEnum("proxy_submission_item_status", [
+  "queued",
+  "submitting",
+  "submitted",
+  "failed",
+  "skipped",
+]);
+
+/** Batch job: proxy-submit N contacts through a landing page form */
+export const proxyFormSubmissionJobs = pgTable("proxy_form_submission_jobs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  /** Published landing page to submit against */
+  pageSlug: text("page_slug").notNull(),
+  /** Campaign that sourced the clickers */
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  /** Who triggered this job */
+  createdBy: varchar("created_by").references(() => users.id).notNull(),
+  status: proxySubmissionJobStatusEnum("status").notNull().default("pending"),
+  /** Total items queued */
+  totalItems: integer("total_items").notNull().default(0),
+  /** Items successfully submitted */
+  completedItems: integer("completed_items").notNull().default(0),
+  /** Items that failed */
+  failedItems: integer("failed_items").notNull().default(0),
+  /** Pacing: min/max delay (ms) between submissions for natural cadence */
+  minDelayMs: integer("min_delay_ms").notNull().default(3000),
+  maxDelayMs: integer("max_delay_ms").notNull().default(15000),
+  /** UTM overrides applied to all items in this batch */
+  utmDefaults: jsonb("utm_defaults").$type<{
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    utmTerm?: string;
+    utmContent?: string;
+  }>(),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  statusIdx: index("proxy_sub_jobs_status_idx").on(table.status),
+  campaignIdx: index("proxy_sub_jobs_campaign_idx").on(table.campaignId),
+  createdByIdx: index("proxy_sub_jobs_created_by_idx").on(table.createdBy),
+  createdAtIdx: index("proxy_sub_jobs_created_at_idx").on(table.createdAt),
+}));
+
+/** Individual item inside a proxy submission batch */
+export const proxyFormSubmissionItems = pgTable("proxy_form_submission_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  jobId: varchar("job_id").references(() => proxyFormSubmissionJobs.id, { onDelete: 'cascade' }).notNull(),
+  /** Contact to submit (optional — can also use raw data) */
+  contactId: varchar("contact_id").references(() => contacts.id, { onDelete: 'set null' }),
+  status: proxySubmissionItemStatusEnum("status").notNull().default("queued"),
+  /** Form field values to submit */
+  formPayload: jsonb("form_payload").notNull().$type<{
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    name?: string;
+    company?: string;
+    jobTitle?: string;
+    phone?: string;
+  }>(),
+  /** USA IP that was actually used for this submission */
+  usedIpAddress: varchar("used_ip_address", { length: 45 }),
+  /** USA state/region for the IP */
+  usedIpRegion: varchar("used_ip_region", { length: 100 }),
+  /** User-Agent string used */
+  usedUserAgent: text("used_user_agent"),
+  /** ID of the resulting contentPromotionPageView record */
+  resultPageViewId: varchar("result_page_view_id"),
+  /** Processing timestamps */
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+  /** Retry tracking */
+  attemptCount: integer("attempt_count").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  jobIdx: index("proxy_sub_items_job_idx").on(table.jobId),
+  statusIdx: index("proxy_sub_items_status_idx").on(table.status),
+  contactIdx: index("proxy_sub_items_contact_idx").on(table.contactId),
+}));
+
+export const insertProxyFormSubmissionJobSchema = createInsertSchema(proxyFormSubmissionJobs).omit({
+  id: true,
+  completedItems: true,
+  failedItems: true,
+  startedAt: true,
+  completedAt: true,
+  errorMessage: true,
+  createdAt: true,
+});
+
+export const insertProxyFormSubmissionItemSchema = createInsertSchema(proxyFormSubmissionItems).omit({
+  id: true,
+  usedIpAddress: true,
+  usedIpRegion: true,
+  usedUserAgent: true,
+  resultPageViewId: true,
+  submittedAt: true,
+  errorMessage: true,
+  attemptCount: true,
+  createdAt: true,
+});
+
+export type ProxyFormSubmissionJob = typeof proxyFormSubmissionJobs.$inferSelect;
+export type InsertProxyFormSubmissionJob = z.infer<typeof insertProxyFormSubmissionJobSchema>;
+export type ProxyFormSubmissionItem = typeof proxyFormSubmissionItems.$inferSelect;
+export type InsertProxyFormSubmissionItem = z.infer<typeof insertProxyFormSubmissionItemSchema>;
+
+// ============================================================
 // ADMIN TO-DO BOARD
 // ============================================================
 

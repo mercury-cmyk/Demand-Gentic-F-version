@@ -23,9 +23,12 @@ router.get("/", async (_req: Request, res: Response) => {
   try {
     const payload = await getAiGovernanceUiPayload();
     res.json(payload);
-  } catch (error) {
+  } catch (error: any) {
     console.error("[AiGovernance] Failed to load governance config:", error);
-    res.status(500).json({ message: "Failed to load AI governance configuration" });
+    res.status(500).json({
+      message: "Failed to load AI governance configuration",
+      detail: process.env.NODE_ENV !== "production" ? error?.message : undefined,
+    });
   }
 });
 
