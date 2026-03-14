@@ -13,7 +13,7 @@
  */
 
 import { db } from "../db";
-import { googleCloudAccounts, GoogleCloudAccount } from "@shared/schema";
+import { googleCloudAccounts, GoogleCloudAccount, gcpMigrationChecklist } from "@shared/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { encryptJson, decryptJson } from "../lib/encryption";
 import { clearSecretCache } from "./secret-loader";
@@ -789,4 +789,165 @@ export async function getAccountById(id: string): Promise<Omit<GoogleCloudAccoun
   if (!row) return null;
   const { serviceAccountJson: _sa, ...rest } = row;
   return rest;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PERSISTENT MIGRATION CHECKLIST
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Persist a generated checklist to the DB.
+ * Upserts: new items get "pending", existing items keep their saved status.
+ */
+export async function persistChecklist(
+  accountId: string,
+  items: Array<{ id: string; category: string; area: string; description: string; detail?: string; status: string }>
+): Promise<void> {
+  // Load existing items so we don't overwrite completed status
+  const existing = await db
+    .select({ itemId: gcpMigrationChecklist.itemId, status: gcpMigrationChecklist.status })
+    .from(gcpMigrationChecklist)
+    .where(eq(gcpMigrationChecklist.accountId, accountId));
+
+  const existingMap = new Map(existing.map(e => [e.itemId, e.status]));
+
+  for (const item of items) {
+    const saved = existingMap.get(item.id);
+    if (saved) {
+      // Update description/detail (checklist may have new wording) but keep user status
+      await db
+        .update(gcpMigrationChecklist)
+        .set({
+          category: item.category,
+          area: item.area,
+          description: item.description,
+          detail: item.detail || null,
+          updatedAt: new Date(),
+          // If item was auto-managed and now ok, mark it completed
+          ...(item.category === "auto" && item.status === "ok"
+            ? { status: "completed", completedAt: new Date(), completedBy: "system" }
+            : {}),
+        })
+        .where(
+          and(
+            eq(gcpMigrationChecklist.accountId, accountId),
+            eq(gcpMigrationChecklist.itemId, item.id)
+          )
+        );
+    } else {
+      // New item
+      await db.insert(gcpMigrationChecklist).values({
+        accountId,
+        itemId: item.id,
+        category: item.category,
+        area: item.area,
+        description: item.description,
+        detail: item.detail || null,
+        status: item.category === "auto" && item.status === "ok" ? "completed" : "pending",
+        completedAt: item.category === "auto" && item.status === "ok" ? new Date() : null,
+        completedBy: item.category === "auto" && item.status === "ok" ? "system" : null,
+      });
+    }
+  }
+}
+
+/**
+ * Load the persisted checklist, merging with the generated template
+ * so new items appear and removed items are pruned.
+ */
+export async function loadPersistedChecklist(accountId: string) {
+  const rows = await db
+    .select()
+    .from(gcpMigrationChecklist)
+    .where(eq(gcpMigrationChecklist.accountId, accountId));
+
+  return rows;
+}
+
+/**
+ * Update a single checklist item's status.
+ */
+export async function updateChecklistItem(
+  accountId: string,
+  itemId: string,
+  status: "pending" | "in_progress" | "completed" | "skipped" | "not_applicable",
+  userId: string,
+  notes?: string
+): Promise<{ ok: boolean; error?: string }> {
+  const [existing] = await db
+    .select()
+    .from(gcpMigrationChecklist)
+    .where(
+      and(
+        eq(gcpMigrationChecklist.accountId, accountId),
+        eq(gcpMigrationChecklist.itemId, itemId)
+      )
+    )
+    .limit(1);
+
+  if (!existing) {
+    return { ok: false, error: `Checklist item '${itemId}' not found for this account` };
+  }
+
+  await db
+    .update(gcpMigrationChecklist)
+    .set({
+      status,
+      completedAt: status === "completed" ? new Date() : existing.completedAt,
+      completedBy: status === "completed" ? userId : existing.completedBy,
+      notes: notes !== undefined ? notes : existing.notes,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(gcpMigrationChecklist.accountId, accountId),
+        eq(gcpMigrationChecklist.itemId, itemId)
+      )
+    );
+
+  return { ok: true };
+}
+
+/**
+ * Get a merged checklist: generated template + persisted state.
+ * Returns items with their saved status, notes, and completion info.
+ */
+export async function getMergedChecklist(account: GoogleCloudAccount) {
+  // Generate the template (always up-to-date with code)
+  const template = await generateMigrationChecklist(account);
+
+  // Load persisted state
+  const saved = await loadPersistedChecklist(account.id);
+  const savedMap = new Map(saved.map(s => [s.itemId, s]));
+
+  // Merge: template items get their saved status if available
+  const mergedItems = template.items.map(item => {
+    const persisted = savedMap.get(item.id);
+    if (persisted) {
+      return {
+        ...item,
+        status: persisted.status,
+        completedAt: persisted.completedAt,
+        completedBy: persisted.completedBy,
+        notes: persisted.notes,
+      };
+    }
+    return { ...item, status: item.status === "ok" ? "completed" : "pending", completedAt: null, completedBy: null, notes: null };
+  });
+
+  const summary = {
+    total: mergedItems.length,
+    completed: mergedItems.filter(i => i.status === "completed").length,
+    pending: mergedItems.filter(i => i.status === "pending").length,
+    inProgress: mergedItems.filter(i => i.status === "in_progress").length,
+    skipped: mergedItems.filter(i => i.status === "skipped" || i.status === "not_applicable").length,
+  };
+
+  return {
+    accountName: template.accountName,
+    projectId: template.projectId,
+    timestamp: new Date().toISOString(),
+    items: mergedItems,
+    summary,
+  };
 }

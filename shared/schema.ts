@@ -16339,3 +16339,34 @@ export const insertGoogleCloudAccountSchema = createInsertSchema(googleCloudAcco
 export type GoogleCloudAccount = typeof googleCloudAccounts.$inferSelect;
 export type InsertGoogleCloudAccount = z.infer<typeof insertGoogleCloudAccountSchema>;
 
+// GCP Migration Checklist — persistent tracking of migration items per account
+export const gcpMigrationChecklistStatusEnum = pgEnum("gcp_migration_checklist_status", [
+  "pending",
+  "in_progress",
+  "completed",
+  "skipped",
+  "not_applicable",
+]);
+
+export const gcpMigrationChecklist = pgTable("gcp_migration_checklist", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id", { length: 36 }).notNull(),
+  itemId: varchar("item_id", { length: 100 }).notNull(),        // e.g. "api_aiplatform", "telnyx_sip_ip"
+  category: varchar("category", { length: 20 }).notNull(),       // "auto" | "manual"
+  area: varchar("area", { length: 100 }).notNull(),              // e.g. "GCP APIs", "Telnyx SIP"
+  description: text("description").notNull(),
+  detail: text("detail"),
+  status: gcpMigrationChecklistStatusEnum("status").notNull().default("pending"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  completedBy: varchar("completed_by", { length: 36 }),
+  notes: text("notes"),                                           // user notes on what was done
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  accountItemIdx: index("gmc_account_item_idx").on(table.accountId, table.itemId),
+  accountIdx: index("gmc_account_idx").on(table.accountId),
+}));
+
+export type GcpMigrationChecklistItem = typeof gcpMigrationChecklist.$inferSelect;
+export type InsertGcpMigrationChecklistItem = typeof gcpMigrationChecklist.$inferInsert;
+

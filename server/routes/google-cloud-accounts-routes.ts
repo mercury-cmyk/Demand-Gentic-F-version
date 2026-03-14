@@ -8,7 +8,9 @@
  * DELETE /api/google-cloud-accounts/:id          delete account
  * POST   /api/google-cloud-accounts/:id/activate  health-check + hot-swap + migration checklist
  * POST   /api/google-cloud-accounts/:id/health-check  health-check only (no switch)
- * GET    /api/google-cloud-accounts/:id/migration-checklist  what needs attention
+ * GET    /api/google-cloud-accounts/:id/migration-checklist      persistent checklist with status
+ * PATCH  /api/google-cloud-accounts/:id/migration-checklist/:itemId  update single item status
+ * PATCH  /api/google-cloud-accounts/:id/migration-checklist      bulk update item statuses
  */
 
 import { Router, Request, Response } from "express";
@@ -23,6 +25,9 @@ import {
   getAccountById,
   encryptServiceAccount,
   generateMigrationChecklist,
+  persistChecklist,
+  updateChecklistItem,
+  getMergedChecklist,
 } from "../services/google-account-manager";
 
 const router = Router();
@@ -242,13 +247,17 @@ router.post("/:id/activate", requireAuth, async (req: Request, res: Response) =>
 
     let migrationChecklist = null;
     if (account) {
-      migrationChecklist = await generateMigrationChecklist(account);
+      const template = await generateMigrationChecklist(account);
       // Mark auto-managed items as ok since applyAccount just ran
-      for (const item of migrationChecklist.items) {
+      for (const item of template.items) {
         if (item.category === "auto") item.status = "ok";
       }
-      migrationChecklist.summary.ok = migrationChecklist.items.filter(i => i.status === "ok").length;
-      migrationChecklist.summary.actionNeeded = migrationChecklist.items.filter(i => i.status === "action_needed").length;
+      // Persist to DB (upserts — new items get "pending", auto items get "completed")
+      await persistChecklist(account.id, template.items).catch(err => {
+        console.warn("[GcpAccountManager] Failed to persist checklist:", err.message);
+      });
+      // Return the merged (persisted) checklist
+      migrationChecklist = await getMergedChecklist(account);
     }
 
     res.json({ ...result, migrationChecklist });
@@ -257,7 +266,7 @@ router.post("/:id/activate", requireAuth, async (req: Request, res: Response) =>
   }
 });
 
-// ── MIGRATION CHECKLIST (read-only — shows what needs attention) ────────────
+// ── MIGRATION CHECKLIST (read — shows persisted state merged with template) ─
 router.get("/:id/migration-checklist", requireAuth, async (req: Request, res: Response) => {
   try {
     const [account] = await db
@@ -268,8 +277,67 @@ router.get("/:id/migration-checklist", requireAuth, async (req: Request, res: Re
 
     if (!account) return res.status(404).json({ error: "Not found" });
 
-    const checklist = await generateMigrationChecklist(account);
+    // Ensure items are persisted (in case this account was never activated through the new flow)
+    const template = await generateMigrationChecklist(account);
+    await persistChecklist(account.id, template.items).catch(() => {});
+
+    const checklist = await getMergedChecklist(account);
     res.json(checklist);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── UPDATE CHECKLIST ITEM ─────────────────────────────────────────────────
+// PATCH /api/google-cloud-accounts/:id/migration-checklist/:itemId
+router.patch("/:id/migration-checklist/:itemId", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id, itemId } = req.params;
+    const { status, notes } = req.body;
+    const userId = (req as any).user?.id || "system";
+
+    const validStatuses = ["pending", "in_progress", "completed", "skipped", "not_applicable"];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
+    }
+
+    const result = await updateChecklistItem(id, itemId, status, userId, notes);
+    if (!result.ok) {
+      return res.status(404).json({ error: result.error });
+    }
+
+    res.json({ ok: true, itemId, status, updatedBy: userId });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── BULK UPDATE CHECKLIST ITEMS ───────────────────────────────────────────
+// PATCH /api/google-cloud-accounts/:id/migration-checklist
+router.patch("/:id/migration-checklist", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { updates } = req.body;
+    const userId = (req as any).user?.id || "system";
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: "updates array is required: [{ itemId, status, notes? }]" });
+    }
+
+    const validStatuses = ["pending", "in_progress", "completed", "skipped", "not_applicable"];
+    const results: Array<{ itemId: string; ok: boolean; error?: string }> = [];
+
+    for (const upd of updates) {
+      if (!upd.itemId || !upd.status || !validStatuses.includes(upd.status)) {
+        results.push({ itemId: upd.itemId || "unknown", ok: false, error: "Invalid itemId or status" });
+        continue;
+      }
+      const r = await updateChecklistItem(id, upd.itemId, upd.status, userId, upd.notes);
+      results.push({ itemId: upd.itemId, ...r });
+    }
+
+    const succeeded = results.filter(r => r.ok).length;
+    res.json({ totalProcessed: results.length, succeeded, failed: results.length - succeeded, results });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
