@@ -44,6 +44,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
+import { cn } from "@/lib/utils";
 import { SidebarFilters } from "@/components/filters/sidebar-filters";
 import type { FilterGroup } from "@shared/filter-types";
 
@@ -54,6 +55,12 @@ interface CampaignIntent {
   fromEmail: string;
   replyToEmail: string;
   subject: string;
+  preheader?: string;
+  campaignProviderId?: string | null;
+  campaignProviderName?: string | null;
+  campaignProviderKey?: string | null;
+  domainAuthId?: number | null;
+  domainName?: string | null;
   // Project & org context carried from Step 1
   clientAccountId?: string;
   clientName?: string;
@@ -377,6 +384,14 @@ export function AudienceSendPage({
     }
     return "Not selected";
   }, [audienceType, selectedSegment, selectedList, segments, lists]);
+
+  const launchReadiness = useMemo(() => {
+    const senderReady = Boolean(campaignIntent.senderProfileId && campaignIntent.fromEmail);
+    const routingReady = Boolean(campaignIntent.campaignProviderName || campaignIntent.campaignProviderKey || campaignIntent.senderProfileId);
+    const complianceReady = Boolean(campaignIntent.replyToEmail);
+    const trackingReady = Boolean(template.subject && template.htmlContent);
+    return { senderReady, routingReady, complianceReady, trackingReady };
+  }, [campaignIntent, template]);
   
   // Handle launch
   const handleLaunch = async () => {
@@ -440,6 +455,51 @@ export function AudienceSendPage({
       </div>
       
       <div className="max-w-4xl mx-auto py-8 px-4 space-y-6">
+        <Card className="shadow-sm border-slate-200 bg-[linear-gradient(135deg,#ffffff_0%,#f8fbff_100%)]">
+          <CardContent className="p-5">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Provider Route</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">
+                    {campaignIntent.campaignProviderName || campaignIntent.campaignProviderKey || "Default routing"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">{campaignIntent.domainName || "Sender-linked domain"}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Sender Envelope</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">{campaignIntent.senderName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{campaignIntent.fromEmail}</p>
+                  <p className="mt-1 text-xs text-slate-500">Reply-to: {campaignIntent.replyToEmail}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Message Setup</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-950">{template.subject}</p>
+                  <p className="mt-1 text-xs text-slate-500">{campaignIntent.preheader || template.preheader || "No preview text"}</p>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-slate-200 bg-slate-950 p-5 text-white">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Activation Readiness</p>
+                <div className="mt-4 space-y-2">
+                  {[
+                    { label: "Sender and route", ready: launchReadiness.senderReady && launchReadiness.routingReady },
+                    { label: "Reply and compliance", ready: launchReadiness.complianceReady },
+                    { label: "Tracking and reports", ready: launchReadiness.trackingReady },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs">
+                      <span>{item.label}</span>
+                      <Badge className={cn("border text-[11px]", item.ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700")}>
+                        {item.ready ? "ready" : "review"}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Step 0: Client & Project */}
         <Card className="shadow-sm">
           <CardHeader className="pb-4">
@@ -864,6 +924,39 @@ export function AudienceSendPage({
                     </div>
                   )}
                 </div>
+                <div className="p-3 bg-slate-50 rounded-lg">
+                  <Label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Provider Route</Label>
+                  <p className="text-sm font-medium text-slate-900 mt-1">
+                    {campaignIntent.campaignProviderName || campaignIntent.campaignProviderKey || "Default routing"}
+                  </p>
+                  <p className="text-xs text-slate-500">{campaignIntent.domainName || "Sender-linked domain"}</p>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-lg">
+                  <Label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Reply + Preview</Label>
+                  <p className="text-sm font-medium text-slate-900 mt-1">{campaignIntent.replyToEmail}</p>
+                  <p className="text-xs text-slate-500 line-clamp-2">{campaignIntent.preheader || template.preheader || "No preview text"}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Tracking and Reporting</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    Launch feeds open, click, unsubscribe, and recipient activity into campaign reporting. Link performance and engagement tabs stay aligned to the send pipeline.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Compliance and Suppression</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    Unsubscribe controls, blacklist checks, and audience suppression logic remain enforced at send time. Reply-to and sender identity are already locked into the route.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Landing Page Readiness</p>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    CTA links built in the template step can carry merge-tag prefill values so registrations and follow-on forms open with known contact data already attached.
+                  </p>
+                </div>
               </div>
               
               {/* Template Preview Button */}
@@ -905,7 +998,7 @@ export function AudienceSendPage({
               {isValid && (
                 <div className="flex items-center gap-2 text-green-600">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span className="text-sm">Ready to launch</span>
+                  <span className="text-sm">Ready to launch with tracking, suppression, and route controls in place</span>
                 </div>
               )}
             </div>

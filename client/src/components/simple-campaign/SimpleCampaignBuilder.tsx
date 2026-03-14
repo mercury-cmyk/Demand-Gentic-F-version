@@ -82,6 +82,7 @@ export function SimpleCampaignBuilder({
         fromEmail: initialCampaign.fromEmail || "",
         replyToEmail: initialCampaign.replyToEmail || "",
         subject: initialCampaign.emailSubject || "",
+        preheader: initialCampaign.emailPreheader || "",
         // Client & project preserved from campaign record
         clientAccountId: initialCampaign.clientAccountId || "",
         clientName: initialCampaign.clientName || "",
@@ -114,7 +115,7 @@ export function SimpleCampaignBuilder({
     setCampaignIntent(intent);
     setTemplate(prev => ({
       subject: intent.subject,
-      preheader: prev?.preheader || "",
+      preheader: intent.preheader || prev?.preheader || "",
       bodyContent: prev?.bodyContent || "",
       htmlContent: prev?.htmlContent || ""
     }));

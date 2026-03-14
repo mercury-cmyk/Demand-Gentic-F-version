@@ -1,27 +1,68 @@
-/**
- * CampaignIntentForm - Page 1 of Simple Campaign Builder
- *
- * Collects campaign intent: name, sender settings, subject line,
- * and links to a client + project for contextual email generation.
- */
-
-import { useState, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { useEffect, useMemo, useState } from "react";
+import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Sparkles, Mail, ArrowRight, User, AlertCircle, CheckCircle2, Building2, FolderOpen } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import {
+  AlertCircle,
+  ArrowRight,
+  Bot,
+  Building2,
+  CheckCircle2,
+  FolderOpen,
+  Globe,
+  Loader2,
+  Mail,
+  Radar,
+  ShieldCheck,
+  Sparkles,
+  User,
+} from "lucide-react";
 
-interface SenderProfile {
+const DEFAULT_PROVIDER_OPTION = "default-routing";
+const AUTO_DOMAIN_OPTION = "auto-domain";
+
+interface CampaignProvider {
+  id: string;
+  providerKey: string;
+  name: string;
+  transport: "mailgun_api" | "brevo_api" | "smtp";
+  isEnabled: boolean;
+  isDefault: boolean;
+  healthStatus: string;
+  replyToEmail: string | null;
+}
+
+interface ManagedDomain {
+  id: number;
+  domain: string;
+  spfStatus: "pending" | "verified" | "failed";
+  dkimStatus: "pending" | "verified" | "failed";
+  dmarcStatus: "pending" | "verified" | "failed";
+  trackingDomainStatus: "pending" | "verified" | "failed";
+  healthScore: number | null;
+  campaignProviderId: string | null;
+}
+
+interface ManagedSenderProfile {
   id: string;
   name: string;
-  email: string;
-  replyTo?: string;
-  isVerified: boolean;
+  fromName: string;
+  fromEmail: string;
+  replyTo: string | null;
+  replyToEmail: string | null;
+  isDefault: boolean | null;
+  isActive: boolean | null;
+  isVerified: boolean | null;
+  warmupStatus: string | null;
+  domainAuthId: number | null;
+  campaignProviderId: string | null;
+  campaignProvider: CampaignProvider | null;
 }
 
 interface ClientAccount {
@@ -45,7 +86,12 @@ export interface CampaignIntent {
   fromEmail: string;
   replyToEmail: string;
   subject: string;
-  // Client & Project context
+  preheader: string;
+  campaignProviderId?: string | null;
+  campaignProviderName?: string | null;
+  campaignProviderKey?: string | null;
+  domainAuthId?: number | null;
+  domainName?: string | null;
   clientAccountId: string;
   clientName: string;
   projectId: string;
@@ -60,68 +106,156 @@ interface CampaignIntentFormProps {
   onCancel: () => void;
 }
 
+function toneForStatus(status?: string | null) {
+  if (status === "healthy" || status === "verified") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "failed" || status === "degraded") return "border-red-200 bg-red-50 text-red-700";
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function providerLabel(provider?: CampaignProvider | null) {
+  if (!provider) return "Default routing";
+  if (provider.providerKey === "mailgun") return "Mailgun";
+  if (provider.providerKey === "brevo") return "Brevo";
+  if (provider.providerKey === "brainpool") return "Brainpool";
+  return provider.name;
+}
+
+function domainReady(domain?: ManagedDomain | null) {
+  if (!domain) return false;
+  return domain.spfStatus === "verified" && domain.dkimStatus === "verified" && domain.dmarcStatus === "verified";
+}
+
+function warmupLabel(status?: string | null) {
+  if (status === "completed") return "Warm-up complete";
+  if (status === "in_progress") return "Warm-up in progress";
+  if (status === "paused") return "Warm-up paused";
+  return "Warm-up not started";
+}
+
 export function CampaignIntentForm({ initialData, onNext, onCancel }: CampaignIntentFormProps) {
   const { toast } = useToast();
 
-  // Form state
   const [campaignName, setCampaignName] = useState(initialData?.campaignName || "");
-  const [senderProfileId, setSenderProfileId] = useState(initialData?.senderProfileId || "");
   const [subject, setSubject] = useState(initialData?.subject || "");
+  const [preheader, setPreheader] = useState(initialData?.preheader || "");
+  const [replyToEmail, setReplyToEmail] = useState(initialData?.replyToEmail || "");
 
-  // Sender profile state
-  const [senderProfiles, setSenderProfiles] = useState<SenderProfile[]>([]);
-  const [loadingProfiles, setLoadingProfiles] = useState(true);
-  const [selectedProfile, setSelectedProfile] = useState<SenderProfile | null>(null);
+  const [providers, setProviders] = useState<CampaignProvider[]>([]);
+  const [domains, setDomains] = useState<ManagedDomain[]>([]);
+  const [senders, setSenders] = useState<ManagedSenderProfile[]>([]);
+  const [loadingRouting, setLoadingRouting] = useState(true);
 
-  // Client & project state
+  const [selectedProviderId, setSelectedProviderId] = useState(initialData?.campaignProviderId || DEFAULT_PROVIDER_OPTION);
+  const [selectedDomainId, setSelectedDomainId] = useState(initialData?.domainAuthId ? String(initialData.domainAuthId) : AUTO_DOMAIN_OPTION);
+  const [senderProfileId, setSenderProfileId] = useState(initialData?.senderProfileId || "");
+
   const [clientAccounts, setClientAccounts] = useState<ClientAccount[]>([]);
   const [clientProjects, setClientProjects] = useState<ClientProject[]>([]);
   const [selectedClientId, setSelectedClientId] = useState(initialData?.clientAccountId || "");
   const [selectedProjectId, setSelectedProjectId] = useState(initialData?.projectId || "");
-  const [selectedProject, setSelectedProject] = useState<ClientProject | null>(null);
   const [loadingClients, setLoadingClients] = useState(true);
   const [loadingProjects, setLoadingProjects] = useState(false);
-
-  // AI suggestion state
   const [aiSuggesting, setAiSuggesting] = useState(false);
 
-  // Fetch sender profiles
-  useEffect(() => {
-    const fetchSenderProfiles = async () => {
-      try {
-        setLoadingProfiles(true);
-        const res = await apiRequest("GET", "/api/sender-profiles");
-        const profiles = await res.json();
-        setSenderProfiles(profiles || []);
+  const selectedProject = useMemo(
+    () => clientProjects.find((project) => project.id === selectedProjectId) || null,
+    [clientProjects, selectedProjectId]
+  );
 
-        if (!senderProfileId && profiles?.length > 0) {
-          const verifiedProfile = profiles.find((p: SenderProfile) => p.isVerified);
-          if (verifiedProfile) {
-            setSenderProfileId(verifiedProfile.id);
-            setSelectedProfile(verifiedProfile);
-          }
-        } else if (senderProfileId) {
-          const existing = profiles.find((p: SenderProfile) => p.id === senderProfileId);
-          if (existing) setSelectedProfile(existing);
+  const selectedProvider = useMemo(
+    () => providers.find((provider) => provider.id === selectedProviderId) || null,
+    [providers, selectedProviderId]
+  );
+
+  const availableDomains = useMemo(
+    () => selectedProviderId === DEFAULT_PROVIDER_OPTION
+      ? domains
+      : domains.filter((domain) => domain.campaignProviderId === selectedProviderId),
+    [domains, selectedProviderId]
+  );
+
+  const selectedDomain = useMemo(
+    () => (selectedDomainId === AUTO_DOMAIN_OPTION ? null : domains.find((domain) => String(domain.id) === selectedDomainId) || null),
+    [domains, selectedDomainId]
+  );
+
+  const availableSenders = useMemo(() => {
+    return senders.filter((sender) => {
+      if (sender.isActive === false) return false;
+      if (selectedProviderId !== DEFAULT_PROVIDER_OPTION && sender.campaignProviderId !== selectedProviderId) return false;
+      if (selectedDomainId !== AUTO_DOMAIN_OPTION && String(sender.domainAuthId || "") !== selectedDomainId) return false;
+      return true;
+    });
+  }, [selectedDomainId, selectedProviderId, senders]);
+
+  const selectedSender = useMemo(
+    () => senders.find((sender) => sender.id === senderProfileId) || null,
+    [senders, senderProfileId]
+  );
+
+  const providerSummary = selectedProvider || selectedSender?.campaignProvider || providers.find((provider) => provider.isDefault) || null;
+  const domainSummary = selectedDomain || domains.find((domain) => domain.id === selectedSender?.domainAuthId) || null;
+
+  useEffect(() => {
+    const loadRouting = async () => {
+      try {
+        setLoadingRouting(true);
+        const [providersRes, domainsRes, sendersRes] = await Promise.all([
+          apiRequest("GET", "/api/email-management/providers"),
+          apiRequest("GET", "/api/email-management/domains"),
+          apiRequest("GET", "/api/email-management/sender-profiles"),
+        ]);
+
+        const [providerData, domainData, senderData] = await Promise.all([
+          providersRes.json(),
+          domainsRes.json(),
+          sendersRes.json(),
+        ]);
+
+        const activeProviders = (providerData || []).filter((provider: CampaignProvider) => provider.isEnabled !== false);
+        const activeSenders = (senderData || []).filter((sender: ManagedSenderProfile) => sender.isActive !== false);
+
+        setProviders(activeProviders);
+        setDomains(domainData || []);
+        setSenders(activeSenders);
+
+        const defaultSender = activeSenders.find((sender: ManagedSenderProfile) => sender.id === initialData?.senderProfileId)
+          || activeSenders.find((sender: ManagedSenderProfile) => sender.isDefault)
+          || activeSenders.find((sender: ManagedSenderProfile) => sender.isVerified)
+          || activeSenders[0]
+          || null;
+        const defaultProvider = activeProviders.find((provider: CampaignProvider) => provider.isDefault) || activeProviders[0] || null;
+
+        if (!senderProfileId && defaultSender) {
+          setSenderProfileId(defaultSender.id);
+          setReplyToEmail(initialData?.replyToEmail || defaultSender.replyToEmail || defaultSender.replyTo || defaultSender.fromEmail);
+        }
+        if (!initialData?.campaignProviderId && defaultSender?.campaignProviderId) {
+          setSelectedProviderId(defaultSender.campaignProviderId);
+        } else if (!initialData?.campaignProviderId && defaultProvider) {
+          setSelectedProviderId(defaultProvider.id);
+        }
+        if (!initialData?.domainAuthId && defaultSender?.domainAuthId) {
+          setSelectedDomainId(String(defaultSender.domainAuthId));
         }
       } catch (error) {
-        console.error("Failed to fetch sender profiles:", error);
+        console.error("Failed to load routing data:", error);
+        toast({ title: "Routing unavailable", description: "Could not load providers, domains, or senders.", variant: "destructive" });
       } finally {
-        setLoadingProfiles(false);
+        setLoadingRouting(false);
       }
     };
-    fetchSenderProfiles();
+
+    loadRouting();
   }, []);
 
-  // Fetch client accounts
   useEffect(() => {
-    const fetchClients = async () => {
+    const loadClients = async () => {
       setLoadingClients(true);
       try {
-        const res = await apiRequest("GET", "/api/client-portal/admin/clients");
-        if (!res.ok) throw new Error("Failed to load clients");
-        const data = await res.json();
-        setClientAccounts(data || []);
+        const response = await apiRequest("GET", "/api/client-portal/admin/clients");
+        if (!response.ok) throw new Error("Failed to load clients");
+        setClientAccounts(await response.json());
       } catch (error) {
         console.error("Failed to load clients:", error);
         setClientAccounts([]);
@@ -129,125 +263,118 @@ export function CampaignIntentForm({ initialData, onNext, onCancel }: CampaignIn
         setLoadingClients(false);
       }
     };
-    fetchClients();
+
+    loadClients();
   }, []);
 
-  // Fetch projects when client changes
   useEffect(() => {
     if (!selectedClientId) {
       setClientProjects([]);
       setSelectedProjectId("");
-      setSelectedProject(null);
       return;
     }
+
     let active = true;
-    const fetchProjects = async () => {
+    const loadProjects = async () => {
       setLoadingProjects(true);
       try {
-        const res = await apiRequest("GET", `/api/client-portal/admin/clients/${selectedClientId}`);
-        if (!res.ok) throw new Error("Failed to load projects");
-        const data = await res.json();
+        const response = await apiRequest("GET", `/api/client-portal/admin/clients/${selectedClientId}`);
+        if (!response.ok) throw new Error("Failed to load projects");
+        const data = await response.json();
         if (!active) return;
-        const projects: ClientProject[] = data?.projects || [];
+        const projects = data?.projects || [];
         setClientProjects(projects);
-        // Keep existing selection if valid
-        if (selectedProjectId && projects.some(p => p.id === selectedProjectId)) {
-          setSelectedProject(projects.find(p => p.id === selectedProjectId) || null);
-        } else if (projects.length > 0) {
-          setSelectedProjectId(projects[0].id);
-          setSelectedProject(projects[0]);
-        } else {
-          setSelectedProjectId("");
-          setSelectedProject(null);
-        }
+        if (projects.some((project: ClientProject) => project.id === selectedProjectId)) return;
+        setSelectedProjectId(projects[0]?.id || "");
       } catch (error) {
         console.error("Failed to load projects:", error);
         if (active) {
           setClientProjects([]);
           setSelectedProjectId("");
-          setSelectedProject(null);
         }
       } finally {
         if (active) setLoadingProjects(false);
       }
     };
-    fetchProjects();
-    return () => { active = false; };
+
+    loadProjects();
+    return () => {
+      active = false;
+    };
   }, [selectedClientId]);
 
-  // Keep selectedProject in sync when project dropdown changes
   useEffect(() => {
-    if (selectedProjectId) {
-      const project = clientProjects.find(p => p.id === selectedProjectId);
-      setSelectedProject(project || null);
-    } else {
-      setSelectedProject(null);
+    if (selectedDomainId !== AUTO_DOMAIN_OPTION && !availableDomains.some((domain) => String(domain.id) === selectedDomainId)) {
+      setSelectedDomainId(AUTO_DOMAIN_OPTION);
     }
-  }, [selectedProjectId, clientProjects]);
+    if (senderProfileId && availableSenders.some((sender) => sender.id === senderProfileId)) return;
+    const nextSender = availableSenders.find((sender) => sender.isDefault)
+      || availableSenders.find((sender) => sender.isVerified)
+      || availableSenders[0]
+      || null;
+    if (nextSender) {
+      setSenderProfileId(nextSender.id);
+    }
+  }, [availableDomains, availableSenders, selectedDomainId, senderProfileId]);
 
-  const handleProfileChange = (profileId: string) => {
-    setSenderProfileId(profileId);
-    const profile = senderProfiles.find(p => p.id === profileId);
-    setSelectedProfile(profile || null);
-  };
+  useEffect(() => {
+    if (!selectedSender || replyToEmail) return;
+    setReplyToEmail(selectedSender.replyToEmail || selectedSender.replyTo || selectedSender.fromEmail);
+  }, [replyToEmail, selectedSender]);
 
-  const handleClientChange = (clientId: string) => {
-    setSelectedClientId(clientId);
-    setSelectedProjectId("");
-    setSelectedProject(null);
-  };
-
-  // AI Subject suggestion - uses project/org context
   const handleAiSuggestSubject = async () => {
     if (!campaignName.trim()) {
-      toast({
-        title: "Campaign name needed",
-        description: "Enter a campaign name first to get AI suggestions",
-        variant: "destructive"
-      });
+      toast({ title: "Campaign name required", description: "Add a campaign name first.", variant: "destructive" });
       return;
     }
 
     setAiSuggesting(true);
     try {
-      const res = await apiRequest("POST", "/api/ai/suggest-subject", {
+      const response = await apiRequest("POST", "/api/ai/suggest-subject", {
         campaignName,
         projectName: selectedProject?.name,
         projectDescription: selectedProject?.description,
         organizationId: selectedProject?.campaignOrganizationId,
-        clientName: clientAccounts.find(c => c.id === selectedClientId)?.name
+        clientName: clientAccounts.find((client) => client.id === selectedClientId)?.name,
       });
-      const data = await res.json();
-      if (data.subject) {
-        setSubject(data.subject);
-      }
-    } catch (error) {
-      // Fallback: generate a simple subject from campaign name
-      const words = campaignName.split(" ").slice(0, 4).join(" ");
-      setSubject(`Quick question about ${words}`);
+      const data = await response.json();
+      if (data.subject) setSubject(data.subject);
+    } catch {
+      setSubject(`A quick note on ${campaignName.split(" ").slice(0, 4).join(" ")}`);
     } finally {
       setAiSuggesting(false);
     }
   };
 
-  // Validation - require client + project
-  const isValid = campaignName.trim() && senderProfileId && subject.trim() && selectedClientId && selectedProjectId;
+  const isValid = Boolean(
+    campaignName.trim()
+    && subject.trim()
+    && replyToEmail.trim()
+    && senderProfileId
+    && selectedClientId
+    && selectedProjectId
+  );
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isValid || !selectedProfile) return;
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isValid || !selectedSender) return;
 
-    const client = clientAccounts.find(c => c.id === selectedClientId);
-
+    const selectedClient = clientAccounts.find((client) => client.id === selectedClientId) || null;
     onNext({
       campaignName: campaignName.trim(),
-      senderProfileId,
-      senderName: selectedProfile.name,
-      fromEmail: selectedProfile.email,
-      replyToEmail: selectedProfile.replyTo || selectedProfile.email,
+      senderProfileId: selectedSender.id,
+      senderName: selectedSender.fromName || selectedSender.name,
+      fromEmail: selectedSender.fromEmail,
+      replyToEmail: replyToEmail.trim(),
       subject: subject.trim(),
+      preheader: preheader.trim(),
+      campaignProviderId: providerSummary?.id || selectedSender.campaignProviderId || null,
+      campaignProviderName: providerSummary?.name || null,
+      campaignProviderKey: providerSummary?.providerKey || selectedSender.campaignProvider?.providerKey || null,
+      domainAuthId: domainSummary?.id || selectedSender.domainAuthId || null,
+      domainName: domainSummary?.domain || null,
       clientAccountId: selectedClientId,
-      clientName: client?.name || client?.companyName || "",
+      clientName: selectedClient?.name || selectedClient?.companyName || "",
       projectId: selectedProjectId,
       projectName: selectedProject?.name || "",
       projectDescription: selectedProject?.description,
@@ -256,281 +383,310 @@ export function CampaignIntentForm({ initialData, onNext, onCancel }: CampaignIn
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 py-12 px-4">
-      <div className="max-w-xl mx-auto">
-        {/* Page Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-semibold text-slate-900 tracking-tight">
-            Create Email Campaign
-          </h1>
-          <p className="mt-2 text-slate-500">
-            Define your campaign intent. Build the message next.
-          </p>
+    <div className="min-h-screen bg-[linear-gradient(180deg,#f5f8ff_0%,#eef3f8_45%,#f7fafc_100%)] px-4 py-8 md:px-8">
+      <div className="mx-auto max-w-7xl space-y-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-3">
+            <Badge className="w-fit border border-slate-300 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+              Step 1 of 3
+            </Badge>
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">Email Campaign Control Deck</h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Align provider routing, domain readiness, sender identity, reply handling, and inbox strategy before the unified email agent builds the campaign.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              { label: "Routing", value: providerLabel(providerSummary), subtext: "Multi-provider sender bindings" },
+              { label: "Compliance", value: "Suppression + unsubscribe", subtext: "Launch guardrails are surfaced early" },
+              { label: "Personalization", value: "Merge tags ready", subtext: "CTA prefill flow supported" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-white/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">{item.label}</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">{item.value}</p>
+                <p className="mt-1 text-xs text-slate-500">{item.subtext}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <Card className="shadow-lg border-slate-200">
-          <CardContent className="p-8">
-            <form onSubmit={handleSubmit} className="space-y-8">
-
-              {/* Client & Project Section */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                  <Building2 className="w-4 h-4 text-slate-400" />
-                  <Label className="text-sm font-semibold text-slate-700">Client & Project</Label>
+        <form onSubmit={submit} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="space-y-6">
+            <Card className="rounded-[28px] border-white/70 bg-white/90 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)]">
+              <CardContent className="space-y-5 p-6 md:p-8">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-slate-900 p-3 text-white"><Building2 className="h-5 w-5" /></div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">Campaign Context</h2>
+                    <p className="text-sm text-slate-500">Connect the campaign to the client and project that drive AI generation and reporting.</p>
+                  </div>
                 </div>
-                <p className="text-xs text-slate-400 -mt-2">
-                  Link this campaign to a client and project to align email content with project goals.
-                </p>
 
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Client Select */}
+                <div className="grid gap-5 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="client" className="text-xs font-medium text-slate-500">
-                      Client <span className="text-red-500">*</span>
-                    </Label>
+                    <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Client</Label>
                     {loadingClients ? (
-                      <div className="flex items-center justify-center h-10 bg-slate-50 rounded-md border">
-                        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                      </div>
+                      <div className="flex h-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50"><Loader2 className="h-4 w-4 animate-spin text-slate-400" /></div>
                     ) : (
-                      <Select value={selectedClientId} onValueChange={handleClientChange}>
-                        <SelectTrigger className="h-10">
-                          <SelectValue placeholder="Select client" />
-                        </SelectTrigger>
+                      <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                        <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select client" /></SelectTrigger>
                         <SelectContent>
-                          {clientAccounts.length === 0 ? (
-                            <div className="p-3 text-sm text-slate-500">No clients found</div>
-                          ) : (
-                            clientAccounts.map((client) => (
-                              <SelectItem key={client.id} value={client.id}>
-                                {client.name || client.companyName}
-                              </SelectItem>
-                            ))
-                          )}
+                          {clientAccounts.map((client) => <SelectItem key={client.id} value={client.id}>{client.name || client.companyName}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     )}
                   </div>
-
-                  {/* Project Select */}
                   <div className="space-y-2">
-                    <Label htmlFor="project" className="text-xs font-medium text-slate-500">
-                      Project <span className="text-red-500">*</span>
-                    </Label>
+                    <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Project</Label>
                     {!selectedClientId ? (
-                      <div className="h-10 flex items-center px-3 text-xs text-slate-400 bg-slate-50 border rounded-md">
-                        Select client first
-                      </div>
+                      <div className="flex h-14 items-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 text-sm text-slate-400">Choose a client first</div>
                     ) : loadingProjects ? (
-                      <div className="flex items-center justify-center h-10 bg-slate-50 rounded-md border">
-                        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                      </div>
+                      <div className="flex h-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50"><Loader2 className="h-4 w-4 animate-spin text-slate-400" /></div>
                     ) : (
                       <Select value={selectedProjectId} onValueChange={setSelectedProjectId}>
-                        <SelectTrigger className="h-10">
-                          <SelectValue placeholder="Select project" />
-                        </SelectTrigger>
+                        <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select project" /></SelectTrigger>
                         <SelectContent>
-                          {clientProjects.length === 0 ? (
-                            <div className="p-3 text-sm text-slate-500">No projects found</div>
-                          ) : (
-                            clientProjects.map((project) => (
-                              <SelectItem key={project.id} value={project.id}>
-                                {project.name}
-                              </SelectItem>
-                            ))
-                          )}
+                          {clientProjects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     )}
                   </div>
                 </div>
 
-                {/* Project details badge */}
                 {selectedProject && (
-                  <div className="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
-                    <FolderOpen className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-blue-800">{selectedProject.name}</p>
-                      {selectedProject.description && (
-                        <p className="text-xs text-blue-600 mt-0.5 line-clamp-2">{selectedProject.description}</p>
-                      )}
-                      {selectedProject.campaignOrganizationId && (
-                        <Badge variant="secondary" className="mt-1 text-[10px] h-4 bg-blue-100 text-blue-700 border-blue-200">
-                          <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" />
-                          Org intelligence linked
-                        </Badge>
-                      )}
+                  <div className="rounded-3xl border border-blue-100 bg-[linear-gradient(135deg,#eff6ff_0%,#f8fbff_100%)] p-5">
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-2xl bg-white p-2.5 text-blue-600 shadow-sm"><FolderOpen className="h-4 w-4" /></div>
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{selectedProject.name}</p>
+                          <Badge variant="outline" className="border-blue-200 bg-white text-[11px] text-blue-700">{selectedProject.status}</Badge>
+                          {selectedProject.campaignOrganizationId && (
+                            <Badge className="border border-blue-200 bg-blue-600/10 text-[11px] text-blue-700">
+                              <Bot className="mr-1 h-3 w-3" />
+                              Unified email agent context linked
+                            </Badge>
+                          )}
+                        </div>
+                        {selectedProject.description && <p className="text-sm leading-6 text-slate-600">{selectedProject.description}</p>}
+                      </div>
                     </div>
                   </div>
                 )}
-              </div>
+              </CardContent>
+            </Card>
 
-              {/* Campaign Name */}
-              <div className="space-y-2">
-                <Label htmlFor="campaignName" className="text-sm font-semibold text-slate-700">
-                  Campaign Name <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="campaignName"
-                  value={campaignName}
-                  onChange={(e) => setCampaignName(e.target.value)}
-                  placeholder="Q1 ABM Outreach – Finance Leaders"
-                  className="h-12 text-base"
-                  autoFocus
-                />
-                <p className="text-xs text-slate-400">Internal name for tracking. Not visible to recipients.</p>
-              </div>
+            <Card className="rounded-[28px] border-white/70 bg-white/90 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)]">
+              <CardContent className="space-y-5 p-6 md:p-8">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-slate-900 p-3 text-white"><Radar className="h-5 w-5" /></div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">Provider Routing and Identity</h2>
+                    <p className="text-sm text-slate-500">Choose the provider route, authenticated domain, and sender envelope for this campaign.</p>
+                  </div>
+                </div>
 
-              {/* Sender Settings Section */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                  <User className="w-4 h-4 text-slate-400" />
-                  <Label className="text-sm font-semibold text-slate-700">Sender Settings</Label>
+                {loadingRouting ? (
+                  <div className="flex min-h-[220px] items-center justify-center rounded-3xl border border-slate-200 bg-slate-50">
+                    <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading providers, domains, and senders...</div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid gap-5 xl:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Provider Route</Label>
+                        <Select value={selectedProviderId} onValueChange={setSelectedProviderId}>
+                          <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select provider" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={DEFAULT_PROVIDER_OPTION}>Use default routing</SelectItem>
+                            {providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Authenticated Domain</Label>
+                        <Select value={selectedDomainId} onValueChange={setSelectedDomainId}>
+                          <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select domain" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={AUTO_DOMAIN_OPTION}>Use sender-linked domain</SelectItem>
+                            {availableDomains.map((domain) => <SelectItem key={domain.id} value={String(domain.id)}>{domain.domain}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Sender Identity</Label>
+                        <Select value={senderProfileId} onValueChange={setSenderProfileId}>
+                          <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select sender" /></SelectTrigger>
+                          <SelectContent>
+                            {availableSenders.map((sender) => (
+                              <SelectItem key={sender.id} value={sender.id}>{sender.fromName || sender.name} &lt;{sender.fromEmail}&gt;</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 xl:grid-cols-3">
+                      <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Provider Status</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-950">{providerSummary?.name || "Default routing"}</p>
+                        <p className="mt-1 text-xs text-slate-500">{providerLabel(providerSummary)} via {providerSummary?.transport === "smtp" ? "SMTP" : "API"}</p>
+                        <Badge className={cn("mt-3 border text-[11px]", toneForStatus(providerSummary?.healthStatus))}>{providerSummary?.healthStatus || "resolved at launch"}</Badge>
+                      </div>
+                      <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Domain Readiness</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-950">{domainSummary?.domain || "Sender-linked domain"}</p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {domainSummary ? `SPF ${domainSummary.spfStatus}, DKIM ${domainSummary.dkimStatus}, DMARC ${domainSummary.dmarcStatus}` : "Domain will follow sender binding."}
+                        </p>
+                        <Badge className={cn("mt-3 border text-[11px]", toneForStatus(domainReady(domainSummary) ? "verified" : "pending"))}>
+                          {domainReady(domainSummary) ? "ready" : "review"}
+                        </Badge>
+                      </div>
+                      <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Sender Envelope</p>
+                        <p className="mt-3 text-sm font-semibold text-slate-950">{selectedSender?.fromName || selectedSender?.name || "No sender selected"}</p>
+                        <p className="mt-1 text-xs text-slate-500">{selectedSender?.fromEmail || "Select a sender"}</p>
+                        <Badge className={cn("mt-3 border text-[11px]", toneForStatus(selectedSender?.isVerified ? "verified" : "pending"))}>
+                          {selectedSender?.isVerified ? "verified" : "provider managed"}
+                        </Badge>
+                        <p className="mt-3 text-xs text-slate-500">{warmupLabel(selectedSender?.warmupStatus)}</p>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[28px] border-white/70 bg-white/90 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)]">
+              <CardContent className="space-y-5 p-6 md:p-8">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-slate-900 p-3 text-white"><Sparkles className="h-5 w-5" /></div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-950">Subject, Reply Handling, and Inbox Preview</h2>
+                    <p className="text-sm text-slate-500">Set the envelope details now so the template builder can optimize the full experience around them.</p>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="senderProfile" className="text-xs font-medium text-slate-500">
-                    Sender Profile <span className="text-red-500">*</span>
-                  </Label>
-                  {loadingProfiles ? (
-                    <div className="flex items-center justify-center h-12 bg-slate-50 rounded-md border">
-                      <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                    </div>
-                  ) : (
-                    <Select value={senderProfileId} onValueChange={handleProfileChange}>
-                      <SelectTrigger className="h-12">
-                        <SelectValue placeholder="Select a verified sender" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {senderProfiles.map((profile) => (
-                          <SelectItem key={profile.id} value={profile.id}>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{profile.name}</span>
-                              <span className="text-slate-400">&lt;{profile.email}&gt;</span>
-                              {profile.isVerified ? (
-                                <Badge variant="secondary" className="text-[10px] py-0 h-4 bg-green-50 text-green-700 border-green-200">
-                                  <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" />
-                                  Verified
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200">
-                                  <AlertCircle className="w-2.5 h-2.5 mr-0.5" />
-                                  Unverified
-                                </Badge>
-                              )}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
+                  <Label htmlFor="campaignName" className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Campaign Name</Label>
+                  <Input id="campaignName" value={campaignName} onChange={(event) => setCampaignName(event.target.value)} placeholder="Q2 account expansion outreach" className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-base" autoFocus />
                 </div>
 
-                {selectedProfile && (
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg border border-slate-100">
-                    <div>
-                      <Label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">From Name</Label>
-                      <p className="text-sm font-medium text-slate-700 mt-1">{selectedProfile.name}</p>
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="subject" className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Subject Line</Label>
+                      <Button type="button" variant="ghost" size="sm" onClick={handleAiSuggestSubject} disabled={aiSuggesting} className="h-8 rounded-full px-3 text-xs text-blue-600 hover:bg-blue-50 hover:text-blue-700">
+                        {aiSuggesting ? <><Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />Thinking</> : <><Sparkles className="mr-1 h-3.5 w-3.5" />Suggest</>}
+                      </Button>
                     </div>
-                    <div>
-                      <Label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">From Email</Label>
-                      <p className="text-sm font-medium text-slate-700 mt-1">{selectedProfile.email}</p>
-                    </div>
-                    <div className="col-span-2">
-                      <Label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Reply-To</Label>
-                      <p className="text-sm font-medium text-slate-700 mt-1">{selectedProfile.replyTo || selectedProfile.email}</p>
-                    </div>
+                    <Input id="subject" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Quick question about pipeline conversion" className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-base" />
                   </div>
-                )}
-
-                {senderProfiles.length === 0 && !loadingProfiles && (
-                  <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
-                    <div className="flex items-center gap-2 text-amber-700">
-                      <AlertCircle className="w-4 h-4" />
-                      <span className="text-sm font-medium">No sender profiles found</span>
-                    </div>
-                    <p className="text-xs text-amber-600 mt-1">
-                      Create a sender profile in Settings → Sender Profiles to continue.
-                    </p>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Inbox Heuristic</p>
+                    <p className="mt-3 text-2xl font-semibold text-slate-950">{subject.length}</p>
+                    <p className="mt-1 text-xs text-slate-500">{subject.length > 60 ? "May truncate on mobile inboxes" : "Healthy range for mobile visibility"}</p>
                   </div>
-                )}
-              </div>
-
-              {/* Subject Line */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="subject" className="text-sm font-semibold text-slate-700">
-                    Subject Line <span className="text-red-500">*</span>
-                  </Label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleAiSuggestSubject}
-                    disabled={aiSuggesting}
-                    className="text-xs h-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                  >
-                    {aiSuggesting ? (
-                      <>
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                        Thinking...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3 h-3 mr-1" />
-                        AI Suggest
-                      </>
-                    )}
-                  </Button>
                 </div>
-                <Input
-                  id="subject"
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  placeholder="Quick question about..."
-                  className="h-12 text-base"
-                />
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-slate-400">
-                    Keep it under 60 characters for best visibility
+
+                <div className="grid gap-5 lg:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="preheader" className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Preview Text</Label>
+                    <Input id="preheader" value={preheader} onChange={(event) => setPreheader(event.target.value)} placeholder="Reinforce the subject line with the next line of context" className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-base" />
+                    <p className="text-xs text-slate-500">{preheader.length}/150 characters</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="replyToEmail" className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Reply-To Address</Label>
+                    <Input id="replyToEmail" value={replyToEmail} onChange={(event) => setReplyToEmail(event.target.value)} placeholder="replies@yourdomain.com" className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-base" />
+                    <p className="text-xs text-slate-500">Replies, bounces, and handoffs should route to the monitored campaign inbox.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <Card className="rounded-[28px] border-white/70 bg-slate-950 text-white shadow-[0_24px_70px_-40px_rgba(15,23,42,0.6)]">
+              <CardContent className="space-y-4 p-6">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-white/10 p-3"><ShieldCheck className="h-5 w-5 text-emerald-300" /></div>
+                  <div>
+                    <p className="text-sm font-semibold">Campaign Route Summary</p>
+                    <p className="text-xs text-slate-300">This route is carried into the template and launch workflow.</p>
+                  </div>
+                </div>
+                {[
+                  { label: "Provider", value: providerSummary?.name || "Default routing", detail: providerLabel(providerSummary) },
+                  { label: "Domain", value: domainSummary?.domain || "Sender-linked domain", detail: domainSummary ? `Health score ${domainSummary.healthScore ?? "n/a"}` : "Resolved from sender" },
+                  { label: "Sender", value: selectedSender ? `${selectedSender.fromName || selectedSender.name} <${selectedSender.fromEmail}>` : "No sender selected", detail: replyToEmail || "Reply inbox not set" },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
+                    <p className="mt-2 text-sm font-semibold">{item.value}</p>
+                    <p className="mt-1 text-xs text-slate-400">{item.detail}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[28px] border-white/70 bg-white/90 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)]">
+              <CardContent className="space-y-4 p-6">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-2xl bg-blue-50 p-3 text-blue-700"><Bot className="h-5 w-5" /></div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">Unified Email Agent Guardrails</p>
+                    <p className="text-xs leading-5 text-slate-500">The template step uses the unified email agent as the source of truth for CTA, personalization, compliance, and deliverability.</p>
+                  </div>
+                </div>
+                <div className="space-y-2 text-sm text-slate-600">
+                  <p>Single-CTA, deliverability-safe copy patterns stay aligned with the email agent architecture.</p>
+                  <p>Open, click, unsubscribe, and suppression handling remain aligned with the send pipeline.</p>
+                  <p>Landing page CTA links can carry merge-tag prefill data in the builder.</p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-[28px] border-white/70 bg-white/90 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)]">
+              <CardContent className="space-y-3 p-6">
+                <p className="text-sm font-semibold text-slate-950">Supported Personalization</p>
+                <div className="flex flex-wrap gap-2">
+                  {["{{firstName}}", "{{lastName}}", "{{company}}", "{{jobTitle}}", "{{email}}"].map((token) => (
+                    <Badge key={token} variant="outline" className="rounded-full border-slate-200 px-3 py-1 text-xs text-slate-700">{token}</Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="rounded-[28px] border border-slate-200 bg-white/90 p-5 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.35)]">
+              <div className="mb-4 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className={cn("rounded-2xl p-2", isValid ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
+                  {isValid ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">{isValid ? "Ready for template generation" : "Complete the routing envelope"}</p>
+                  <p className="text-xs leading-5 text-slate-500">
+                    Provider, sender, reply-to, subject, client, and project should all be selected before moving forward.
                   </p>
-                  <span className={`text-xs ${subject.length > 60 ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                    {subject.length}/60
-                  </span>
                 </div>
               </div>
 
-              {/* Submit Button */}
-              <div className="pt-4">
-                <Button
-                  type="submit"
-                  disabled={!isValid}
-                  className="w-full h-12 text-base font-semibold bg-blue-600 hover:bg-blue-700"
-                >
-                  <Mail className="w-5 h-5 mr-2" />
-                  Create Email Template
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
-              </div>
+              <Button type="submit" disabled={!isValid} className="h-14 w-full rounded-2xl bg-slate-950 text-base font-semibold text-white hover:bg-slate-800">
+                <Mail className="mr-2 h-5 w-5" />
+                Continue to Template Builder
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
 
-              <div className="text-center">
-                <Button
-                  type="button"
-                  variant="link"
-                  onClick={onCancel}
-                  className="text-sm text-slate-500 hover:text-slate-700"
-                >
-                  Cancel and go back
-                </Button>
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">Next step: generate the full email, preview it, test it, and prepare launch.</p>
+                <Button type="button" variant="link" onClick={onCancel} className="px-0 text-sm text-slate-500">Cancel</Button>
               </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        <p className="text-center text-xs text-slate-400 mt-6">
-          This is step 1 of 3. You'll design the email content next.
-        </p>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   );

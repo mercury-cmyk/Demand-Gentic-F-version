@@ -76,6 +76,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { sanitizeHtmlForIframePreview } from "@/lib/html-preview";
+import { cn } from "@/lib/utils";
 import { buildBrandedEmailHtml, type BrandPaletteKey, type BrandPaletteOverrides, type EmailTemplateCopy } from "@/components/email-builder/ai-email-template";
 
 // Content Block Types for Visual Editor
@@ -115,6 +116,12 @@ interface CampaignIntent {
   fromEmail: string;
   replyToEmail: string;
   subject: string;
+  preheader?: string;
+  campaignProviderId?: string | null;
+  campaignProviderName?: string | null;
+  campaignProviderKey?: string | null;
+  domainAuthId?: number | null;
+  domainName?: string | null;
   // Project & org context (from Step 1 selection)
   clientAccountId?: string;
   clientName?: string;
@@ -575,7 +582,7 @@ export function SimpleTemplateBuilder({
         initialBodyContent.includes("<!DOCTYPE html"))
   );
   const [subject, setSubject] = useState(campaignIntent.subject);
-  const [preheader, setPreheader] = useState(initialTemplate?.preheader || "");
+  const [preheader, setPreheader] = useState(initialTemplate?.preheader || campaignIntent.preheader || "");
   const [bodyContent, setBodyContent] = useState(initialBodyContent);
   const [editorMode, setEditorMode] = useState<"visual" | "code" | "html">(
     "visual"  // Always start in visual mode for better UX
@@ -876,6 +883,14 @@ export function SimpleTemplateBuilder({
     }
     return text;
   }, [bodyContent, orgName, orgAddress, useBrandedTemplate]);
+
+  const routeSummary = useMemo(() => ({
+    provider: campaignIntent.campaignProviderName || campaignIntent.campaignProviderKey || "Default routing",
+    domain: campaignIntent.domainName || "Sender-linked domain",
+    replyTo: campaignIntent.replyToEmail || campaignIntent.fromEmail,
+  }), [campaignIntent]);
+
+  const mergeTokens = useMemo(() => PERSONALIZATION_TOKENS.map((item) => item.token), []);
   
   // Block manipulation functions for visual editor
   const addBlock = useCallback((type: BlockType, afterId?: string) => {
@@ -1228,9 +1243,20 @@ export function SimpleTemplateBuilder({
             <Separator orientation="vertical" className="h-6" />
             
             {/* Campaign Name Badge */}
-            <Badge variant="secondary" className="text-xs font-medium">
-              {campaignIntent.campaignName}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="text-xs font-medium">
+                {campaignIntent.campaignName}
+              </Badge>
+              <Badge variant="outline" className="text-[11px]">
+                Step 2 of 3
+              </Badge>
+              <Badge variant="outline" className="text-[11px]">
+                {routeSummary.provider}
+              </Badge>
+              <Badge variant="outline" className="text-[11px]">
+                {routeSummary.domain}
+              </Badge>
+            </div>
           </div>
           
           {/* Center Toolbar */}
@@ -1581,40 +1607,45 @@ export function SimpleTemplateBuilder({
         </div>
         
         {/* Subject & Preheader Row */}
-        <div className="border-b bg-white px-6 py-3 flex-shrink-0">
-          <div className="max-w-4xl mx-auto space-y-3">
-            {/* Subject Line */}
-            <div className="flex items-center gap-4">
-              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide w-20">Subject</Label>
-              <Input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                placeholder="Write a compelling subject line..."
-                className="text-base font-medium border-0 bg-transparent px-2 h-10 flex-1 focus-visible:ring-1 focus-visible:ring-blue-500"
-              />
-              <span className={`text-xs whitespace-nowrap ${subject.length > 60 ? 'text-amber-600' : 'text-slate-400'}`}>
-                {subject.length}/60
-              </span>
+        <div className="border-b bg-[linear-gradient(180deg,#ffffff_0%,#f8fbff_100%)] px-6 py-4 flex-shrink-0">
+          <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[minmax(0,1fr)_240px]">
+            <div className="rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+              <div className="flex items-center gap-4">
+                <Label className="w-20 text-xs font-semibold uppercase tracking-wide text-slate-500">Subject</Label>
+                <Input
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder="Write a compelling subject line..."
+                  className="h-11 flex-1 border-0 bg-transparent px-2 text-base font-medium focus-visible:ring-1 focus-visible:ring-blue-500"
+                />
+                <span className={`text-xs whitespace-nowrap ${subject.length > 60 ? 'text-amber-600' : 'text-slate-400'}`}>
+                  {subject.length}/60
+                </span>
+              </div>
+              <div className="mt-3 flex items-center gap-4">
+                <Label className="w-20 text-xs font-semibold uppercase tracking-wide text-slate-500">Preview</Label>
+                <Input
+                  value={preheader}
+                  onChange={(e) => setPreheader(e.target.value)}
+                  placeholder="Preview text shows after subject in inbox..."
+                  className="h-9 flex-1 border-0 bg-transparent px-2 text-sm focus-visible:ring-1 focus-visible:ring-blue-500"
+                />
+                <span className="text-xs text-slate-400 whitespace-nowrap">{preheader.length}/150</span>
+              </div>
             </div>
-            
-            {/* Preheader */}
-            <div className="flex items-center gap-4">
-              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide w-20">Preview</Label>
-              <Input
-                value={preheader}
-                onChange={(e) => setPreheader(e.target.value)}
-                placeholder="Preview text shows after subject in inbox..."
-                className="text-sm border-0 bg-transparent px-2 h-8 flex-1 focus-visible:ring-1 focus-visible:ring-blue-500"
-              />
-              <span className="text-xs text-slate-400 whitespace-nowrap">{preheader.length}/150</span>
+
+            <div className="rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Envelope</p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">{campaignIntent.senderName} &lt;{campaignIntent.fromEmail}&gt;</p>
+              <p className="mt-1 text-xs text-slate-500">Replies to {routeSummary.replyTo}</p>
             </div>
           </div>
         </div>
 
         {/* Main Content Area */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Main Canvas (Full width now) */}
-          <div className="flex-1 flex flex-col min-h-0 p-6 bg-slate-50/50">
+        <div className="flex-1 min-h-0 overflow-hidden bg-slate-50/50">
+          <div className="grid h-full gap-6 overflow-hidden px-6 py-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="flex min-h-0 flex-col">
             {/* Editor Mode Toggle */}
             <div className="flex items-center justify-between mb-4 max-w-5xl mx-auto w-full">
               <div className="flex items-center gap-2 bg-white rounded-lg p-1 shadow-sm border">
@@ -1960,6 +1991,150 @@ export function SimpleTemplateBuilder({
                 </div>
               </div>
             </div>
+          </div>
+          <div className="hidden min-h-0 xl:flex xl:flex-col xl:overflow-hidden">
+            <div className="grid min-h-0 gap-4 xl:grid-rows-[auto_auto_minmax(0,1fr)_auto]">
+              <Card className="rounded-3xl border-slate-200 shadow-sm">
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">Unified Email Agent</p>
+                      <p className="text-xs leading-5 text-slate-500">
+                        Keep the brief aligned to the email agent architecture before generating or refining the template.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500">Outreach Type</Label>
+                      <Select value={outreachType} onValueChange={setOutreachType}>
+                        <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{OUTREACH_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-500">Tone</Label>
+                      <Select value={tone} onValueChange={setTone}>
+                        <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>{TONE_OPTIONS.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">Unified Brief</Label>
+                    <Textarea
+                      value={aiContext}
+                      onChange={e => setAiContext(e.target.value)}
+                      placeholder="Describe goals, pain points, offer, proof, and CTA constraints..."
+                      className="min-h-[140px] resize-none text-sm"
+                    />
+                  </div>
+
+                  <Button onClick={handleAiGenerate} disabled={aiGenerating} className="w-full bg-slate-950 text-white hover:bg-slate-800">
+                    {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                    Generate With Unified Agent
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-slate-200 shadow-sm">
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">Personalization and CTA</p>
+                      <p className="text-xs text-slate-500">Use merge tags and prefilled landing page links without leaving the builder.</p>
+                    </div>
+                    <Badge variant="outline" className="text-[11px]">{routeSummary.domain}</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {mergeTokens.map((token) => (
+                      <Button key={token} type="button" variant="outline" size="sm" className="h-8 rounded-full px-3 text-xs" onClick={() => insertToken(token)}>
+                        {token}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-500">CTA URL</Label>
+                    <Input value={ctaUrl} onChange={e => setCtaUrl(e.target.value)} className="text-sm" />
+                    <p className="text-xs text-slate-500">Enable prefill on CTA blocks to pass first name, last name, company, email, and phone into landing forms.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="min-h-0 rounded-3xl border-slate-200 shadow-sm">
+                <CardContent className="flex h-full min-h-0 flex-col p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">Live Inbox Preview</p>
+                      <p className="text-xs text-slate-500">Keep the email visible while you edit so the full template reads like an inbox artifact, not raw markup.</p>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+                      <Button variant={previewMode === "gmail-desktop" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("gmail-desktop")} className="text-[11px]">
+                        <Monitor className="mr-1 h-3.5 w-3.5" /> Gmail
+                      </Button>
+                      <Button variant={previewMode === "gmail-mobile" ? "secondary" : "ghost"} size="sm" onClick={() => setPreviewMode("gmail-mobile")} className="text-[11px]">
+                        <Smartphone className="mr-1 h-3.5 w-3.5" /> Mobile
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+                    <div className="font-medium text-slate-900">{campaignIntent.senderName} &lt;{campaignIntent.fromEmail}&gt;</div>
+                    <div className="mt-1">Subject: {subject || "(No subject)"}</div>
+                    {preheader && <div className="mt-1">Preview: {preheader}</div>}
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 p-3">
+                    <div className={cn("mx-auto h-full overflow-hidden rounded-2xl bg-white shadow-lg", previewMode === "gmail-mobile" ? "max-w-[375px]" : "max-w-full")}>
+                      <iframe
+                        title="Live Email Preview"
+                        srcDoc={sanitizeHtmlForIframePreview(fullHtml)}
+                        className="h-full min-h-[420px] w-full border-0"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-slate-200 shadow-sm">
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">Send Test and Quality Gate</p>
+                      <p className="text-xs text-slate-500">Validate rendering and keep an eye on spam, CTA, and length guidance.</p>
+                    </div>
+                    <Badge className={cn("border text-[11px]", hasErrors ? "border-red-200 bg-red-50 text-red-700" : hasWarnings ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                      {hasErrors ? "Needs fixes" : hasWarnings ? "Review warnings" : "Ready"}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="email@example.com" className="text-sm" />
+                    <Button type="button" onClick={handleSendTest} disabled={sendingTest}>
+                      {sendingTest ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {(nudges.length ? nudges : [{ id: "empty", type: "info", message: "Start writing to see insights." }]).slice(0, 4).map((nudge) => (
+                      <div key={nudge.id} className={cn(
+                        "rounded-2xl border p-3 text-xs",
+                        nudge.type === "error" ? "border-red-200 bg-red-50 text-red-700" :
+                        nudge.type === "warning" ? "border-amber-200 bg-amber-50 text-amber-700" :
+                        nudge.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" :
+                        "border-blue-200 bg-blue-50 text-blue-700"
+                      )}>
+                        {nudge.message}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
           </div>
         </div>
 
