@@ -45,6 +45,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { BrevoInfrastructureDialog } from "@/components/email/brevo-infrastructure-dialog";
 
 type EmailManagementTab = "providers" | "senders" | "domains";
 type CampaignProviderKey = "mailgun" | "brevo" | "brainpool" | "custom";
@@ -295,6 +296,7 @@ export default function EmailManagementPage() {
   const [dnsExpandedId, setDnsExpandedId] = useState<number | null>(null);
   const [testProvider, setTestProvider] = useState<CampaignProvider | null>(null);
   const [testEmail, setTestEmail] = useState("");
+  const [brevoProvider, setBrevoProvider] = useState<CampaignProvider | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -766,6 +768,12 @@ export default function EmailManagementPage() {
                     )}
 
                     <div className="flex flex-wrap gap-2">
+                      {provider.providerKey === "brevo" && (
+                        <Button variant="outline" onClick={() => setBrevoProvider(provider)}>
+                          <ShieldCheck className="mr-2 h-4 w-4" />
+                          Brevo Infrastructure
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         onClick={() => verifyProviderMutation.mutate(provider.id)}
@@ -1574,6 +1582,21 @@ export default function EmailManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BrevoInfrastructureDialog
+        provider={brevoProvider}
+        open={!!brevoProvider}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBrevoProvider(null);
+          }
+        }}
+        onSynced={() => {
+          refreshProviders();
+          refreshSenders();
+          refreshDomains();
+        }}
+      />
 
       {!providersLoading && providers.length === 0 && (
         <Card className="border-amber-200 bg-amber-50">

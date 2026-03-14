@@ -12,6 +12,18 @@ import {
   getCampaignEmailProviderBindingForSender,
   listCampaignEmailProviders,
 } from '../services/campaign-email-provider-service';
+import {
+  authenticateBrevoDomain,
+  createBrevoDomain,
+  createBrevoSender,
+  deleteBrevoDomain,
+  deleteBrevoSender,
+  getBrevoDomain,
+  getBrevoInfrastructureOverview,
+  syncBrevoAssetsToDashboard,
+  updateBrevoSender,
+  validateBrevoSender,
+} from '../services/brevo-infrastructure-service';
 
 const router = Router();
 
@@ -342,6 +354,140 @@ router.post('/providers/:id/set-default', async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('Error setting default campaign email provider:', error);
     res.status(500).json({ error: error.message || 'Failed to set default campaign email provider' });
+  }
+});
+
+router.get('/providers/:id/brevo/overview', async (req: Request, res: Response) => {
+  try {
+    res.json(await getBrevoInfrastructureOverview(req.params.id));
+  } catch (error: any) {
+    console.error('Error fetching Brevo infrastructure overview:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch Brevo infrastructure overview' });
+  }
+});
+
+router.post('/providers/:id/brevo/sync-to-dashboard', async (req: Request, res: Response) => {
+  try {
+    res.json(await syncBrevoAssetsToDashboard(req.params.id));
+  } catch (error: any) {
+    console.error('Error syncing Brevo assets to dashboard:', error);
+    res.status(500).json({ error: error.message || 'Failed to sync Brevo assets to dashboard' });
+  }
+});
+
+router.post('/providers/:id/brevo/senders', async (req: Request, res: Response) => {
+  try {
+    const data = z.object({
+      name: z.string().min(1),
+      email: z.string().email(),
+      ips: z.array(z.string().min(1)).optional(),
+    }).parse(req.body);
+
+    await createBrevoSender(req.params.id, data);
+    res.status(201).json({ success: true });
+  } catch (error: any) {
+    console.error('Error creating Brevo sender:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to create Brevo sender' });
+  }
+});
+
+router.put('/providers/:id/brevo/senders/:senderId', async (req: Request, res: Response) => {
+  try {
+    const data = z.object({
+      name: z.string().min(1).optional(),
+      email: z.string().email().optional(),
+      ips: z.array(z.string().min(1)).optional(),
+    }).parse(req.body);
+
+    await updateBrevoSender(req.params.id, req.params.senderId, data);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error updating Brevo sender:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to update Brevo sender' });
+  }
+});
+
+router.delete('/providers/:id/brevo/senders/:senderId', async (req: Request, res: Response) => {
+  try {
+    await deleteBrevoSender(req.params.id, req.params.senderId);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting Brevo sender:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete Brevo sender' });
+  }
+});
+
+router.post('/providers/:id/brevo/senders/:senderId/validate', async (req: Request, res: Response) => {
+  try {
+    const data = z.object({
+      otp: z.string().min(1),
+    }).parse(req.body);
+
+    await validateBrevoSender(req.params.id, req.params.senderId, data.otp);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error validating Brevo sender:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to validate Brevo sender' });
+  }
+});
+
+router.post('/providers/:id/brevo/domains', async (req: Request, res: Response) => {
+  try {
+    const data = z.object({
+      domain: z.string().min(1),
+    }).parse(req.body);
+
+    await createBrevoDomain(req.params.id, data);
+    res.status(201).json({ success: true });
+  } catch (error: any) {
+    console.error('Error creating Brevo domain:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to create Brevo domain' });
+  }
+});
+
+router.get('/providers/:id/brevo/domains/:domainName', async (req: Request, res: Response) => {
+  try {
+    const domain = await getBrevoDomain(req.params.id, req.params.domainName);
+    if (!domain) {
+      return res.status(404).json({ error: 'Brevo domain not found' });
+    }
+
+    res.json(domain);
+  } catch (error: any) {
+    console.error('Error fetching Brevo domain:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch Brevo domain' });
+  }
+});
+
+router.post('/providers/:id/brevo/domains/:domainName/authenticate', async (req: Request, res: Response) => {
+  try {
+    await authenticateBrevoDomain(req.params.id, req.params.domainName);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error authenticating Brevo domain:', error);
+    res.status(500).json({ error: error.message || 'Failed to authenticate Brevo domain' });
+  }
+});
+
+router.delete('/providers/:id/brevo/domains/:domainName', async (req: Request, res: Response) => {
+  try {
+    await deleteBrevoDomain(req.params.id, req.params.domainName);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting Brevo domain:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete Brevo domain' });
   }
 });
 

@@ -1184,7 +1184,7 @@ export async function sendCampaignEmail(params: SendCampaignEmailParams): Promis
 export async function bindSenderProfileToCampaignEmailProvider(senderProfileId: string, providerId: string | null): Promise<void> {
   await ensureCampaignEmailSchema();
 
-  if (!providerId || providerId === MAILGUN_ENV_PROVIDER_ID) {
+  if (!providerId || providerId === MAILGUN_ENV_PROVIDER_ID || providerId === BREVO_ENV_PROVIDER_ID) {
     await db
       .delete(campaignEmailSenderBindings)
       .where(eq(campaignEmailSenderBindings.senderProfileId, senderProfileId));
@@ -1202,7 +1202,7 @@ export async function bindSenderProfileToCampaignEmailProvider(senderProfileId: 
 export async function bindDomainToCampaignEmailProvider(domainAuthId: number, providerId: string | null): Promise<void> {
   await ensureCampaignEmailSchema();
 
-  if (!providerId || providerId === MAILGUN_ENV_PROVIDER_ID) {
+  if (!providerId || providerId === MAILGUN_ENV_PROVIDER_ID || providerId === BREVO_ENV_PROVIDER_ID) {
     await db
       .delete(campaignEmailDomainBindings)
       .where(eq(campaignEmailDomainBindings.domainAuthId, domainAuthId));
