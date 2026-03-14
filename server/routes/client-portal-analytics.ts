@@ -25,6 +25,7 @@ import {
   emailTemplates,
 } from '@shared/schema';
 import { resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
+import { requireClientFeature } from '../middleware/client-feature-gate';
 
 const router = Router();
 
@@ -699,6 +700,253 @@ router.get('/email-campaigns', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('[CLIENT PORTAL] Email campaigns error:', error);
     res.status(500).json({ message: 'Failed to fetch email campaigns' });
+  }
+});
+
+// ==================== DISPOSITION INTELLIGENCE ====================
+
+/**
+ * GET /disposition-intelligence
+ * Disposition overview: breakdown, accuracy, trends for client campaigns
+ */
+router.get('/disposition-intelligence', requireClientFeature('disposition_overview'), async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { campaignId } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+    if (campaignIds.length === 0) return res.json({ dispositions: [], timeline: [], totalCalls: 0 });
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+    if (targetIds.length === 0) return res.json({ dispositions: [], timeline: [], totalCalls: 0 });
+
+    // Disposition breakdown
+    const dispositions = await db
+      .select({
+        disposition: sql<string>`COALESCE(${callSessions.aiDisposition}, 'unknown')`,
+        count: sql<number>`COUNT(*)::int`,
+        avgDuration: sql<number>`COALESCE(AVG(${callSessions.durationSec}), 0)::int`,
+      })
+      .from(callSessions)
+      .where(and(inArray(callSessions.campaignId, targetIds), eq(callSessions.status, 'completed')))
+      .groupBy(sql`COALESCE(${callSessions.aiDisposition}, 'unknown')`)
+      .orderBy(desc(sql`COUNT(*)`));
+
+    const [totals] = await db
+      .select({ totalCalls: sql<number>`COUNT(*)::int` })
+      .from(callSessions)
+      .where(and(inArray(callSessions.campaignId, targetIds), eq(callSessions.status, 'completed')));
+
+    // Daily trend (last 30 days)
+    const timeline = await db
+      .select({
+        date: sql<string>`TO_CHAR(${callSessions.createdAt}, 'YYYY-MM-DD')`,
+        total: sql<number>`COUNT(*)::int`,
+        qualified: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} IN ('qualified', 'qualified_lead', 'converted_qualified') THEN 1 END)::int`,
+        notInterested: sql<number>`COUNT(CASE WHEN ${callSessions.aiDisposition} = 'not_interested' THEN 1 END)::int`,
+      })
+      .from(callSessions)
+      .where(and(
+        inArray(callSessions.campaignId, targetIds),
+        eq(callSessions.status, 'completed'),
+        gte(callSessions.createdAt, sql`NOW() - INTERVAL '30 days'`)
+      ))
+      .groupBy(sql`TO_CHAR(${callSessions.createdAt}, 'YYYY-MM-DD')`)
+      .orderBy(sql`TO_CHAR(${callSessions.createdAt}, 'YYYY-MM-DD')`);
+
+    res.json({
+      dispositions,
+      timeline,
+      totalCalls: totals?.totalCalls || 0,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Disposition intelligence error:', error);
+    res.status(500).json({ message: 'Failed to fetch disposition data' });
+  }
+});
+
+/**
+ * GET /potential-leads
+ * AI-identified potential leads with buying signals
+ */
+router.get('/potential-leads', requireClientFeature('disposition_potential_leads'), async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { campaignId } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+    if (campaignIds.length === 0) return res.json([]);
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+    if (targetIds.length === 0) return res.json([]);
+
+    // Leads with high AI scores but not yet qualified
+    const potentialLeads = await db
+      .select({
+        id: leads.id,
+        contactName: leads.contactName,
+        contactEmail: leads.contactEmail,
+        accountName: leads.accountName,
+        campaignName: campaigns.name,
+        aiScore: leads.aiScore,
+        aiQualificationStatus: leads.aiQualificationStatus,
+        qaStatus: leads.qaStatus,
+        createdAt: leads.createdAt,
+      })
+      .from(leads)
+      .innerJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .where(and(
+        inArray(leads.campaignId, targetIds),
+        gte(sql`CAST(${leads.aiScore} AS numeric)`, sql`40`),
+      ))
+      .orderBy(desc(sql`CAST(${leads.aiScore} AS numeric)`))
+      .limit(100);
+
+    res.json(potentialLeads);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Potential leads error:', error);
+    res.status(500).json({ message: 'Failed to fetch potential leads' });
+  }
+});
+
+// ==================== COST TRACKING ====================
+
+/**
+ * GET /cost-tracking
+ * Cost breakdown by campaign and activity type
+ */
+router.get('/cost-tracking', requireClientFeature('billing_cost_tracking'), async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    // Call costs (from callSessions)
+    const [callCosts] = await db
+      .select({
+        totalCalls: sql<number>`COUNT(*)::int`,
+        totalDuration: sql<number>`COALESCE(SUM(${callSessions.durationSec}), 0)::int`,
+      })
+      .from(callSessions)
+      .where(and(
+        inArray(callSessions.campaignId, campaignIds.length > 0 ? campaignIds : ['__none__']),
+        eq(callSessions.status, 'completed')
+      ));
+
+    // Email costs (from emailSends)
+    const [emailCosts] = await db
+      .select({ totalEmails: sql<number>`COUNT(*)::int` })
+      .from(emailSends)
+      .where(inArray(emailSends.campaignId, campaignIds.length > 0 ? campaignIds : ['__none__']));
+
+    // Lead costs (qualified leads)
+    const [leadCosts] = await db
+      .select({
+        totalLeads: sql<number>`COUNT(*)::int`,
+        qualifiedLeads: sql<number>`COUNT(CASE WHEN ${leads.qaStatus} IN ('approved', 'published') THEN 1 END)::int`,
+      })
+      .from(leads)
+      .where(inArray(leads.campaignId, campaignIds.length > 0 ? campaignIds : ['__none__']));
+
+    // Per-campaign breakdown
+    const campaignBreakdown = await Promise.all(
+      campaignIds.slice(0, 20).map(async (cId) => {
+        const [cInfo] = await db.select({ name: campaigns.name }).from(campaigns).where(eq(campaigns.id, cId)).limit(1);
+        const [cCalls] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(callSessions).where(and(eq(callSessions.campaignId, cId), eq(callSessions.status, 'completed')));
+        const [cEmails] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(emailSends).where(eq(emailSends.campaignId, cId));
+        const [cLeads] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(leads).where(and(eq(leads.campaignId, cId), inArray(leads.qaStatus, ['approved', 'published'])));
+        return {
+          campaignId: cId,
+          campaignName: cInfo?.name || 'Unknown',
+          calls: cCalls?.count || 0,
+          emails: cEmails?.count || 0,
+          qualifiedLeads: cLeads?.count || 0,
+        };
+      })
+    );
+
+    res.json({
+      summary: {
+        totalCalls: callCosts?.totalCalls || 0,
+        totalDurationMinutes: Math.round((callCosts?.totalDuration || 0) / 60),
+        totalEmails: emailCosts?.totalEmails || 0,
+        totalLeads: leadCosts?.totalLeads || 0,
+        qualifiedLeads: leadCosts?.qualifiedLeads || 0,
+      },
+      campaignBreakdown,
+    });
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Cost tracking error:', error);
+    res.status(500).json({ message: 'Failed to fetch cost tracking data' });
+  }
+});
+
+/**
+ * GET /leads/export
+ * Export all leads to CSV format
+ */
+router.get('/leads/export', requireClientFeature('lead_export'), async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { campaignId, status } = req.query;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+    if (campaignIds.length === 0) return res.status(404).json({ message: 'No campaigns found' });
+
+    const targetIds = campaignId && campaignId !== 'all'
+      ? [campaignId as string].filter(id => campaignIds.includes(id))
+      : campaignIds;
+    if (targetIds.length === 0) return res.status(404).json({ message: 'No campaign access' });
+
+    const conditions: any[] = [inArray(leads.campaignId, targetIds)];
+    if (status === 'qualified') {
+      conditions.push(inArray(leads.qaStatus, ['approved', 'published']));
+    }
+
+    const leadsData = await db
+      .select({
+        contactName: leads.contactName,
+        contactEmail: leads.contactEmail,
+        contactPhone: leads.contactPhone,
+        accountName: leads.accountName,
+        accountIndustry: leads.accountIndustry,
+        campaignName: campaigns.name,
+        aiScore: leads.aiScore,
+        qaStatus: leads.qaStatus,
+        aiQualificationStatus: leads.aiQualificationStatus,
+        createdAt: leads.createdAt,
+      })
+      .from(leads)
+      .innerJoin(campaigns, eq(leads.campaignId, campaigns.id))
+      .where(and(...conditions))
+      .orderBy(desc(leads.createdAt))
+      .limit(10000);
+
+    // Generate CSV
+    const headers = ['Contact Name', 'Email', 'Phone', 'Account', 'Industry', 'Campaign', 'AI Score', 'QA Status', 'AI Status', 'Date'];
+    const rows = leadsData.map(l => [
+      l.contactName || '', l.contactEmail || '', l.contactPhone || '',
+      l.accountName || '', l.accountIndustry || '', l.campaignName || '',
+      l.aiScore || '', l.qaStatus || '', l.aiQualificationStatus || '',
+      l.createdAt ? new Date(l.createdAt).toISOString().split('T')[0] : '',
+    ]);
+
+    const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="leads-export-${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error('[CLIENT PORTAL] Leads export error:', error);
+    res.status(500).json({ message: 'Failed to export leads' });
   }
 });
 

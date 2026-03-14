@@ -597,6 +597,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: [USER_ROLES.ADMIN],
             description: 'Central secret manager',
           },
+          {
+            id: 'iam-client-access',
+            title: 'Client Access',
+            url: '/iam/client-access',
+            roles: [USER_ROLES.ADMIN],
+            description: 'Per-client feature permissions',
+          },
         ],
       },
     ],

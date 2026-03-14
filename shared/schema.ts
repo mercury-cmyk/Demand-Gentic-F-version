@@ -13506,16 +13506,78 @@ export type InsertAgentExecutionPlan = z.infer<typeof insertAgentExecutionPlanSc
  * Controls which features are enabled for each client
  */
 export const clientFeatureFlagEnum = pgEnum('client_feature_flag', [
+  // === CRM & Pipeline ===
   'accounts_contacts',       // Can manage accounts and contacts
   'bulk_upload',            // Can bulk upload contacts/accounts
+  'pipeline_view',          // Pipeline kanban & deal tracking
+  'segments_lists',         // Account/Contact segments & target lists
+  'lead_forms',             // Lead forms management
+
+  // === Campaigns & Execution ===
   'campaign_creation',      // Can create campaigns
+  'campaign_reports',       // View campaign performance reports
+  'campaign_queue_view',    // View live campaign queue status
+  'campaign_email_builder', // Email campaign builder access
+  'campaign_test_mode',     // Campaign test/simulation mode
+  'campaign_planner',       // Campaign planner tool
+
+  // === Leads & Data Access ===
+  'qualified_leads_view',   // View QA-approved qualified leads
+  'all_leads_view',         // View all leads (including non-qualified)
+  'lead_export',            // Export leads to CSV/Excel
+  'ai_scores_view',         // View AI scoring/analysis on leads
+
+  // === Recordings & Transcripts ===
+  'call_recordings_playback', // Listen to call recordings
+  'call_recordings_download', // Download recording files
+  'transcripts_view',        // View call transcripts
+
+  // === AI & Intelligence ===
+  'ai_studio_dashboard',       // AI Studio overview/dashboard
+  'ai_studio_org_intelligence', // Organization Intelligence (ICP, messaging, service catalog)
+  'ai_studio_account_intelligence', // Account/Campaign research engine
+  'ai_studio_preview_studio',  // Preview & test AI agent behavior
+  'ai_studio_voice_training',  // Voice agent training dashboard
+  'ai_studio_campaign_manager', // AI campaign manager/planner
+  'creative_studio',           // Generative Studio (image, landing pages, emails, blog, ebook)
+
+  // === Disposition Intelligence ===
+  'disposition_overview',          // Disposition metrics, call counts, AI accuracy
+  'disposition_conversation_quality', // Conversation quality analysis & scoring
+  'disposition_showcase_calls',    // Top meaningful call recordings with transcripts
+  'disposition_reanalysis',        // Deep AI reanalysis, correction workflow
+  'disposition_potential_leads',   // AI-identified potential leads with signals
+
+  // === Analytics & Reports ===
+  'analytics_dashboard',    // Can access analytics
+  'engagement_analytics',   // Email engagement metrics (opens, clicks, responses)
+  'call_reports',           // Call disposition reports, agent performance
+  'reports_export',         // Can export reports
+
+  // === Billing & Finance ===
+  'billing_invoices',       // View invoices and payment history
+  'billing_cost_tracking',  // View real-time cost tracking
+
+  // === Simulations ===
+  'voice_simulation',       // Voice call simulation
+  'email_simulation',       // Email delivery simulation
+  'simulations_unified',    // Unified simulations hub
+
+  // === Email Access ===
+  'email_connect',          // Can connect personal/business email for sending
+  'email_inbox',            // Access to unified email inbox with send/receive
+
+  // === Communication & Templates ===
   'email_templates',        // Can create/manage email templates
   'call_flows',             // Can define call flows
   'voice_selection',        // Can select AI voices
+
+  // === Advanced & Integration ===
+  'work_orders',            // Direct Agentic Orders
   'calendar_booking',       // Can configure calendar booking
-  'analytics_dashboard',    // Can access analytics
-  'reports_export',         // Can export reports
   'api_access',             // Has API access
+  'webhook_notifications',  // Receive webhook event notifications
+  'journey_pipeline',       // Journey/pipeline view
   'organization_intelligence', // Can view/edit organization intelligence for campaigns
 ]);
 
@@ -13585,6 +13647,128 @@ export const clientFeatureAccess = pgTable("client_feature_access", {
   clientFeatureIdx: uniqueIndex("client_feature_access_unique_idx").on(table.clientAccountId, table.feature),
   clientAccountIdx: index("client_feature_access_client_idx").on(table.clientAccountId),
 }));
+
+// ============================================================
+// Client Permission Scope Enum
+// ============================================================
+export const clientPermissionScopeEnum = pgEnum('client_permission_scope', [
+  'all',            // All resources the client owns
+  'campaign',       // Specific campaigns only
+  'project',        // Specific projects only
+  'date_range',     // Time-windowed access
+]);
+
+// ============================================================
+// Client Permission Grants
+// Scoped, auditable grants with campaign/project targeting and expiry
+// ============================================================
+export const clientPermissionGrants = pgTable("client_permission_grants", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  // Which capability is granted
+  feature: clientFeatureFlagEnum("feature").notNull(),
+
+  // Scope — how the grant is restricted
+  scopeType: clientPermissionScopeEnum("scope_type").notNull().default('all'),
+  scopeValue: jsonb("scope_value").$type<{
+    campaignIds?: string[];
+    projectIds?: string[];
+    dateRange?: { from: string; to: string };
+  }>(),
+
+  isEnabled: boolean("is_enabled").notNull().default(true),
+
+  // Feature-specific configuration (e.g. rate limits for api_access)
+  config: jsonb("config").$type<Record<string, any>>(),
+
+  // Lifecycle
+  grantedBy: varchar("granted_by").references(() => users.id, { onDelete: 'set null' }),
+  grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at"),
+  revokedBy: varchar("revoked_by").references(() => users.id, { onDelete: 'set null' }),
+  revokedAt: timestamp("revoked_at"),
+  notes: text("notes"),
+}, (table) => ({
+  clientFeatureIdx: uniqueIndex("client_perm_grants_unique_idx").on(table.clientAccountId, table.feature),
+  clientAccountIdx: index("client_perm_grants_client_idx").on(table.clientAccountId),
+  featureIdx: index("client_perm_grants_feature_idx").on(table.feature),
+  activeIdx: index("client_perm_grants_active_idx").on(table.clientAccountId, table.isEnabled),
+}));
+
+// ============================================================
+// Client Access Audit Log
+// Tracks every grant, revoke, and modification action
+// ============================================================
+export const clientAccessAuditActionEnum = pgEnum('client_access_audit_action', [
+  'grant',
+  'revoke',
+  'modify',
+  'bulk_grant',
+  'bulk_revoke',
+]);
+
+export const clientAccessAuditLog = pgTable("client_access_audit_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+
+  action: clientAccessAuditActionEnum("action").notNull(),
+  feature: clientFeatureFlagEnum("feature"),
+
+  // Scope details
+  scopeType: clientPermissionScopeEnum("scope_type"),
+  scopeValue: jsonb("scope_value").$type<Record<string, any>>(),
+
+  // State snapshots
+  previousState: jsonb("previous_state").$type<Record<string, any>>(),
+  newState: jsonb("new_state").$type<Record<string, any>>(),
+
+  // Actor
+  performedBy: varchar("performed_by").notNull().references(() => users.id, { onDelete: 'set null' }),
+  performedAt: timestamp("performed_at").notNull().defaultNow(),
+  notes: text("notes"),
+}, (table) => ({
+  clientIdx: index("client_access_audit_client_idx").on(table.clientAccountId),
+  actionIdx: index("client_access_audit_action_idx").on(table.action),
+  performedAtIdx: index("client_access_audit_date_idx").on(table.performedAt),
+  featureIdx: index("client_access_audit_feature_idx").on(table.feature),
+}));
+
+/**
+ * Client Mailbox Accounts - OAuth-connected email for client portal users
+ * Mirrors admin mailboxAccounts but scoped to client users
+ */
+export const clientMailboxAccounts = pgTable("client_mailbox_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  clientUserId: varchar("client_user_id").notNull().references(() => clientUsers.id, { onDelete: 'cascade' }),
+  provider: varchar("provider", { length: 32 }).notNull(), // 'google' | 'o365' | 'smtp'
+  status: varchar("status", { length: 32 }).default('disconnected').notNull(),
+  mailboxEmail: varchar("mailbox_email", { length: 320 }),
+  displayName: varchar("display_name", { length: 255 }),
+  connectedAt: timestamp("connected_at", { withTimezone: true }),
+  lastSyncAt: timestamp("last_sync_at", { withTimezone: true }),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+  encryptedTokens: text("encrypted_tokens"),
+  // SMTP-specific config (host, port, tls, username — password in encryptedTokens)
+  smtpConfig: jsonb("smtp_config").$type<{ host: string; port: number; tls: boolean; username: string }>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  clientAccountIdx: index("client_mailbox_client_account_idx").on(table.clientAccountId),
+  clientUserIdx: index("client_mailbox_client_user_idx").on(table.clientUserId, table.provider),
+}));
+
+export const insertClientMailboxAccountSchema = createInsertSchema(clientMailboxAccounts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ClientMailboxAccount = typeof clientMailboxAccounts.$inferSelect;
+export type InsertClientMailboxAccount = z.infer<typeof insertClientMailboxAccountSchema>;
 
 /**
  * Client Accounts (CRM) - Client's own account records

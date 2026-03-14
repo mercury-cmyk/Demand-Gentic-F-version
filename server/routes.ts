@@ -78,6 +78,7 @@ import unifiedEmailSystemRouter from './routes/unified-email-system';
 import emailBuilderRouter from './routes/email-builder';
 import clientPortalRouter from './routes/client-portal';
 import clientPortalQualifiedLeadsRouter from './routes/client-portal-qualified-leads';
+import { requireClientFeature } from './middleware/client-feature-gate';
 import qaGatedContentRouter from './routes/qa-gated-content';
 import telemarketingSuppressionRouter from './routes/telemarketing-suppression-routes';
 import aiCallsRouter from './routes/ai-calls';
@@ -101,6 +102,7 @@ import simulationsRouter from './routes/simulations';
 import voiceAgentTrainingRouter from './routes/voice-agent-training';
 import voiceProviderRoutes from './routes/voice-provider-routes';
 import iamRouter from './routes/iam';
+import iamClientAccessRouter from './routes/iam-client-access';
 import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
@@ -15893,6 +15895,7 @@ Provide JSON response with:
   // ==================== IAM - IDENTITY & ACCESS MANAGEMENT ====================
 
   app.use("/api/iam", iamRouter);
+  app.use("/api/iam/client-access", iamClientAccessRouter);
   app.use("/api/secrets", secretsRouter);
 
   // ==================== ORGANIZATION MANAGEMENT ====================

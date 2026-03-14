@@ -11,6 +11,7 @@ import { eq, and, ilike, or, desc, asc } from 'drizzle-orm';
 import {
   clientBusinessProfiles,
   clientFeatureAccess,
+  clientPermissionGrants,
   clientAccounts,
   insertClientBusinessProfileSchema,
   clientOrganizationLinks,
@@ -22,6 +23,7 @@ import {
   workOrderDrafts,
 } from '@shared/schema';
 import { z } from 'zod';
+import { isNull } from 'drizzle-orm';
 import { collectWebsiteContent, type WebsitePageSummary } from '../lib/website-research';
 import {
   researchCompanyCore,
@@ -192,48 +194,36 @@ router.get('/features', async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const features = await db
+    // Read from new clientPermissionGrants table (default-deny)
+    const grants = await db
       .select({
-        feature: clientFeatureAccess.feature,
-        isEnabled: clientFeatureAccess.isEnabled,
-        config: clientFeatureAccess.config,
+        feature: clientPermissionGrants.feature,
+        isEnabled: clientPermissionGrants.isEnabled,
+        config: clientPermissionGrants.config,
+        expiresAt: clientPermissionGrants.expiresAt,
       })
-      .from(clientFeatureAccess)
+      .from(clientPermissionGrants)
       .where(
         and(
-          eq(clientFeatureAccess.clientAccountId, clientAccountId),
-          eq(clientFeatureAccess.isEnabled, true)
+          eq(clientPermissionGrants.clientAccountId, clientAccountId),
+          eq(clientPermissionGrants.isEnabled, true),
+          isNull(clientPermissionGrants.revokedAt),
         )
       );
 
-    // Convert to a map for easy lookup
-    const featureMap: Record<string, { enabled: boolean; config?: any }> = {};
-    features.forEach((f) => {
-      featureMap[f.feature] = {
-        enabled: f.isEnabled,
-        config: f.config,
-      };
-    });
+    // Filter out expired grants
+    const now = new Date();
+    const activeGrants = grants.filter(
+      (g) => !g.expiresAt || new Date(g.expiresAt) > now
+    );
 
-    // List of all possible features
-    const allFeatures = [
-      'accounts_contacts',
-      'bulk_upload',
-      'campaign_creation',
-      'email_templates',
-      'call_flows',
-      'voice_selection',
-      'calendar_booking',
-      'analytics_dashboard',
-      'reports_export',
-      'api_access',
-    ];
+    const enabledFeatures = activeGrants.map((g) => g.feature);
 
-    // Build complete feature status - default to enabled when no explicit record exists
-    const featureStatus = allFeatures.map((feature) => ({
-      feature,
-      enabled: featureMap[feature] !== undefined ? featureMap[feature].enabled : true,
-      config: featureMap[feature]?.config || null,
+    // Build feature status map
+    const featureStatus = activeGrants.map((g) => ({
+      feature: g.feature,
+      enabled: true,
+      config: g.config || null,
     }));
 
     // Fetch visibility settings alongside features
@@ -243,7 +233,7 @@ router.get('/features', async (req: Request, res: Response) => {
 
     res.json({
       features: featureStatus,
-      enabledFeatures: featureStatus.filter((f) => f.enabled).map((f) => f.feature),
+      enabledFeatures,
       visibilitySettings,
     });
   } catch (error) {
@@ -254,7 +244,7 @@ router.get('/features', async (req: Request, res: Response) => {
 
 /**
  * GET /features/:feature
- * Check if a specific feature is enabled
+ * Check if a specific feature is enabled (default-deny via clientPermissionGrants)
  */
 router.get('/features/:feature', async (req: Request, res: Response) => {
   try {
@@ -265,22 +255,31 @@ router.get('/features/:feature', async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const [featureAccess] = await db
-      .select()
-      .from(clientFeatureAccess)
+    const [grant] = await db
+      .select({
+        isEnabled: clientPermissionGrants.isEnabled,
+        config: clientPermissionGrants.config,
+        expiresAt: clientPermissionGrants.expiresAt,
+      })
+      .from(clientPermissionGrants)
       .where(
         and(
-          eq(clientFeatureAccess.clientAccountId, clientAccountId),
-          eq(clientFeatureAccess.feature, feature as any)
+          eq(clientPermissionGrants.clientAccountId, clientAccountId),
+          eq(clientPermissionGrants.feature, feature as any),
+          eq(clientPermissionGrants.isEnabled, true),
+          isNull(clientPermissionGrants.revokedAt),
         )
       )
       .limit(1);
 
-    // Default to enabled when no explicit record exists (no restrictions)
+    // Default-deny: only enabled if an active, non-expired grant exists
+    const isExpired = grant?.expiresAt ? new Date(grant.expiresAt) <= new Date() : false;
+    const enabled = !!grant && !isExpired;
+
     res.json({
       feature,
-      enabled: featureAccess ? featureAccess.isEnabled : true,
-      config: featureAccess?.config || null,
+      enabled,
+      config: enabled ? (grant?.config || null) : null,
     });
   } catch (error) {
     console.error('[CLIENT SETTINGS] Check feature error:', error);

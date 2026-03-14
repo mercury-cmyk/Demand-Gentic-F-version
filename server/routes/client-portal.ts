@@ -60,8 +60,10 @@ import { ukefTranscriptQaRouter } from '../integrations/ukef_transcript_qa';
 import { UKEF_CLIENT_ACCOUNT_ID } from '../integrations/ukef_reports/types';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
+import clientPortalEmailRouter, { callbackRouter as clientPortalEmailCallbackRouter } from './client-portal-email';
 import clientCampaignPlannerRouter from './client-campaign-planner-routes';
 import clientJourneyPipelineRouter from './client-journey-pipeline-routes';
+import { requireClientFeature, requireAnyClientFeature } from '../middleware/client-feature-gate';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 import { buildCanonicalPortalUrl, getCanonicalPortalBaseUrl } from '../lib/canonical-portal-url';
 import { getRecordingUrl } from '../services/recording-storage';
@@ -622,20 +624,20 @@ function generateOrderNumber(): string {
 }
 
 // ==================== MOUNT ENHANCED CLIENT PORTAL ROUTES ====================
-// These routes require client authentication
-router.use('/projects', requireClientAuth, clientPortalProjectsRouter);
-router.use('/billing', requireClientAuth, clientPortalBillingRouter);
-router.use('/voice', requireClientAuth, clientPortalVoiceRouter);
-router.use('/agent', requireClientAuth, clientPortalAgentRouter);
-router.use('/agentic', requireClientAuth, clientPortalAgenticRouter);
-router.use('/simulation', requireClientAuth, clientPortalSimulationRouter);
+// These routes require client authentication + feature access gates
+router.use('/projects', requireClientAuth, requireClientFeature('pipeline_view'), clientPortalProjectsRouter);
+router.use('/billing', requireClientAuth, requireClientFeature('billing_invoices'), clientPortalBillingRouter);
+router.use('/voice', requireClientAuth, requireClientFeature('voice_selection'), clientPortalVoiceRouter);
+router.use('/agent', requireClientAuth, requireClientFeature('ai_studio_dashboard'), clientPortalAgentRouter);
+router.use('/agentic', requireClientAuth, requireClientFeature('ai_studio_dashboard'), clientPortalAgenticRouter);
+router.use('/simulation', requireClientAuth, requireClientFeature('voice_simulation'), clientPortalSimulationRouter);
 router.use('/settings', requireClientAuth, clientPortalSettingsRouter);
 router.use('/crm', requireClientAuth, clientPortalCrmRouter);
-router.use('/bookings', requireClientAuth, clientPortalBookingsRouter);
-router.use('/orders', requireClientAuth, clientPortalOrdersRouter);
+router.use('/bookings', requireClientAuth, requireClientFeature('calendar_booking'), clientPortalBookingsRouter);
+router.use('/orders', requireClientAuth, requireClientFeature('campaign_queue_view'), clientPortalOrdersRouter);
 
 // Canonical work orders (Direct Agentic Orders) — used by Work Orders tab + Upcoming Events
-router.use('/work-orders', requireClientAuth, clientPortalWorkOrdersRouter);
+router.use('/work-orders', requireClientAuth, requireClientFeature('work_orders'), clientPortalWorkOrdersRouter);
 
 // Argyle event-sourced campaign drafts (feature-flagged, client-gated)
 router.use('/argyle-events', requireClientAuth, argyleEventsRouter);
@@ -647,10 +649,15 @@ router.use('/ukef-reports', requireClientAuth, ukefReportsRouter);
 router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
 
 // AI Campaign Planner (full-funnel multi-channel planning from OI)
-router.use('/campaign-planner', requireClientAuth, clientCampaignPlannerRouter);
+router.use('/campaign-planner', requireClientAuth, requireClientFeature('ai_campaign_planner'), clientCampaignPlannerRouter);
 
 // Lead Journey Pipeline (follow-up management for campaign leads)
-router.use('/journey-pipeline', requireClientAuth, clientJourneyPipelineRouter);
+router.use('/journey-pipeline', requireClientAuth, requireClientFeature('lead_journey_pipeline'), clientJourneyPipelineRouter);
+
+// Email connection — OAuth callbacks (no auth, redirect landing pages)
+router.use('/email', clientPortalEmailCallbackRouter);
+// Email connection — protected endpoints (authorize, status, disconnect, smtp)
+router.use('/email', requireClientAuth, requireClientFeature('email_connect'), clientPortalEmailRouter);
 
 // Campaigns (Client wizard and management)
 /**
@@ -787,7 +794,7 @@ router.get('/campaigns/:campaignId/preview-audience', requireClientAuth, async (
   }
 });
 
-router.use('/campaigns', requireClientAuth, clientPortalCampaignsRouter);
+router.use('/campaigns', requireClientAuth, requireClientFeature('campaign_reports'), clientPortalCampaignsRouter);
 
 // Admin routes for billing/invoice management (requires admin auth)
 router.use('/admin', clientPortalAdminBillingRouter);
@@ -1017,6 +1024,11 @@ router.use((req: Request, res: Response, next: NextFunction) => {
   if (req.path.startsWith('/admin')) return next();
   // For all other paths, apply client auth then forward to the analytics sub-router
   requireClientAuth(req, res, next);
+});
+// Feature-gated analytics: require analytics_dashboard grant
+router.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path.startsWith('/admin')) return next();
+  requireClientFeature('analytics_dashboard')(req, res, next);
 });
 router.use('/', clientPortalAnalyticsRouter);
 

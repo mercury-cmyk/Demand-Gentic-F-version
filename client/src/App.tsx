@@ -135,6 +135,12 @@ const ClientPortalCallReports = lazy(() => import("@/pages/client-portal-call-re
 const ClientPortalAnalytics = lazy(() => import("@/pages/client-portal-analytics"));
 const ClientPortalConversationQuality = lazy(() => import("@/pages/client-portal-conversation-quality"));
 const ClientPortalShowcaseCalls = lazy(() => import("@/pages/client-portal-showcase-calls"));
+const ClientPortalDisposition = lazy(() => import("@/pages/client-portal-disposition"));
+const ClientPortalCostTracking = lazy(() => import("@/pages/client-portal-cost-tracking"));
+const ClientPortalLeadsExport = lazy(() => import("@/pages/client-portal-leads-export"));
+const ClientPortalRecordings = lazy(() => import("@/pages/client-portal-recordings"));
+const ClientPortalReportsExport = lazy(() => import("@/pages/client-portal-reports-export"));
+const ClientPortalEmailInbox = lazy(() => import("@/pages/client-portal-email-inbox"));
 import ClientPortalEmailCampaigns from "@/pages/client-portal-email-campaigns";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
@@ -187,6 +193,7 @@ import IamGrants from "@/pages/iam/iam-grants";
 import IamRequests from "@/pages/iam/iam-requests";
 import IamAudit from "@/pages/iam/iam-audit";
 import IamSecrets from "@/pages/iam/iam-secrets";
+import IamClientAccess from "@/pages/iam/iam-client-access";
 
 const normalizeRole = (role: unknown): string | null => {
   if (typeof role === "string") {
@@ -640,6 +647,7 @@ function AuthenticatedApp() {
               <Route path="/iam/requests" component={IamRequests} />
               <Route path="/iam/audit" component={IamAudit} />
               <Route path="/iam/secrets" component={IamSecrets} />
+              <Route path="/iam/client-access" component={IamClientAccess} />
 
               {/* Operations Hub - GCP Infrastructure Management Dashboard */}
               <Route path="/ops-hub" component={OpsHubPage} />
@@ -914,6 +922,11 @@ function Router() {
           <ClientPortalEmailCampaigns />
         </ClientPortalProtectedRoute>
       </Route>
+      <Route path="/client-portal/email-inbox">
+        <ClientPortalProtectedRoute>
+          <ClientPortalEmailInbox />
+        </ClientPortalProtectedRoute>
+      </Route>
       <Route path="/client-portal/orders/:id">
         <ClientPortalProtectedRoute>
           <ClientPortalOrderDetail />
@@ -934,6 +947,31 @@ function Router() {
           <ClientPortalLayout>
             <ClientServices />
           </ClientPortalLayout>
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/disposition-intelligence">
+        <ClientPortalProtectedRoute>
+          <ClientPortalDisposition />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/cost-tracking">
+        <ClientPortalProtectedRoute>
+          <ClientPortalCostTracking />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/leads">
+        <ClientPortalProtectedRoute>
+          <ClientPortalLeadsExport />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/recordings">
+        <ClientPortalProtectedRoute>
+          <ClientPortalRecordings />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/reports-export">
+        <ClientPortalProtectedRoute>
+          <ClientPortalReportsExport />
         </ClientPortalProtectedRoute>
       </Route>
 

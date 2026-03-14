@@ -7,11 +7,10 @@
 
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
-import { eq, and, or, like, desc, asc, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, like, desc, asc, sql, inArray, isNull } from 'drizzle-orm';
 import {
   clientCrmAccounts,
   clientCrmContacts,
-  clientFeatureAccess,
   clientBulkImports,
   insertClientCrmAccountSchema,
   insertClientCrmContactSchema,
@@ -23,75 +22,14 @@ import {
   clientCampaignAccess,
 } from '@shared/schema';
 import { z } from 'zod';
+import { requireClientFeature } from '../middleware/client-feature-gate';
 
 const router = Router();
 
 // ==================== MIDDLEWARE ====================
 
-/**
- * Check if client has 'accounts_contacts' feature enabled
- */
-async function requireAccountsContactsFeature(req: Request, res: Response, next: Function) {
-  const clientAccountId = req.clientUser?.clientAccountId;
-  if (!clientAccountId) {
-    return res.status(401).json({ message: 'Unauthorized' });
-  }
-
-  const [feature] = await db
-    .select()
-    .from(clientFeatureAccess)
-    .where(
-      and(
-        eq(clientFeatureAccess.clientAccountId, clientAccountId),
-        eq(clientFeatureAccess.feature, 'accounts_contacts')
-      )
-    )
-    .limit(1);
-
-  // Default to enabled when no explicit record exists (no restrictions)
-  if (feature && !feature.isEnabled) {
-    return res.status(403).json({
-      message: 'Accounts & Contacts feature is not enabled for your account',
-      featureRequired: 'accounts_contacts'
-    });
-  }
-
-  next();
-}
-
-/**
- * Check if client has 'bulk_upload' feature enabled
- */
-async function requireBulkUploadFeature(req: Request, res: Response, next: Function) {
-  const clientAccountId = req.clientUser?.clientAccountId;
-  if (!clientAccountId) {
-    return res.status(401).json({ message: 'Unauthorized' });
-  }
-
-  const [feature] = await db
-    .select()
-    .from(clientFeatureAccess)
-    .where(
-      and(
-        eq(clientFeatureAccess.clientAccountId, clientAccountId),
-        eq(clientFeatureAccess.feature, 'bulk_upload')
-      )
-    )
-    .limit(1);
-
-  // Default to enabled when no explicit record exists (no restrictions)
-  if (feature && !feature.isEnabled) {
-    return res.status(403).json({
-      message: 'Bulk upload feature is not enabled for your account',
-      featureRequired: 'bulk_upload'
-    });
-  }
-
-  next();
-}
-
-// Apply accounts_contacts feature check to all routes
-router.use(requireAccountsContactsFeature);
+// Apply accounts_contacts feature check to all routes (default-deny via clientPermissionGrants)
+router.use(requireClientFeature('accounts_contacts'));
 
 // ==================== ACCOUNTS ====================
 
@@ -707,7 +645,7 @@ router.post('/contacts/:id/link-account', async (req: Request, res: Response) =>
  * POST /bulk-import
  * Start a bulk import job for contacts or accounts
  */
-router.post('/bulk-import', requireBulkUploadFeature, async (req: Request, res: Response) => {
+router.post('/bulk-import', requireClientFeature('bulk_upload'), async (req: Request, res: Response) => {
   try {
     const clientAccountId = req.clientUser?.clientAccountId;
     const clientUserId = req.clientUser?.clientUserId;

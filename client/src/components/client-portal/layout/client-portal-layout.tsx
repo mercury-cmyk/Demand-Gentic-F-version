@@ -69,6 +69,9 @@ import {
   GitBranch,
   Wand2,
   Workflow,
+  DollarSign,
+  Download,
+  Inbox,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -116,6 +119,36 @@ const agenticOperator = {
   description: 'Unified agentic operations panel',
 };
 
+// Map nav item hrefs to required feature flags for gating.
+// Items not listed are always shown (e.g. Dashboard Overview, Settings, Guide).
+const NAV_FEATURE_MAP: Record<string, string> = {
+  '/client-portal/dashboard?tab=campaigns': 'campaign_reports',
+  '/client-portal/create-campaign': 'campaign_reports',
+  '/client-portal/dashboard?tab=journey-pipeline': 'lead_journey_pipeline',
+  '/client-portal/dashboard?tab=campaign-pipeline': 'pipeline_view',
+  '/client-portal/dashboard?tab=work-orders': 'work_orders',
+  '/client-portal/dashboard?tab=bookings': 'calendar_booking',
+  '/client-portal/agents': 'ai_studio_dashboard',
+  '/client-portal/intelligence': 'ai_studio_dashboard',
+  '/client-portal/dashboard?tab=target-markets': 'ai_studio_dashboard',
+  '/client-portal/dashboard?tab=campaign-planner': 'ai_campaign_planner',
+  '/client-portal/generative-studio': 'ai_studio_dashboard',
+  '/client-portal/preview-studio': 'voice_simulation',
+  '/client-portal/analytics': 'analytics_dashboard',
+  '/client-portal/conversation-quality': 'analytics_dashboard',
+  '/client-portal/showcase-calls': 'analytics_dashboard',
+  '/client-portal/dashboard?tab=billing': 'billing_invoices',
+  '/client-portal/disposition-intelligence': 'disposition_overview',
+  '/client-portal/cost-tracking': 'billing_cost_tracking',
+  '/client-portal/leads': 'lead_export',
+  '/client-portal/recordings': 'call_recordings_playback',
+  '/client-portal/reports-export': 'reports_export',
+  '/client-portal/call-reports': 'campaign_reports',
+  '/client-portal/email-campaigns': 'email_connect',
+  '/client-portal/email-simulation': 'email_connect',
+  '/client-portal/email-inbox': 'email_inbox',
+};
+
 // Grouped navigation structure
 const baseNavigationGroups: NavGroup[] = [
   {
@@ -138,6 +171,7 @@ const baseNavigationGroups: NavGroup[] = [
       // { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
       // { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
       { name: 'Bookings', href: '/client-portal/dashboard?tab=bookings', icon: CalendarDays },
+      { name: 'Leads & Export', href: '/client-portal/leads', icon: Download },
     ],
   },
   {
@@ -159,6 +193,10 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'Analytics', href: '/client-portal/analytics', icon: BarChart3 },
       { name: 'Conversation Quality', href: '/client-portal/conversation-quality', icon: MessageSquareText },
       { name: 'Showcase Calls', href: '/client-portal/showcase-calls', icon: Trophy },
+      { name: 'Disposition Intelligence', href: '/client-portal/disposition-intelligence', icon: Target },
+      { name: 'Call Reports', href: '/client-portal/call-reports', icon: Phone },
+      { name: 'Recordings', href: '/client-portal/recordings', icon: Mic },
+      { name: 'Reports & Export', href: '/client-portal/reports-export', icon: FileText },
     ],
   },
   {
@@ -166,6 +204,16 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'Billing',
     items: [
       { name: 'Billing & Invoices', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
+      { name: 'Cost Tracking', href: '/client-portal/cost-tracking', icon: DollarSign },
+    ],
+  },
+  {
+    id: 'email',
+    label: 'Email',
+    items: [
+      { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
+      { name: 'Email Studio', href: '/client-portal/email-simulation', icon: Sparkles },
+      { name: 'Inbox', href: '/client-portal/email-inbox', icon: Inbox },
     ],
   },
   {
@@ -294,12 +342,27 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   // Build navigation dynamically based on feature availability
   const navigationGroups = React.useMemo(() => {
-    let groups = baseNavigationGroups.map(group => ({ ...group, items: [...group.items] }));
+    const enabledSet = new Set(enabledFeatures);
+
+    let groups = baseNavigationGroups.map(group => ({
+      ...group,
+      items: group.items.filter(item => {
+        const requiredFeature = NAV_FEATURE_MAP[item.href];
+        // If no feature mapping, always show the item
+        if (!requiredFeature) return true;
+        // If features haven't loaded yet (empty array), show all to avoid flicker
+        if (enabledFeatures.length === 0) return true;
+        return enabledSet.has(requiredFeature);
+      }),
+    }));
 
     // Hide billing group if showBilling is explicitly false
     if (visibilitySettings.showBilling === false) {
       groups = groups.filter(g => g.id !== 'billing');
     }
+
+    // Remove empty groups after filtering
+    groups = groups.filter(g => g.items.length > 0);
 
     // Rename AI & Intelligence group to [Client Name] AI Studio
     const aiGroup = groups.find(g => g.id === 'ai-intelligence');
@@ -324,7 +387,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     }
 
     return groups;
-  }, [argyleFeatureStatus?.enabled, user?.clientAccountName, visibilitySettings.showBilling]);
+  }, [argyleFeatureStatus?.enabled, user?.clientAccountName, visibilitySettings.showBilling, enabledFeatures]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {
