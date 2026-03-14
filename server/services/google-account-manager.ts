@@ -195,6 +195,7 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     { api: "storage.googleapis.com", name: "Cloud Storage API", reason: "Recording storage" },
     { api: "secretmanager.googleapis.com", name: "Secret Manager API", reason: "VM secret fetching" },
     { api: "compute.googleapis.com", name: "Compute Engine API", reason: "VM management" },
+    { api: "workstations.googleapis.com", name: "Cloud Workstations API", reason: "Cloud workstation clusters for dev environments" },
   ];
   for (const { api, name, reason } of requiredApis) {
     items.push({
@@ -214,7 +215,7 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     area: "Service Account IAM Roles",
     description: "Grant required roles to service account",
     status: account.serviceAccountJson ? "action_needed" : "skipped",
-    detail: "Required roles: roles/storage.admin, roles/secretmanager.secretAccessor, roles/aiplatform.user, roles/logging.logWriter",
+    detail: "Required roles: roles/storage.admin, roles/secretmanager.secretAccessor, roles/aiplatform.user, roles/logging.logWriter, roles/workstations.admin",
   });
 
   // OAuth consent screen
