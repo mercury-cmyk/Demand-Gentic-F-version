@@ -46,7 +46,7 @@ import { analyzeVoicemailTranscript } from "./voicemail-detection";
 // Configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
 // Model name - strip 'models/' prefix if present for Vertex AI
-const RAW_GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.0-flash-live-001";
+const RAW_GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 const GEMINI_MODEL_ID = RAW_GEMINI_MODEL.replace(/^models\//, '');
 
 // Vertex AI configuration - prefer Vertex AI (paid) over Google AI Studio (free/limited)

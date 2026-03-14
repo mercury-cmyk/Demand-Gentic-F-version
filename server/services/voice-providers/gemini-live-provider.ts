@@ -138,7 +138,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     const model = this.modelOverride || await getVoiceModelForProvider('google');
     this.activeModel = model;
 
-    // ALWAYS use Vertex AI when project ID is available (required for gemini-live-2.5-flash-native-audio)
+    // ALWAYS use Vertex AI when project ID is available (required for gemini-2.5-flash-native-audio-latest)
     // API keys (Google AI Studio) don't support the native audio models
     const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
 
@@ -267,7 +267,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             console.error(`${LOG_PREFIX} 💡 Try getting a new API key from https://aistudio.google.com/apikey`);
           }
           if (error.message?.includes('404')) {
-            console.error(`${LOG_PREFIX} 🔍 Model not found - check GEMINI_LIVE_MODEL (current: ${process.env.GEMINI_LIVE_MODEL || 'gemini-live-2.5-flash-native-audio'})`);
+            console.error(`${LOG_PREFIX} 🔍 Model not found - check GEMINI_LIVE_MODEL (current: ${process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest'})`);
           }
           this.emitError('connection_error', error.message, false);
           reject(error);
@@ -325,7 +325,7 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     }
 
     // Primary model exhausted retries — try known fallback model names
-    // Note: As of 2026-03, only 'gemini-live-2.5-flash-native-audio' works via Vertex AI WebSocket.
+    // Note: As of 2026-03, only 'gemini-2.5-flash-native-audio-latest' works via Vertex AI WebSocket.
     // Other model names (dialog, flash-live, etc.) all return code=1008.
     const FALLBACK_MODELS: string[] = [];
 

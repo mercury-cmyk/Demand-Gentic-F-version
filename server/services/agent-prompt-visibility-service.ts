@@ -804,7 +804,7 @@ We are Pivotal B2B, a B2B demand generation platform that helps companies improv
     },
     gemini: {
       provider: 'gemini',
-      model: 'gemini-live-2.5-flash-native-audio',
+      model: 'gemini-2.5-flash-native-audio-latest',
       systemPrompt: geminiSystemPrompt,
       userPromptTemplate: userPromptTemplate,
       sampleUserPrompt: sampleUserPrompt,

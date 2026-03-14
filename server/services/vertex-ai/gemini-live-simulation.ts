@@ -198,7 +198,7 @@ Remember: You are simulating a REAL prospect. Make this a valuable training exer
   async connect(): Promise<void> {
     const projectId = getGcpProjectId();
     const location = getGcpLocation();
-    const model = process.env.GEMINI_LIVE_MODEL || "gemini-live-2.5-flash-native-audio";
+    const model = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 
     if (!projectId) {
       throw new Error("GOOGLE_CLOUD_PROJECT or GCP_PROJECT_ID required for Gemini Live");
@@ -280,7 +280,7 @@ Remember: You are simulating a REAL prospect. Make this a valuable training exer
 
     const projectId = getGcpProjectId();
     const location = getGcpLocation();
-    const model = process.env.GEMINI_LIVE_MODEL || "gemini-live-2.5-flash-native-audio";
+    const model = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 
     const setupMessage = {
       setup: {

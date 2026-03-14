@@ -8,7 +8,7 @@ config();
 
 const PORT = 8082;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "models/gemini-live-2.5-flash-native-audio";
+const GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "models/gemini-2.5-flash-native-audio-latest";
 
 if (!GEMINI_API_KEY) {
   console.error("GEMINI_API_KEY is missing in environment variables.");
