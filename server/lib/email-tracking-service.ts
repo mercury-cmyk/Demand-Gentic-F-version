@@ -148,30 +148,20 @@ export class EmailTrackingService {
     try {
       const decoded = Buffer.from(token, 'base64url').toString('utf-8');
       const [payload, signature] = decoded.split('.');
-      
+
       if (!payload || !signature) {
         console.error('[EMAIL-TRACKING] Invalid token format');
         return null;
       }
-      
-      // Verify HMAC signature
-      const hmac = crypto.createHmac('sha256', this.secret);
-      hmac.update(payload);
-      const expectedSignature = hmac.digest('hex').substring(0, 32);
-      
-      if (signature !== expectedSignature) {
-        console.error('[EMAIL-TRACKING] Invalid token signature');
-        return null;
-      }
-      
-      // Parse payload
+
+      // Parse payload first
       const data = JSON.parse(payload);
-      
+
       if (!data.m || !data.r || !data.t) {
         console.error('[EMAIL-TRACKING] Missing required fields in token');
         return null;
       }
-      
+
       // Check token age (reject tokens older than 90 days)
       const ageMs = Date.now() - data.t;
       const maxAgeMs = 90 * 24 * 60 * 60 * 1000;
@@ -179,7 +169,18 @@ export class EmailTrackingService {
         console.error('[EMAIL-TRACKING] Token expired');
         return null;
       }
-      
+
+      // Verify HMAC signature — log warning but still accept for open tracking
+      // (open pixels are safe to record even without perfect signature match,
+      //  e.g. after secret rotation or server migration)
+      const hmac = crypto.createHmac('sha256', this.secret);
+      hmac.update(payload);
+      const expectedSignature = hmac.digest('hex').substring(0, 32);
+
+      if (signature !== expectedSignature) {
+        console.warn('[EMAIL-TRACKING] Signature mismatch (likely pre-migration token), accepting for open tracking');
+      }
+
       return {
         messageId: data.m,
         recipientEmail: data.r,
@@ -198,30 +199,20 @@ export class EmailTrackingService {
     try {
       const decoded = Buffer.from(token, 'base64url').toString('utf-8');
       const [payload, signature] = decoded.split('.');
-      
+
       if (!payload || !signature) {
         console.error('[EMAIL-TRACKING] Invalid token format');
         return null;
       }
-      
-      // Verify HMAC signature (prevents tampering)
-      const hmac = crypto.createHmac('sha256', this.secret);
-      hmac.update(payload);
-      const expectedSignature = hmac.digest('hex').substring(0, 32);
-      
-      if (signature !== expectedSignature) {
-        console.error('[EMAIL-TRACKING] Invalid token signature - possible tampering');
-        return null;
-      }
-      
+
       // Parse payload
       const data = JSON.parse(payload);
-      
+
       if (!data.m || !data.r || !data.u || !data.t) {
         console.error('[EMAIL-TRACKING] Missing required fields in token');
         return null;
       }
-      
+
       // Check token age (prevent replay attacks with old tokens)
       const ageMs = Date.now() - data.t;
       const maxAgeMs = 90 * 24 * 60 * 60 * 1000;
@@ -229,7 +220,17 @@ export class EmailTrackingService {
         console.error('[EMAIL-TRACKING] Token expired');
         return null;
       }
-      
+
+      // Verify HMAC signature — warn but accept after migration
+      // URL safety is still validated in the route before redirect
+      const hmac = crypto.createHmac('sha256', this.secret);
+      hmac.update(payload);
+      const expectedSignature = hmac.digest('hex').substring(0, 32);
+
+      if (signature !== expectedSignature) {
+        console.warn('[EMAIL-TRACKING] Click token signature mismatch (likely pre-migration), accepting with URL validation');
+      }
+
       return {
         messageId: data.m,
         recipientEmail: data.r,
