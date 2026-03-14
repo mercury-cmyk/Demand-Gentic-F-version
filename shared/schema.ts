@@ -16313,6 +16313,11 @@ export const googleCloudAccounts = pgTable("google_cloud_accounts", {
   // State
   isActive: boolean("is_active").notNull().default(false),
   isDefault: boolean("is_default").notNull().default(false),
+  // Pool configuration — controls how this account participates in the Gemini key pool
+  poolEnabled: boolean("pool_enabled").notNull().default(true),        // include in voice call pool
+  poolRole: varchar("pool_role", { length: 20 }).notNull().default("api_only"), // "host" = VM+infra, "api_only" = Gemini API only, "full" = both
+  poolMaxSessions: integer("pool_max_sessions").notNull().default(20), // max concurrent voice sessions for this account
+  poolPriority: integer("pool_priority").notNull().default(0),         // higher = preferred (0 = equal weight)
   // Health / last switch
   lastActivatedAt: timestamp("last_activated_at", { withTimezone: true }),
   lastActivatedBy: varchar("last_activated_by", { length: 36 }),

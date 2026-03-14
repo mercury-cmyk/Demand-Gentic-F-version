@@ -85,10 +85,12 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
       googleClientId, googleClientSecret, googleOauthRedirectUri,
       serviceAccountJson,  // plain JSON string from the client
       isDefault,
+      // Pool configuration
+      poolEnabled, poolRole, poolMaxSessions, poolPriority,
     } = req.body;
 
-    if (!name || !projectId || !gcsBucket) {
-      return res.status(400).json({ error: "name, projectId, and gcsBucket are required" });
+    if (!name || !projectId) {
+      return res.status(400).json({ error: "name and projectId are required" });
     }
 
     // Encrypt service account JSON if provided
@@ -109,12 +111,13 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
     }
 
     const userId = (req as any).user?.id || "system";
+    const effectiveRole = poolRole || (gcsBucket ? "full" : "api_only");
     const [created] = await db.insert(googleCloudAccounts).values({
       name,
       description: description || null,
       projectId,
       location: location || "us-central1",
-      gcsBucket,
+      gcsBucket: gcsBucket || `${projectId}-storage`, // default bucket name for api_only
       geminiApiKey: geminiApiKey || null,
       googleSearchApiKey: googleSearchApiKey || null,
       googleSearchEngineId: googleSearchEngineId || null,
@@ -125,11 +128,19 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
       serviceAccountEmail,
       isActive: false,
       isDefault: isDefault || false,
+      poolEnabled: poolEnabled !== false,
+      poolRole: effectiveRole,
+      poolMaxSessions: poolMaxSessions || 20,
+      poolPriority: poolPriority || 0,
       createdBy: userId,
       updatedBy: userId,
     }).returning();
 
     const { serviceAccountJson: _sa, ...safe } = created;
+
+    // Auto-reload pool so new account is immediately available for voice calls
+    geminiApiKeyPool.reload().catch(err => console.warn("[GcpAccounts] Pool reload after create:", err.message));
+
     res.status(201).json(safe);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -152,6 +163,7 @@ router.put("/:id", requireAuth, async (req: Request, res: Response) => {
       geminiApiKey, googleSearchApiKey, googleSearchEngineId,
       googleClientId, googleClientSecret, googleOauthRedirectUri,
       serviceAccountJson, isDefault,
+      poolEnabled, poolRole, poolMaxSessions, poolPriority,
     } = req.body;
 
     const updates: Partial<typeof googleCloudAccounts.$inferInsert> = { updatedAt: new Date() };
@@ -168,6 +180,11 @@ router.put("/:id", requireAuth, async (req: Request, res: Response) => {
     if (googleSearchEngineId !== undefined) updates.googleSearchEngineId = googleSearchEngineId || null;
     if (googleClientId !== undefined) updates.googleClientId = googleClientId || null;
     if (googleClientSecret !== undefined) updates.googleClientSecret = googleClientSecret || null;
+    // Pool config
+    if (poolEnabled !== undefined) updates.poolEnabled = poolEnabled;
+    if (poolRole !== undefined) updates.poolRole = poolRole;
+    if (poolMaxSessions !== undefined) updates.poolMaxSessions = poolMaxSessions;
+    if (poolPriority !== undefined) updates.poolPriority = poolPriority;
     if (googleOauthRedirectUri !== undefined) updates.googleOauthRedirectUri = googleOauthRedirectUri || null;
     if (isDefault !== undefined) updates.isDefault = isDefault;
 
@@ -193,6 +210,10 @@ router.put("/:id", requireAuth, async (req: Request, res: Response) => {
       .returning();
 
     const { serviceAccountJson: _sa, ...safe } = updated;
+
+    // Auto-reload pool so updated config takes effect immediately
+    geminiApiKeyPool.reload().catch(err => console.warn("[GcpAccounts] Pool reload after update:", err.message));
+
     res.json(safe);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -214,6 +235,10 @@ router.delete("/:id", requireAuth, async (req: Request, res: Response) => {
     }
 
     await db.delete(googleCloudAccounts).where(eq(googleCloudAccounts.id, req.params.id));
+
+    // Auto-reload pool so removed account is excluded
+    geminiApiKeyPool.reload().catch(err => console.warn("[GcpAccounts] Pool reload after delete:", err.message));
+
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
