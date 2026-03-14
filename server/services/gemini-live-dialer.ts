@@ -43,8 +43,10 @@ import { releaseProspectLock } from "./active-call-tracker";
 import { handleCallCompleted } from "./number-pool-integration";
 import { analyzeVoicemailTranscript } from "./voicemail-detection";
 
-// Configuration
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+// Configuration — use a getter so key changes from account manager or pool are picked up
+let _geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+function getGeminiApiKey() { return process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || _geminiApiKey; }
+const GEMINI_API_KEY_COMPAT = _geminiApiKey; // kept for backward compat checks only
 // Model name - strip 'models/' prefix if present for Vertex AI
 const RAW_GEMINI_MODEL = process.env.GEMINI_LIVE_MODEL || "gemini-2.5-flash-native-audio-latest";
 const GEMINI_MODEL_ID = RAW_GEMINI_MODEL.replace(/^models\//, '');
@@ -92,7 +94,7 @@ function getGeminiWebSocketUrl(): string {
     return `wss://${VERTEX_AI_LOCATION}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
   } else {
     // Google AI Studio endpoint - uses API key in URL
-    return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${GEMINI_API_KEY}`;
+    return `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${getGeminiApiKey()}`;
   }
 }
 
@@ -863,8 +865,8 @@ Example: After saying "Thank you, have a great day!", WAIT for prospect's goodby
 export async function handleGeminiLiveConnection(ws: WebSocket, req: IncomingMessage) {
   console.log('[Gemini Live] 📞 New incoming call stream connection');
 
-  if (!GEMINI_API_KEY) {
-    console.error('[Gemini Live] ❌ GEMINI_API_KEY is not configured');
+  if (!getGeminiApiKey() && !USE_VERTEX_AI) {
+    console.error('[Gemini Live] ❌ No GEMINI_API_KEY and no Vertex AI project configured');
     ws.close(1011, 'Gemini API Key missing');
     return;
   }

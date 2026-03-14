@@ -11,6 +11,8 @@
  * GET    /api/google-cloud-accounts/:id/migration-checklist      persistent checklist with status
  * PATCH  /api/google-cloud-accounts/:id/migration-checklist/:itemId  update single item status
  * PATCH  /api/google-cloud-accounts/:id/migration-checklist      bulk update item statuses
+ * GET    /api/google-cloud-accounts/pool/stats                  Gemini API key pool status
+ * POST   /api/google-cloud-accounts/pool/reload                 reload pool keys from DB
  */
 
 import { Router, Request, Response } from "express";
@@ -29,6 +31,7 @@ import {
   updateChecklistItem,
   getMergedChecklist,
 } from "../services/google-account-manager";
+import { geminiApiKeyPool } from "../services/gemini-api-key-pool";
 
 const router = Router();
 
@@ -37,6 +40,26 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
     const accounts = await listAccounts();
     res.json(accounts);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GEMINI API KEY POOL (must be before /:id to avoid matching "pool" as id) ─
+// GET /api/google-cloud-accounts/pool/stats — pool status and per-key metrics
+router.get("/pool/stats", requireAuth, async (_req: Request, res: Response) => {
+  try {
+    res.json(geminiApiKeyPool.getStats());
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/google-cloud-accounts/pool/reload — reload keys from DB
+router.post("/pool/reload", requireAuth, async (_req: Request, res: Response) => {
+  try {
+    await geminiApiKeyPool.reload();
+    res.json({ ok: true, stats: geminiApiKeyPool.getStats() });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

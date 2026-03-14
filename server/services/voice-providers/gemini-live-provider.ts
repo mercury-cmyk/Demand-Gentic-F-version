@@ -49,6 +49,7 @@ import {
   getVertexModelName,
 } from "./gemini-types";
 import { getVoiceModelForProvider } from "../ai-model-governance";
+import { geminiApiKeyPool, type AcquiredSlot } from "../gemini-api-key-pool";
 
 const LOG_PREFIX = "[Gemini-Provider]";
 const DEBUG = process.env.DEBUG_VOICE_PROVIDERS === 'true';
@@ -120,6 +121,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
   // queue it and auto-send when setupComplete fires. Prevents silent agent on race conditions.
   private pendingOpeningMessage: string | null = null;
 
+  // Pool slot — tracks which API key from the pool is used for this connection
+  private poolSlot: AcquiredSlot | null = null;
+
   // Override setResponding to log audio state transitions for debugging voice delivery issues
   protected setResponding(responding: boolean, responseId?: string): void {
     const wasResponding = this._isResponding;
@@ -133,17 +137,41 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
   async connect(): Promise<void> {
     const { getGcpProjectId, getGcpLocation } = await import('../../lib/gcp-config');
-    const projectId = getGcpProjectId();
-    const location = getGcpLocation();
     const model = this.modelOverride || await getVoiceModelForProvider('google');
     this.activeModel = model;
 
-    // ALWAYS use Vertex AI when project ID is available (required for gemini-2.5-flash-native-audio-latest)
-    // API keys (Google AI Studio) don't support the native audio models
-    const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+    // Acquire a slot from the Gemini API key pool (round-robin across accounts)
+    let slot: AcquiredSlot;
+    try {
+      slot = await geminiApiKeyPool.acquire();
+      this.poolSlot = slot;
+    } catch (poolErr: any) {
+      // Fallback to single env-based config if pool fails
+      console.warn(`${LOG_PREFIX} Pool acquire failed (${poolErr.message}), falling back to env config`);
+      const projectId = getGcpProjectId();
+      const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!projectId && !apiKey) {
+        throw new Error("Google Cloud Project ID or API key required (pool exhausted and no env fallback)");
+      }
+      slot = {
+        accountId: "env-fallback",
+        accountName: "Environment Fallback",
+        projectId: projectId || "",
+        location: getGcpLocation(),
+        apiKey: apiKey || null,
+        useVertexAI: !!projectId,
+        getAccessToken: async () => {
+          const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+          const token = await auth.getAccessToken();
+          if (!token) throw new Error("Failed to get access token");
+          return token;
+        },
+        release: () => {},
+      };
+      this.poolSlot = slot;
+    }
 
-    // Prefer Vertex AI when project ID is available (better model support + required for native audio)
-    const useVertexAI = !!projectId;
+    const { projectId, location, apiKey, useVertexAI } = slot;
 
     if (DEBUG) {
       console.log(`${LOG_PREFIX} Configuration:`, {
@@ -152,11 +180,14 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         hasApiKey: !!apiKey,
         hasProjectId: !!projectId,
         projectId: projectId || 'N/A',
+        poolAccount: slot.accountName,
         reason: useVertexAI ? 'Using Vertex AI (project ID available)' : 'Using Google AI Studio (no project ID)'
       });
     }
 
     if (!useVertexAI && !apiKey) {
+      slot.release();
+      this.poolSlot = null;
       throw new Error("Google Cloud Project ID (for Vertex AI) or API key (for Google AI Studio) required");
     }
 
@@ -166,17 +197,10 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         let headers: Record<string, string> = {};
 
         if (useVertexAI) {
-          // Vertex AI endpoint - use OAuth2
-          if (DEBUG) console.log(`${LOG_PREFIX} Using Vertex AI endpoint for project: ${projectId}`);
+          // Vertex AI endpoint - use OAuth2 via pool slot's auth
+          if (DEBUG) console.log(`${LOG_PREFIX} Using Vertex AI endpoint for project: ${projectId} (${slot.accountName})`);
 
-          this.auth = new GoogleAuth({
-            scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-          });
-
-          const accessToken = await this.auth.getAccessToken();
-          if (!accessToken) {
-            throw new Error("Failed to get Google Cloud access token");
-          }
+          const accessToken = await slot.getAccessToken();
 
           wsUrl = getGeminiLiveEndpoint({
             projectId: projectId!,
@@ -189,8 +213,8 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
             "Authorization": `Bearer ${accessToken}`,
           };
         } else {
-          // Google AI endpoint - use API key
-          if (DEBUG) console.log(`${LOG_PREFIX} Using Google AI endpoint`);
+          // Google AI endpoint - use API key from pool slot
+          if (DEBUG) console.log(`${LOG_PREFIX} Using Google AI endpoint (${slot.accountName})`);
 
           wsUrl = getGeminiLiveEndpoint({
             projectId: '',
@@ -222,7 +246,9 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
 
         this.ws.on("open", () => {
           clearTimeout(this.connectionTimeout!);
-          console.log(`${LOG_PREFIX} Connected to Gemini Live API`);
+          console.log(`${LOG_PREFIX} Connected to Gemini Live API (pool: ${slot.accountName})`);
+          // Report success to pool
+          if (this.poolSlot) geminiApiKeyPool.reportSuccess(this.poolSlot.accountId);
           // Start WebSocket keepalive to prevent silent connection drops
           this.startKeepalive();
           // Don't emit connected yet - wait for setup_complete
@@ -260,11 +286,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
         });
 
         this.ws.on("error", (error: any) => {
-          console.error(`${LOG_PREFIX} ❌ WebSocket error:`, error);
+          console.error(`${LOG_PREFIX} ❌ WebSocket error (pool: ${slot.accountName}):`, error);
           console.error(`${LOG_PREFIX} Error details: code=${error.code}, errno=${error.errno}, message=${error.message}`);
+          // Report failure to pool for rate-limit/auth rotation
+          if (this.poolSlot) geminiApiKeyPool.reportFailure(this.poolSlot.accountId, error.message);
           if (error.message?.includes('401') || error.message?.includes('403')) {
-            console.error(`${LOG_PREFIX} 🔑 Authentication failed - your GEMINI_API_KEY may not have access to Gemini Live API`);
-            console.error(`${LOG_PREFIX} 💡 Try getting a new API key from https://aistudio.google.com/apikey`);
+            console.error(`${LOG_PREFIX} 🔑 Authentication failed for ${slot.accountName}`);
           }
           if (error.message?.includes('404')) {
             console.error(`${LOG_PREFIX} 🔍 Model not found - check GEMINI_LIVE_MODEL (current: ${process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest'})`);
@@ -513,6 +540,12 @@ export class GeminiLiveProvider extends BaseVoiceProvider {
     this.receivedOutputTranscription = false;
     // Reset reconnection state
     this.reconnectAttempts = 0;
+
+    // Release pool slot
+    if (this.poolSlot) {
+      this.poolSlot.release();
+      this.poolSlot = null;
+    }
     this.setConnected(false);
   }
 
