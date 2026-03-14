@@ -298,8 +298,19 @@ export class LogStreamingService {
         }
       }
 
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close(1000, 'log stream ended');
+      // Stream ended — auto-reconnect instead of closing
+      if (ws.readyState === WebSocket.OPEN && !controller.signal.aborted) {
+        console.warn('[LogStreaming] Ops agent stream ended, auto-reconnecting in 3s...');
+        ws.send(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          severity: 'INFO',
+          message: '🔄 Log stream reconnecting...',
+          resource: 'vm-log-stream',
+        }));
+        await new Promise(r => setTimeout(r, 3000));
+        if (ws.readyState === WebSocket.OPEN && !controller.signal.aborted) {
+          return this.attachVmLogStream(ws, options);
+        }
       }
     } catch (error) {
       if (controller.signal.aborted) {

@@ -16318,6 +16318,10 @@ export const googleCloudAccounts = pgTable("google_cloud_accounts", {
   poolRole: varchar("pool_role", { length: 20 }).notNull().default("api_only"), // "host" = VM+infra, "api_only" = Gemini API only, "full" = both
   poolMaxSessions: integer("pool_max_sessions").notNull().default(20), // max concurrent voice sessions for this account
   poolPriority: integer("pool_priority").notNull().default(0),         // higher = preferred (0 = equal weight)
+  // Multi-cloud: VM can run on any cloud, GCP accounts only provide AI APIs
+  vmProvider: varchar("vm_provider", { length: 20 }).default("gcp"),   // "gcp" | "aws" | "azure" | "bare_metal" — where VM runs
+  vmIp: varchar("vm_ip", { length: 45 }),                              // VM external IP (if this account hosts a VM)
+  vmRegion: varchar("vm_region", { length: 50 }),                      // VM region (e.g. "us-east-1" for AWS, "eastus" for Azure)
   // Health / last switch
   lastActivatedAt: timestamp("last_activated_at", { withTimezone: true }),
   lastActivatedBy: varchar("last_activated_by", { length: 36 }),
