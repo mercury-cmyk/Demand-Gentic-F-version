@@ -196,6 +196,12 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     { api: "secretmanager.googleapis.com", name: "Secret Manager API", reason: "VM secret fetching" },
     { api: "compute.googleapis.com", name: "Compute Engine API", reason: "VM management" },
     { api: "workstations.googleapis.com", name: "Cloud Workstations API", reason: "Cloud workstation clusters for dev environments" },
+    { api: "pubsub.googleapis.com", name: "Cloud Pub/Sub API", reason: "Log streaming via Pub/Sub topic + subscription" },
+    { api: "logging.googleapis.com", name: "Cloud Logging API", reason: "Cloud Logging sink for real-time log streaming" },
+    { api: "cloudbuild.googleapis.com", name: "Cloud Build API", reason: "CI/CD deploy pipeline from GitHub Actions" },
+    { api: "artifactregistry.googleapis.com", name: "Artifact Registry API", reason: "Docker image storage for Cloud Build/Run deployments" },
+    { api: "run.googleapis.com", name: "Cloud Run API", reason: "Cloud Run deployment manager" },
+    { api: "bigquery.googleapis.com", name: "BigQuery API", reason: "Cost tracker data storage (non-critical)" },
   ];
   for (const { api, name, reason } of requiredApis) {
     items.push({
@@ -215,7 +221,7 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     area: "Service Account IAM Roles",
     description: "Grant required roles to service account",
     status: account.serviceAccountJson ? "action_needed" : "skipped",
-    detail: "Required roles: roles/storage.admin, roles/secretmanager.secretAccessor, roles/aiplatform.user, roles/logging.logWriter, roles/workstations.admin",
+    detail: "Required roles: roles/storage.admin, roles/secretmanager.secretAccessor, roles/aiplatform.user, roles/logging.admin, roles/workstations.admin, roles/pubsub.editor, roles/cloudbuild.builds.editor, roles/run.admin, roles/bigquery.dataEditor, roles/bigquery.jobUser",
   });
 
   // OAuth consent screen
@@ -225,7 +231,7 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     area: "OAuth Consent Screen",
     description: "Configure OAuth consent screen with app name, domain, and scopes",
     status: "action_needed",
-    detail: "Required scopes: email, profile, openid, gmail.readonly, gmail.send, gmail.modify. Add test users or publish app.",
+    detail: "Required scopes: email, profile, openid, gmail.readonly, gmail.send, gmail.modify. Add test users or publish app. Register authorized redirect URIs: https://demandgentic.ai/api/oauth/google/callback, https://demandgentic.ai/api/smtp-providers/oauth/google/callback",
   });
 
   // Gmail reconnection
@@ -255,7 +261,7 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     area: "Secret Manager",
     description: "Push all secrets to new project's Secret Manager",
     status: "action_needed",
-    detail: "Run update-secrets.sh with correct PROJECT_ID, or manually create secrets in the new project",
+    detail: "CRITICAL: Update PROJECT_ID in update-secrets.sh (line 8) and PROJECT in vm-deploy/fetch-secrets.sh (line 10) to the new GCP project ID. Also update the compute SA email in update-secrets.sh (line ~120) to {NEW_PROJECT_NUMBER}-compute@developer.gserviceaccount.com. Then run update-secrets.sh.",
   });
 
   // VM deployment
@@ -263,9 +269,9 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     id: "vm_ip",
     category: "manual",
     area: "VM Deployment",
-    description: "Update PUBLIC_IP in .env and fetch-secrets.sh if VM IP changed",
+    description: "Update PUBLIC_IP in .env, fetch-secrets.sh, and docker-compose.yml if VM IP changed",
     status: "action_needed",
-    detail: "Check: PUBLIC_IP, BASE_URL, APP_BASE_URL, TELNYX_WEBHOOK_URL",
+    detail: "Update: (1) PUBLIC_IP, BASE_URL, APP_BASE_URL, TELNYX_WEBHOOK_URL in .env, (2) --external-ip on drachtio command in vm-deploy/docker-compose.yml, (3) PUBLIC_IP in vm-deploy/fetch-secrets.sh",
   });
 
   items.push({
@@ -353,6 +359,76 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     description: "Deploy gcp-service-account.json to /opt/demandgentic/ on the VM",
     status: "action_needed",
     detail: "Docker compose mounts ../gcp-service-account.json:/app/gcp-service-account.json:ro",
+  });
+
+  // Docker compose hardcoded project ID in media-bridge
+  items.push({
+    id: "docker_compose_project_id",
+    category: "manual",
+    area: "Docker Compose",
+    description: "Update hardcoded GOOGLE_CLOUD_PROJECT in vm-deploy/docker-compose.yml media-bridge service",
+    status: "action_needed",
+    detail: "The media-bridge container has GOOGLE_CLOUD_PROJECT=demandgentic hardcoded (not from .env). Update to the new project ID. Also verify GOOGLE_CLOUD_LOCATION is correct for the new region.",
+  });
+
+  // Brevo API key
+  items.push({
+    id: "brevo_api_key",
+    category: "manual",
+    area: "Email Sending (Brevo)",
+    description: "Add BREVO_API_KEY to Secret Manager and vm-deploy/fetch-secrets.sh",
+    status: "action_needed",
+    detail: "BREVO_API_KEY is used for campaign email sending and contact sync but is NOT in fetch-secrets.sh. Add it to the SECRETS array and push to Secret Manager.",
+  });
+
+  // ElevenLabs secrets
+  items.push({
+    id: "elevenlabs_secrets",
+    category: "manual",
+    area: "ElevenLabs Voice",
+    description: "Ensure ELEVENLABS_AGENT_ID and ELEVENLABS_PHONE_NUMBER_ID are in Secret Manager and fetch-secrets.sh",
+    status: "action_needed",
+    detail: "These secrets are used by the ElevenLabs voice agent but may be missing from vm-deploy/fetch-secrets.sh SECRETS array.",
+  });
+
+  // AI_INTEGRATIONS_GEMINI_BASE_URL
+  items.push({
+    id: "gemini_base_url",
+    category: "manual",
+    area: "Gemini API Config",
+    description: "Push AI_INTEGRATIONS_GEMINI_BASE_URL to Secret Manager via update-secrets.sh",
+    status: "action_needed",
+    detail: "Should be https://generativelanguage.googleapis.com — fetch-secrets.sh expects it but update-secrets.sh may not push it.",
+  });
+
+  // GitHub Actions Workload Identity
+  items.push({
+    id: "github_workload_identity",
+    category: "manual",
+    area: "CI/CD (GitHub Actions)",
+    description: "Recreate GitHub Actions Workload Identity Pool and OIDC provider in new project",
+    status: "action_needed",
+    detail: "Run setup-github-auth.sh in the new project to create github-actions-pool-2, OIDC provider, and github-actions-deployer SA. Update GitHub repo secrets GCP_SERVICE_ACCOUNT and GCP_WORKLOAD_IDENTITY_PROVIDER.",
+  });
+
+  // Terraform state
+  items.push({
+    id: "terraform_state",
+    category: "manual",
+    area: "Terraform (if used)",
+    description: "Clean Terraform state when switching projects",
+    status: "action_needed",
+    detail: "If Terraform was used for VM provisioning, either terraform destroy old resources or init fresh state for the new project. Update var.gcp_project_id and var.gcp_region in terraform/variables.tf.",
+  });
+
+  // DNS subdomain for SIP
+  items.push({
+    id: "dns_sip_subdomain",
+    category: "manual",
+    area: "DNS",
+    description: "Update sip.demandgentic.ai DNS A record to new VM IP",
+    status: "action_needed",
+    detail: "The Telnyx FQDN connection uses sip.demandgentic.ai for inbound SIP. This A record must point to the new VM IP.",
   });
 
   const summary = {
