@@ -314,6 +314,26 @@ export async function generateMigrationChecklist(account: GoogleCloudAccount): P
     detail: "Check Telnyx dashboard → Phone Numbers → Messaging/Voice profile → Webhook URL",
   });
 
+  // Telnyx SIP IP authentication
+  items.push({
+    id: "telnyx_sip_ip",
+    category: "manual",
+    area: "Telnyx SIP",
+    description: "Update Telnyx SIP connection IP authentication with new VM IP",
+    status: "action_needed",
+    detail: "FQDN connection uses ip-authentication. Old VM IP must be removed and new IP added via Telnyx API: POST /v2/ips with {ip_address, port:5060, connection_id}. Also update sip.demandgentic.ai DNS A record.",
+  });
+
+  // Telnyx SIP credentials
+  items.push({
+    id: "telnyx_sip_creds",
+    category: "manual",
+    area: "Telnyx SIP",
+    description: "Verify Telnyx SIP credential connection and FQDN DNS resolution",
+    status: "action_needed",
+    detail: "Credential connection (DemanGent.ai_SIP) and FQDN connection (DG_Drachio) must both resolve. Ensure sip.demandgentic.ai A record points to new VM IP for inbound SIP.",
+  });
+
   // Database migration
   items.push({
     id: "db_migration",
