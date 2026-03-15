@@ -10,6 +10,8 @@ import {
 import { eq, and, sql } from "drizzle-orm";
 import Papa from "papaparse";
 import { normalize } from "../lib/verification-utils";
+import { requireAuth } from "../auth";
+import { requireDataExportAuthority } from "../middleware/auth";
 
 const router = Router();
 
@@ -141,7 +143,7 @@ router.get("/api/verification-campaigns/:campaignId/submission/company-stats", a
   }
 });
 
-router.get("/api/verification-campaigns/:campaignId/submission/export", async (req, res) => {
+router.get("/api/verification-campaigns/:campaignId/submission/export", requireAuth, requireDataExportAuthority, async (req, res) => {
   try {
     const { campaignId } = req.params;
     const templateType = req.query.template || 'enriched';

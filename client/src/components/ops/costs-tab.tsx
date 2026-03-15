@@ -26,6 +26,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Download, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useExportAuthority } from '@/hooks/use-export-authority';
 
 interface CostData {
   service: string;
@@ -38,6 +39,7 @@ export default function CostsTab() {
   const [costBreakdown, setCostBreakdown] = useState<CostData[]>([]);
   const [dailyTrend, setDailyTrend] = useState<{ day: string; cost: number; forecast: number }[]>([]);
   const [agentCosts, setAgentCosts] = useState<{ provider: string; calls: number; cost: number }[]>([]);
+  const { canExportData } = useExportAuthority();
 
   useEffect(() => {
     fetchCostData();
@@ -239,16 +241,18 @@ export default function CostsTab() {
       </Card>
 
       {/* Export Reports */}
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" className="gap-2">
-          <Download className="w-4 h-4" />
-          Export CSV
-        </Button>
-        <Button className="gap-2">
-          <Download className="w-4 h-4" />
-          Export PDF Report
-        </Button>
-      </div>
+      {canExportData && (
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" className="gap-2">
+            <Download className="w-4 h-4" />
+            Export CSV
+          </Button>
+          <Button className="gap-2">
+            <Download className="w-4 h-4" />
+            Export PDF Report
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

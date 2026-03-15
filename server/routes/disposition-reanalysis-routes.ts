@@ -12,6 +12,7 @@
 
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../auth";
+import { requireDataExportAuthority } from "../middleware/auth";
 import {
   analyzeSingleCall,
   reanalyzeBatch,
@@ -444,7 +445,7 @@ router.post("/deep/validate-for-client", requireAuth, async (req: Request, res: 
 });
 
 // POST /deep/export - Export reanalysis data as CSV or JSON
-router.post("/deep/export", requireAuth, async (req: Request, res: Response) => {
+router.post("/deep/export", requireAuth, requireDataExportAuthority, async (req: Request, res: Response) => {
   try {
     const { calls, format } = req.body;
     if (!Array.isArray(calls) || calls.length === 0) {

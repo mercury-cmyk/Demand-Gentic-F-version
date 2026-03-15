@@ -1,28 +1,27 @@
-import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AccountIntelligenceView } from "@/components/ai-studio/account-intelligence/account-intelligence-view";
 import { ICPPositioningTab } from "@/components/ai-studio/org-intelligence/tabs/icp-positioning";
 import { MessagingProofTab } from "@/components/ai-studio/org-intelligence/tabs/messaging-proof";
 import { PromptOptimizationView } from "@/components/ai-studio/org-intelligence/prompt-optimization";
-import { OrganizationSelector } from "@/components/ai-studio/org-intelligence/organization-selector";
 import { ServiceCatalogTab } from "@/components/ai-studio/org-intelligence/tabs/service-catalog-tab";
 import { ProblemFrameworkTab } from "@/components/ai-studio/org-intelligence/tabs/problem-framework-tab";
+import { Badge } from "@/components/ui/badge";
+import { SUPER_ORG_ID, SUPER_ORG_NAME } from "@shared/schema";
 
 export default function OrganizationIntelligencePage() {
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const selectedOrgId = SUPER_ORG_ID;
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-start gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Organization Intelligence</h1>
           <p className="text-muted-foreground mt-2">
-            The foundation layer for all AI behavior - teaching the AI how your organization thinks and operates.
+            The admin workspace is locked to the platform super organization. Client organizations only use their own intelligence inside client dashboards.
           </p>
         </div>
+        <Badge variant="secondary">{SUPER_ORG_NAME} · Super Organization</Badge>
       </div>
-
-      <OrganizationSelector selectedOrgId={selectedOrgId} onOrgChange={setSelectedOrgId} />
 
       <Tabs defaultValue="organization-profile" className="space-y-6">
         <TabsList className="grid w-full grid-cols-6 lg:w-auto">

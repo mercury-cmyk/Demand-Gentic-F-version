@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import type { LeadWithAccount, LeadTag } from "@shared/schema";
 import {
   DropdownMenu,
@@ -102,6 +103,7 @@ export default function LeadsPage() {
   const [showQAParameters, setShowQAParameters] = useState(false);
   const { toast} = useToast();
   const { user } = useAuth();
+  const { canExportData } = useExportAuthority();
 
   // Get user roles (support both legacy single role and new multi-role system)
   const userRoles = (user as any)?.roles || [user?.role || ''];
@@ -1738,22 +1740,26 @@ export default function LeadsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleExportApproved} disabled={exportLoading} data-testid="button-download-approved">
-            {exportLoading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-4 w-4" />
-            )}
-            Download Approved
-          </Button>
-          <Button onClick={handleBulkExport} disabled={exportLoading || filteredLeads.length === 0} data-testid="button-bulk-export-filtered" variant="outline">
-            {exportLoading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="mr-2 h-4 w-4" />
-            )}
-            Export Filtered
-          </Button>
+          {canExportData && (
+            <Button onClick={handleExportApproved} disabled={exportLoading} data-testid="button-download-approved">
+              {exportLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Download Approved
+            </Button>
+          )}
+          {canExportData && (
+            <Button onClick={handleBulkExport} disabled={exportLoading || filteredLeads.length === 0} data-testid="button-bulk-export-filtered" variant="outline">
+              {exportLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Export Filtered
+            </Button>
+          )}
         </div>
       </div>
 
@@ -2140,19 +2146,21 @@ export default function LeadsPage() {
                     <RefreshCw className="mr-2 h-4 w-4" />
                     Update ({selectedLeads.length})
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={() => bulkExportMutation.mutate(selectedLeads)}
-                    disabled={bulkExportMutation.isPending}
-                    data-testid="button-bulk-export"
-                  >
-                    {bulkExportMutation.isPending ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Download className="mr-2 h-4 w-4" />
-                    )}
-                    Export ({selectedLeads.length})
-                  </Button>
+                  {canExportData && (
+                    <Button 
+                      variant="outline" 
+                      onClick={() => bulkExportMutation.mutate(selectedLeads)}
+                      disabled={bulkExportMutation.isPending}
+                      data-testid="button-bulk-export"
+                    >
+                      {bulkExportMutation.isPending ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-2 h-4 w-4" />
+                      )}
+                      Export ({selectedLeads.length})
+                    </Button>
+                  )}
                   {userRoles.includes('admin') && (
                     <Button 
                       variant="destructive" 
@@ -2356,19 +2364,21 @@ export default function LeadsPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Update ({selectedLeads.length})
               </Button>
-              <Button 
-                variant="outline" 
-                onClick={() => bulkExportMutation.mutate(selectedLeads)}
-                disabled={bulkExportMutation.isPending}
-                data-testid="button-bulk-export-approved"
-              >
-                {bulkExportMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 h-4 w-4" />
-                )}
-                Export ({selectedLeads.length})
-              </Button>
+              {canExportData && (
+                <Button 
+                  variant="outline" 
+                  onClick={() => bulkExportMutation.mutate(selectedLeads)}
+                  disabled={bulkExportMutation.isPending}
+                  data-testid="button-bulk-export-approved"
+                >
+                  {bulkExportMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Export ({selectedLeads.length})
+                </Button>
+              )}
               {userRoles.includes('admin') && (
                 <Button 
                   variant="destructive" 
@@ -2473,19 +2483,21 @@ export default function LeadsPage() {
                     )}
                     Approve with Exceptions ({selectedLeads.length})
                   </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => bulkExportMutation.mutate(selectedLeads)}
-                  disabled={bulkExportMutation.isPending}
-                  data-testid="button-bulk-export-pm-review"
-                >
-                  {bulkExportMutation.isPending ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="mr-2 h-4 w-4" />
-                  )}
-                  Export ({selectedLeads.length})
-                </Button>
+                {canExportData && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => bulkExportMutation.mutate(selectedLeads)}
+                    disabled={bulkExportMutation.isPending}
+                    data-testid="button-bulk-export-pm-review"
+                  >
+                    {bulkExportMutation.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="mr-2 h-4 w-4" />
+                    )}
+                    Export ({selectedLeads.length})
+                  </Button>
+                )}
               </div>
             )}
             
@@ -2702,19 +2714,21 @@ export default function LeadsPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Update ({selectedLeads.length})
               </Button>
-              <Button 
-                variant="outline" 
-                onClick={() => bulkExportMutation.mutate(selectedLeads)}
-                disabled={bulkExportMutation.isPending}
-                data-testid="button-bulk-export-rejected"
-              >
-                {bulkExportMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 h-4 w-4" />
-                )}
-                Export ({selectedLeads.length})
-              </Button>
+              {canExportData && (
+                <Button 
+                  variant="outline" 
+                  onClick={() => bulkExportMutation.mutate(selectedLeads)}
+                  disabled={bulkExportMutation.isPending}
+                  data-testid="button-bulk-export-rejected"
+                >
+                  {bulkExportMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Export ({selectedLeads.length})
+                </Button>
+              )}
               {userRoles.includes('admin') && (
                 <Button 
                   variant="destructive" 

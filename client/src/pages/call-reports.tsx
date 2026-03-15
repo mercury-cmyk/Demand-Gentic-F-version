@@ -39,6 +39,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DateRangeFilter } from "@/components/filters/date-range-filter";
 import { useAuth } from "@/contexts/AuthContext";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { AiCallAnalyticsPanel } from "@/pages/ai-call-analytics";
 import { getAuthHeaders } from "@/lib/queryClient";
 
@@ -55,6 +56,7 @@ const COLORS = {
 export default function CallReportsPage() {
   const [location, setLocation] = useLocation();
   const { user } = useAuth();
+  const { canExportData } = useExportAuthority();
   const isAdmin = user?.role === 'admin';
   const canViewAiAnalytics = user?.role === 'admin' || user?.role === 'campaign_manager';
 
@@ -249,10 +251,12 @@ export default function CallReportsPage() {
             </div>
             <p className="text-foreground/70 mt-2">Comprehensive analytics and performance metrics for all telemarketing campaigns</p>
           </div>
-          <Button variant="outline" className="shadow-sm" data-testid="button-export">
-            <Download className="mr-2 h-4 w-4" />
-            Export Report
-          </Button>
+          {canExportData && (
+            <Button variant="outline" className="shadow-sm" data-testid="button-export">
+              <Download className="mr-2 h-4 w-4" />
+              Export Report
+            </Button>
+          )}
         </div>
       </div>
       

@@ -32,6 +32,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/shared/empty-state";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { format } from "date-fns";
@@ -113,6 +114,7 @@ interface QualifiedLead {
 }
 
 export default function TelemarketingSuppressionListPage() {
+  const { canExportData } = useExportAuthority();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("suppressions");
   const [searchQuery, setSearchQuery] = useState("");
@@ -446,25 +448,27 @@ export default function TelemarketingSuppressionListPage() {
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" data-testid="button-export-dropdown">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-                <ChevronDown className="h-4 w-4 ml-2" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => handleExport('csv')} data-testid="menu-item-export-csv">
-                <FileDown className="h-4 w-4 mr-2" />
-                Export as CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('json')} data-testid="menu-item-export-json">
-                <FileDown className="h-4 w-4 mr-2" />
-                Export as JSON
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {canExportData && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" data-testid="button-export-dropdown">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                  <ChevronDown className="h-4 w-4 ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => handleExport('csv')} data-testid="menu-item-export-csv">
+                  <FileDown className="h-4 w-4 mr-2" />
+                  Export as CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('json')} data-testid="menu-item-export-json">
+                  <FileDown className="h-4 w-4 mr-2" />
+                  Export as JSON
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Button onClick={() => setUploadDialogOpen(true)} data-testid="button-upload-suppressions">
             <Upload className="h-4 w-4 mr-2" />
             Upload

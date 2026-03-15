@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { Download, BarChart3, TrendingUp, Mail, Phone } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
@@ -42,6 +43,8 @@ const accountCoverage = [
 ];
 
 export default function ReportsPage() {
+  const { canExportData } = useExportAuthority();
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -51,10 +54,12 @@ export default function ReportsPage() {
             Comprehensive insights into campaign performance and ABM metrics
           </p>
         </div>
-        <Button data-testid="button-export-report">
-          <Download className="mr-2 h-4 w-4" />
-          Export Report
-        </Button>
+        {canExportData && (
+          <Button data-testid="button-export-report">
+            <Download className="mr-2 h-4 w-4" />
+            Export Report
+          </Button>
+        )}
       </div>
 
       <Tabs defaultValue="campaigns" className="w-full">

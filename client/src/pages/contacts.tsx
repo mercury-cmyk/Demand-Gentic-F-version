@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useSelection } from "@/hooks/use-selection";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { BulkActionsToolbar } from "@/components/bulk-actions-toolbar";
 import { BulkUpdateDialog } from "@/components/bulk-update-dialog";
 import { AddToListDialog } from "@/components/add-to-list-dialog";
@@ -60,6 +61,7 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 
 function ContactsPage() {
+  const { canExportData } = useExportAuthority();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [campaignId, setCampaignId] = useState<string | null>(null);
@@ -560,7 +562,7 @@ function ContactsPage() {
               </p>
             </div>
         <div className="flex gap-2">
-          {(user?.role === 'admin' || user?.roles?.includes('admin')) && (
+          {canExportData && (
             <Button 
               variant="outline" 
               onClick={() => {
@@ -819,7 +821,7 @@ function ContactsPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {(user?.role === 'admin' || user?.roles?.includes('admin')) && (
+              {canExportData && (
                 <Button variant="outline" size="sm" onClick={handleBulkExport} data-testid="button-bulk-export">
                   <Download className="mr-2 h-4 w-4" />
                   Export

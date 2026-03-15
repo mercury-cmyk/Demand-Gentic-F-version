@@ -5,26 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { ChevronRight, FileText, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useQuery } from "@tanstack/react-query";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { apiRequest } from "@/lib/queryClient";
-import { InlineOrgCreator } from "@/components/campaigns/inline-org-creator";
 import { CampaignAudienceSelector, type AudienceSelection } from "@/components/campaigns/CampaignAudienceSelector";
-
-interface Organization {
-  id: string;
-  name: string;
-  domain: string | null;
-  industry: string | null;
-  isDefault: boolean;
-  organizationType?: "super" | "client" | "campaign";
-}
+import { SUPER_ORG_ID, SUPER_ORG_NAME } from "@shared/schema";
 
 interface Step1Props {
   data: any;
@@ -39,34 +21,13 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
   const [campaignName, setCampaignName] = useState(data.name || "");
 
   // Organization selection for problem intelligence
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(data.organizationId || null);
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(SUPER_ORG_ID);
 
-  // Fetch organizations for dropdown
-  const { data: orgsData } = useQuery<{ organizations: Organization[] }>({
-    queryKey: ["/api/organizations/dropdown"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", "/api/organizations/dropdown");
-      return res.json();
-    },
-  });
-  const organizations = orgsData?.organizations || [];
-  const selectedOrgExists = !!selectedOrgId && organizations.some((org) => org.id === selectedOrgId);
-  const effectiveSelectedOrgValue = selectedOrgExists ? selectedOrgId! : "none";
-
-  // Auto-select default org on first load
   useEffect(() => {
-    if (selectedOrgId && organizations.length > 0 && !organizations.some((o) => o.id === selectedOrgId)) {
-      setSelectedOrgId(null);
-      return;
+    if (selectedOrgId !== SUPER_ORG_ID) {
+      setSelectedOrgId(SUPER_ORG_ID);
     }
-
-    if (!selectedOrgId && !data.organizationId && organizations.length > 0) {
-      const superOrg = organizations.find((o) => o.organizationType === "super");
-      const defaultOrg = organizations.find((o) => o.isDefault);
-      const fallbackOrg = superOrg || defaultOrg || organizations[0];
-      setSelectedOrgId(fallbackOrg.id);
-    }
-  }, [organizations, selectedOrgId, data.organizationId]);
+  }, [selectedOrgId]);
 
   const [audienceData, setAudienceData] = useState<AudienceSelection>({
     source: data.audience?.source || "filters",
@@ -126,38 +87,13 @@ export function Step1AudienceSelection({ data, onNext, campaignType }: Step1Prop
                 <Building2 className="w-4 h-4" />
                 Organization
               </Label>
-              <div className="flex gap-2">
-                <Select
-                  value={effectiveSelectedOrgValue}
-                  onValueChange={(value) => setSelectedOrgId(value === "none" ? null : value)}
-                >
-                  <SelectTrigger id="organization-select" data-testid="select-organization" className="flex-1">
-                    <SelectValue placeholder="Select organization..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No organization</SelectItem>
-                    {organizations.map((org) => (
-                      <SelectItem key={org.id} value={org.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{org.name}</span>
-                          {org.isDefault && (
-                            <Badge variant="secondary" className="text-[10px] h-4">
-                              Default
-                            </Badge>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <InlineOrgCreator
-                  onOrgCreated={(orgId) => setSelectedOrgId(orgId)}
-                  triggerVariant="button"
-                  triggerSize="default"
-                />
+              <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2.5">
+                <Building2 className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm font-medium">{SUPER_ORG_NAME}</span>
+                <Badge variant="secondary" className="ml-auto">Super Organization</Badge>
               </div>
               <p className="text-xs text-muted-foreground">
-                Used for problem intelligence and service catalog matching
+                Admin campaigns always use the super organization for problem intelligence and service catalog matching
               </p>
             </div>
           </div>

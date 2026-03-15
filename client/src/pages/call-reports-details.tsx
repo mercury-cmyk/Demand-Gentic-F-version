@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import { format } from "date-fns";
 
 export default function CallReportsDetailsPage() {
   const [, setLocation] = useLocation();
+  const { canExportData } = useExportAuthority();
   const searchParams = new URLSearchParams(useSearch());
   
   const filters = {
@@ -183,10 +185,12 @@ export default function CallReportsDetailsPage() {
             </p>
           </div>
         </div>
-        <Button variant="outline" data-testid="button-export">
-          <Download className="mr-2 h-4 w-4" />
-          Export CSV
-        </Button>
+        {canExportData && (
+          <Button variant="outline" data-testid="button-export">
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        )}
       </div>
       
       {/* Data Table */}

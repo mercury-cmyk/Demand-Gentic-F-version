@@ -7,6 +7,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
+import { useExportAuthority } from '@/hooks/use-export-authority';
 import { 
   History, Search, ChevronLeft, Filter, Download,
   User, Users, Shield, Key, FileText, AlertTriangle, CheckCircle
@@ -96,6 +97,7 @@ export default function IamAudit() {
   const [entityFilter, setEntityFilter] = useState('');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
+  const { canExportData } = useExportAuthority();
 
   // Fetch audit events
   const { data: events, isLoading } = useQuery<AuditEvent[]>({
@@ -174,10 +176,12 @@ export default function IamAudit() {
             Track all IAM-related actions and changes
           </p>
         </div>
-        <Button variant="outline" onClick={handleExport} disabled={!filteredEvents?.length}>
-          <Download className="h-4 w-4 mr-2" />
-          Export CSV
-        </Button>
+        {canExportData && (
+          <Button variant="outline" onClick={handleExport} disabled={!filteredEvents?.length}>
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+        )}
       </div>
 
       {/* Filters */}

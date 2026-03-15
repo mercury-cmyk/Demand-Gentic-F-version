@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSearch } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { SUPER_ORG_ID } from "@shared/schema";
+import { SUPER_ORG_ID, SUPER_ORG_NAME } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +50,6 @@ import EbookTab from "@/components/generative-studio/ebook-tab";
 import SolutionBriefTab from "@/components/generative-studio/solution-brief-tab";
 import ProjectHistoryPanel from "@/components/generative-studio/shared/project-history-panel";
 import StudioGovernancePanel from "@/components/content-governance/studio-governance-panel";
-import { OrganizationSelector } from "@/components/ai-studio/org-intelligence/organization-selector";
 
 export interface OrgIntelligenceProfile {
   domain?: string;
@@ -209,7 +208,6 @@ export default function GenerativeStudioPage() {
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
   const moduleFromUrl = searchParams.get("module");
   const campaignIdFromUrl = searchParams.get("campaignId");
-  const orgIdFromUrl = searchParams.get("organizationId");
   const projectIdFromUrl = searchParams.get("clientProjectId") || searchParams.get("projectId");
 
   const [activeModule, setActiveModule] = useState("image");
@@ -265,27 +263,11 @@ export default function GenerativeStudioPage() {
 
   const brandKits = (brandKitsData as any)?.brandKits || (Array.isArray(brandKitsData) ? brandKitsData : []);
 
-  // Restore org from localStorage (admin only — client portal gets its org from the API)
-  useEffect(() => {
-    if (projectIdFromUrl || clientPortalToken) return;
-    const storedOrgId = localStorage.getItem("generativeStudioOrgId");
-    if (storedOrgId) {
-      setSelectedOrgId(storedOrgId);
-    }
-    // SUPER_ORG_ID is already the default initial state for admin — no need to set it again
-  }, []);
-
   useEffect(() => {
     if (moduleFromUrl && MODULES.some((m) => m.id === moduleFromUrl)) {
       setActiveModule(moduleFromUrl);
     }
   }, [moduleFromUrl]);
-
-  useEffect(() => {
-    if (orgIdFromUrl && !clientPortalToken) {
-      setSelectedOrgId(orgIdFromUrl);
-    }
-  }, [clientPortalToken, orgIdFromUrl]);
 
   useEffect(() => {
     if (projectIdFromUrl) {
@@ -302,7 +284,7 @@ export default function GenerativeStudioPage() {
     source?: string | null;
   }>({
     queryKey: [`/api/generative-studio/resolve-project-org?projectId=${projectIdFromUrl || ""}`],
-    enabled: !!projectIdFromUrl && !orgIdFromUrl,
+    enabled: !!projectIdFromUrl,
   });
 
   // Track the resolved studio project ID for auto-loading content
@@ -310,9 +292,6 @@ export default function GenerativeStudioPage() {
 
   useEffect(() => {
     if (!resolvedOrgData) return;
-    if (resolvedOrgData.organizationId && !clientPortalToken) {
-      setSelectedOrgId(resolvedOrgData.organizationId);
-    }
     // If the URL points to a generative studio project, auto-switch to the right tab
     if (resolvedOrgData.source === "generative_studio" && resolvedOrgData.studioProjectId) {
       setPreloadStudioProjectId(resolvedOrgData.studioProjectId);
@@ -459,10 +438,11 @@ export default function GenerativeStudioPage() {
                 <Badge variant="outline" className="text-[10px] h-4">Client</Badge>
               </div>
             ) : (
-              <OrganizationSelector
-                selectedOrgId={selectedOrgId}
-                onOrgChange={setSelectedOrgId}
-              />
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border bg-muted/50">
+                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs font-medium">{SUPER_ORG_NAME}</span>
+                <Badge variant="secondary" className="text-[10px] h-4">Super Org</Badge>
+              </div>
             )}
             <Select
               value={selectedProjectId || ""}

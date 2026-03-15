@@ -8,6 +8,7 @@ import { db } from "../db";
 import { verificationContacts, verificationCampaigns, accounts } from "@shared/schema";
 import { eq, and, sql, inArray, not } from "drizzle-orm";
 import { requireAuth } from "../auth";
+import { requireDataExportAuthority } from "../middleware/auth";
 import { uploadToS3, getPresignedDownloadUrl } from "../lib/storage";
 import { z } from "zod";
 
@@ -61,6 +62,7 @@ const exportFilterSchema = z.object({
 router.post(
   "/api/verification-campaigns/:campaignId/export",
   requireAuth,
+  requireDataExportAuthority,
   async (req, res) => {
     try {
       const { campaignId } = req.params;
@@ -84,19 +86,6 @@ router.post(
 
       if (!campaign) {
         return res.status(404).json({ error: "Campaign not found" });
-      }
-
-      // Security: Verify user has access to this campaign
-      // Admin users can access all campaigns
-      // Regular users can only access campaigns they own or are assigned to
-      if (req.auth.role !== 'admin') {
-        // For non-admin users, verify ownership or assignment
-        // (This assumes campaigns have an ownerId or similar field)
-        // For now, we'll enforce admin-only access for exports as a security measure
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "Only administrators can export verification campaigns",
-        });
       }
 
       console.log(`[EXPORT] Starting export for campaign ${campaignId}`, filters);
@@ -389,14 +378,6 @@ async function handlePresetExport(
       return res.status(404).json({ error: "Campaign not found" });
     }
 
-    // Security: Verify user has access to this campaign
-    if (req.auth.role !== 'admin') {
-      return res.status(403).json({
-        error: "Forbidden",
-        message: "Only administrators can export verification campaigns",
-      });
-    }
-
     // Re-execute the main export logic with preset filters
     req.body = filters;
     
@@ -557,6 +538,7 @@ async function handlePresetExport(
 router.post(
   "/api/verification-campaigns/:campaignId/export/ready-for-delivery",
   requireAuth,
+  requireDataExportAuthority,
   async (req, res) => {
     await handlePresetExport(req, res, {
       eligibilityStatuses: ['Eligible'],
@@ -572,6 +554,7 @@ router.post(
 router.post(
   "/api/verification-campaigns/:campaignId/export/submission-buffer",
   requireAuth,
+  requireDataExportAuthority,
   async (req, res) => {
     await handlePresetExport(req, res, {
       inSubmissionBuffer: true,
@@ -584,6 +567,7 @@ router.post(
 router.post(
   "/api/verification-campaigns/:campaignId/export/eligible",
   requireAuth,
+  requireDataExportAuthority,
   async (req, res) => {
     await handlePresetExport(req, res, {
       eligibilityStatuses: ['Eligible'],
@@ -600,6 +584,7 @@ router.post(
 router.post(
   "/api/verification-campaigns/:campaignId/export/smart-client",
   requireAuth,
+  requireDataExportAuthority,
   async (req, res) => {
     const { campaignId } = req.params;
     
@@ -612,14 +597,6 @@ router.post(
 
       if (!campaign) {
         return res.status(404).json({ error: "Campaign not found" });
-      }
-
-      // Security: Admin only
-      if (req.auth.role !== 'admin') {
-        return res.status(403).json({
-          error: "Forbidden",
-          message: "Only administrators can export verification campaigns",
-        });
       }
 
       console.log(`[SMART EXPORT] Starting smart client export for campaign ${campaignId}`);

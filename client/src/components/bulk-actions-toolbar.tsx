@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { X, Download, Edit, Trash2, Users } from "lucide-react";
 
 interface BulkActionsToolbarProps {
@@ -21,6 +22,8 @@ export function BulkActionsToolbar({
   onBulkExport,
   onBulkAddToList,
 }: BulkActionsToolbarProps) {
+  const { canExportData } = useExportAuthority();
+
   if (selectedCount === 0) return null;
 
   return (
@@ -44,7 +47,7 @@ export function BulkActionsToolbar({
       </div>
       
       <div className="flex items-center gap-2">
-        {onBulkExport && (
+        {canExportData && onBulkExport && (
           <Button 
             variant="outline" 
             size="sm"

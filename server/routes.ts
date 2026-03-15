@@ -11,6 +11,7 @@ import { buildCallFlowPromptSection } from "@shared/call-flow";
 import { storage } from "./storage";
 import { emailTrackingService } from "./lib/email-tracking-service";
 import { comparePassword, generateToken, verifyToken, requireAuth, requireDualAuth, requireRole, hashPassword } from "./auth";
+import { requireDataExportAuthority } from "./middleware/auth";
 import { getBestPhoneForContact } from "./lib/phone-utils";
 import { buildFilterQuery } from "./filter-builder";
 import webhooksRouter from "./routes/webhooks";
@@ -4915,7 +4916,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.post("/api/lists/:id/export", requireAuth, requireRole('admin', 'campaign_manager', 'quality_analyst'), async (req, res) => {
+  app.post("/api/lists/:id/export", requireAuth, requireDataExportAuthority, async (req, res) => {
     try {
       const { format = 'csv' } = req.body;
       if (!['csv', 'json'].includes(format)) {
@@ -12489,7 +12490,7 @@ export function registerRoutes(app: Express) {
     }
   });
 
-  app.get("/api/leads/export/approved", requireAuth, async (req, res) => {
+  app.get("/api/leads/export/approved", requireAuth, requireDataExportAuthority, async (req, res) => {
     try {
       // Include both explicitly approved and PM-pending approved leads.
       const leadsData = (await storage.getLeads()).filter(
@@ -12596,7 +12597,7 @@ export function registerRoutes(app: Express) {
   });
 
   // Bulk export filtered leads
-  app.post("/api/leads/bulk-export", requireAuth, async (req, res) => {
+  app.post("/api/leads/bulk-export", requireAuth, requireDataExportAuthority, async (req, res) => {
     try {
       const { leadIds } = req.body as { leadIds: string[] };
 

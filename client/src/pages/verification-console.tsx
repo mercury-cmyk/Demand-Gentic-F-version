@@ -29,6 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { renderEmailStatusBadge } from "@/lib/email-status";
@@ -39,6 +40,7 @@ export default function VerificationConsolePage() {
   const { campaignId } = useParams();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { canExportData } = useExportAuthority();
   const [currentContactId, setCurrentContactId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -919,18 +921,20 @@ export default function VerificationConsolePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="flex flex-col gap-2">
               <h4 className="text-sm font-medium text-muted-foreground">Step 1: Review Eligible</h4>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  window.location.href = `/api/verification-campaigns/${campaignId}/contacts/export/validated-verified`;
-                }}
-                data-testid="button-export-for-validation"
-                className="w-full justify-start"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export Eligible Contacts
-              </Button>
+              {canExportData && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    window.location.href = `/api/verification-campaigns/${campaignId}/contacts/export/validated-verified`;
+                  }}
+                  data-testid="button-export-for-validation"
+                  className="w-full justify-start"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Eligible Contacts
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">
                 Download contacts with validated emails (auto-validated)
               </p>
@@ -982,18 +986,20 @@ export default function VerificationConsolePage() {
 
             <div className="flex flex-col gap-2">
               <h4 className="text-sm font-medium text-muted-foreground">Step 3: Export for Client</h4>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  window.location.href = `/api/verification-campaigns/${campaignId}/submission/export?template=enriched`;
-                }}
-                data-testid="button-export-for-client"
-                className="w-full justify-start"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export Buffered Leads
-              </Button>
+              {canExportData && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    window.location.href = `/api/verification-campaigns/${campaignId}/submission/export?template=enriched`;
+                  }}
+                  data-testid="button-export-for-client"
+                  className="w-full justify-start"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Buffered Leads
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">
                 Download final leads for client delivery
               </p>
@@ -1093,17 +1099,19 @@ export default function VerificationConsolePage() {
                 </p>
               </div>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    window.location.href = `/api/verification-campaigns/${campaignId}/contacts/export/validated-verified`;
-                  }}
-                  data-testid="button-export-validated-verified"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Validated+Verified
-                </Button>
+                {canExportData && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      window.location.href = `/api/verification-campaigns/${campaignId}/contacts/export/validated-verified`;
+                    }}
+                    data-testid="button-export-validated-verified"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export Validated+Verified
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

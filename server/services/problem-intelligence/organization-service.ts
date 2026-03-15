@@ -17,7 +17,83 @@ import {
   type InsertCampaignOrganization,
 } from "@shared/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { canDeleteOrganization } from "../super-organization-service";
+import { canDeleteOrganization, getSuperOrganization } from "../super-organization-service";
+
+type DropdownOrganizationRow = {
+  id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+  isDefault: boolean;
+  organizationType: 'super' | 'client' | 'campaign';
+  updatedAt?: Date | null;
+};
+
+function getDropdownOrganizationPriority(org: DropdownOrganizationRow): number {
+  if (org.organizationType === "super") return 0;
+  if (org.organizationType === "client") return 1;
+  return 2;
+}
+
+function dedupeDropdownOrganizations(organizations: DropdownOrganizationRow[]) {
+  const uniqueOrganizations = new Map<string, DropdownOrganizationRow>();
+
+  for (const organization of organizations) {
+    const normalizedName = organization.name.trim().toLowerCase();
+    if (!normalizedName) continue;
+
+    // The selector displays the organization name only, so dedupe at the display-name level.
+    // When duplicate rows exist behind the scenes, prefer the most canonical record:
+    // super org > client org > campaign org, then default, then newest updated row.
+    const existing = uniqueOrganizations.get(normalizedName);
+    if (!existing) {
+      uniqueOrganizations.set(normalizedName, organization);
+      continue;
+    }
+
+    const currentPriority = getDropdownOrganizationPriority(existing);
+    const candidatePriority = getDropdownOrganizationPriority(organization);
+
+    if (candidatePriority < currentPriority) {
+      uniqueOrganizations.set(normalizedName, organization);
+      continue;
+    }
+
+    if (candidatePriority > currentPriority) {
+      continue;
+    }
+
+    if (organization.isDefault && !existing.isDefault) {
+      uniqueOrganizations.set(normalizedName, organization);
+      continue;
+    }
+
+    if (!organization.isDefault && existing.isDefault) {
+      continue;
+    }
+
+    if (organization.domain && !existing.domain) {
+      uniqueOrganizations.set(normalizedName, organization);
+      continue;
+    }
+
+    const candidateUpdatedAt = new Date(organization.updatedAt || 0).getTime();
+    const existingUpdatedAt = new Date(existing.updatedAt || 0).getTime();
+    if (candidateUpdatedAt > existingUpdatedAt) {
+      uniqueOrganizations.set(normalizedName, organization);
+    }
+  }
+
+  return Array.from(uniqueOrganizations.values())
+    .sort((a, b) => {
+      const priorityDelta = getDropdownOrganizationPriority(a) - getDropdownOrganizationPriority(b);
+      if (priorityDelta !== 0) return priorityDelta;
+      if (a.isDefault && !b.isDefault) return -1;
+      if (!a.isDefault && b.isDefault) return 1;
+      return a.name.localeCompare(b.name);
+    })
+    .map(({ updatedAt, ...organization }) => organization);
+}
 
 // ==================== ORGANIZATION CRUD ====================
 
@@ -100,6 +176,11 @@ export async function getOrganizationById(id: string): Promise<CampaignOrganizat
  * Get the default organization
  */
 export async function getDefaultOrganization(): Promise<CampaignOrganization | null> {
+  const superOrg = await getSuperOrganization();
+  if (superOrg && superOrg.isActive) {
+    return superOrg;
+  }
+
   const [org] = await db
     .select()
     .from(campaignOrganizations)
@@ -121,8 +202,13 @@ export async function createOrganization(
   data: Omit<InsertCampaignOrganization, "createdAt" | "updatedAt">,
   userId?: string
 ): Promise<CampaignOrganization> {
+  const normalizedData = {
+    ...data,
+    isDefault: data.organizationType === 'super' ? true : false,
+  };
+
   // If this is set as default, unset other defaults first
-  if (data.isDefault) {
+  if (normalizedData.isDefault) {
     await db
       .update(campaignOrganizations)
       .set({ isDefault: false, updatedAt: new Date() })
@@ -132,7 +218,7 @@ export async function createOrganization(
   const [inserted] = await db
     .insert(campaignOrganizations)
     .values({
-      ...data,
+      ...normalizedData,
       createdBy: userId,
     })
     .returning();
@@ -147,8 +233,18 @@ export async function updateOrganization(
   id: string,
   updates: Partial<Omit<InsertCampaignOrganization, "createdAt" | "updatedAt">>
 ): Promise<CampaignOrganization | null> {
+  const existing = await getOrganizationById(id);
+  if (!existing) {
+    return null;
+  }
+
+  const normalizedUpdates = {
+    ...updates,
+    isDefault: existing.organizationType === 'super' ? true : false,
+  };
+
   // If setting as default, unset other defaults first
-  if (updates.isDefault) {
+  if (normalizedUpdates.isDefault) {
     await db
       .update(campaignOrganizations)
       .set({ isDefault: false, updatedAt: new Date() })
@@ -163,7 +259,7 @@ export async function updateOrganization(
   const [updated] = await db
     .update(campaignOrganizations)
     .set({
-      ...updates,
+      ...normalizedUpdates,
       updatedAt: new Date(),
     })
     .where(eq(campaignOrganizations.id, id))
@@ -196,6 +292,15 @@ export async function deleteOrganization(id: string): Promise<{ success: boolean
  * Set an organization as the default
  */
 export async function setDefaultOrganization(id: string): Promise<CampaignOrganization | null> {
+  const organization = await getOrganizationById(id);
+  if (!organization) {
+    return null;
+  }
+
+  if (organization.organizationType !== 'super') {
+    throw new Error('Only the super organization can be the default organization');
+  }
+
   // Unset all other defaults
   await db
     .update(campaignOrganizations)
@@ -342,6 +447,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
       industry: campaignOrganizations.industry,
       isDefault: campaignOrganizations.isDefault,
       organizationType: campaignOrganizations.organizationType,
+      updatedAt: campaignOrganizations.updatedAt,
     })
     .from(campaignOrganizations)
     .where(eq(campaignOrganizations.isActive, true));
@@ -383,6 +489,7 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
             industry: campaignOrganizations.industry,
             isDefault: campaignOrganizations.isDefault,
             organizationType: campaignOrganizations.organizationType,
+            updatedAt: campaignOrganizations.updatedAt,
         })
         .from(campaignOrganizations)
         .where(and(
@@ -391,15 +498,5 @@ export async function getOrganizationsForDropdown(userId?: string): Promise<
         ));
   }
 
-  // Order by: super org first, then by isDefault, then by name
-  return query
-    .then(results => {
-      return results.sort((a, b) => {
-        if (a.organizationType === 'super' && b.organizationType !== 'super') return -1;
-        if (b.organizationType === 'super' && a.organizationType !== 'super') return 1;
-        if (a.isDefault && !b.isDefault) return -1;
-        if (!a.isDefault && b.isDefault) return 1;
-        return a.name.localeCompare(b.name);
-      });
-    });
+  return query.then((results) => dedupeDropdownOrganizations(results));
 }

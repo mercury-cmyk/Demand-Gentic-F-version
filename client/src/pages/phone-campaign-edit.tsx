@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { HybridAgentAssignment } from "@/components/hybrid-agent-assignment";
 import { StepQAParameters } from "@/components/campaign-builder/step-qa-parameters";
 import { CampaignContextRegenerate } from "@/components/campaigns/campaign-context-regenerate";
-import { InlineOrgCreator } from "@/components/campaigns/inline-org-creator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -26,6 +25,7 @@ import { CampaignKnowledgeConfig } from "@/components/campaigns/campaign-knowled
 import { CampaignAudienceSelector, type AudienceSelection } from "@/components/campaigns/CampaignAudienceSelector";
 import { CampaignContextEditor } from "@/components/campaigns/CampaignContextEditor";
 import { normalizeCampaignCallFlow, type CampaignCallFlow } from "@shared/call-flow";
+import { SUPER_ORG_ID, SUPER_ORG_NAME } from "@shared/schema";
 
 export default function PhoneCampaignEditPage() {
   const [, paramsA] = useRoute("/campaigns/phone/:id/edit");
@@ -74,8 +74,7 @@ export default function PhoneCampaignEditPage() {
   // Voice Provider per-campaign (null = use system default)
   const [voiceProvider, setVoiceProvider] = useState<string | null>(null);
 
-  // Organization selection state
-  const [problemIntelligenceOrgId, setProblemIntelligenceOrgId] = useState<string | null>(null);
+  const problemIntelligenceOrgId = SUPER_ORG_ID;
 
   // Dial Mode state - AI Agent mode is the default and only supported mode
   const [dialMode, setDialMode] = useState<'ai_agent'>('ai_agent');
@@ -117,18 +116,6 @@ export default function PhoneCampaignEditPage() {
   const { data: exportTemplates = [] } = useQuery<any[]>({
     queryKey: ['/api/export-templates'],
   });
-
-  // Fetch organizations for organization selection
-  const { data: organizationsData } = useQuery<{ organizations: { id: string; name: string }[] }>({
-    queryKey: ['/api/organizations/dropdown'],
-    queryFn: async () => {
-      const res = await apiRequest('GET', '/api/organizations/dropdown');
-      return res.json();
-    },
-  });
-  const organizations = organizationsData?.organizations || [];
-  const selectedOrgExists = !!problemIntelligenceOrgId && organizations.some((org) => org.id === problemIntelligenceOrgId);
-  const effectiveProblemOrgId = selectedOrgExists ? problemIntelligenceOrgId : null;
 
   // Initialize form with campaign data
   useEffect(() => {
@@ -184,9 +171,6 @@ export default function PhoneCampaignEditPage() {
 
       // Initialize voice provider
       setVoiceProvider(campaign.voiceProvider || null);
-
-      // Initialize organization
-      setProblemIntelligenceOrgId(campaign.problemIntelligenceOrgId || null);
 
       // AI Agent mode is always used
       // setDialMode is not needed as it's always 'ai_agent'
@@ -314,7 +298,7 @@ export default function PhoneCampaignEditPage() {
         name: aiPersonaName,
         role: aiRole,
         voice: selectedVoice,
-        companyName: organizations.find((o) => o.id === effectiveProblemOrgId)?.name || campaign?.aiAgentSettings?.persona?.companyName || '',
+        companyName: SUPER_ORG_NAME,
       },
     };
 
@@ -470,31 +454,13 @@ export default function PhoneCampaignEditPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="organization">Organization</Label>
-                <div className="flex gap-2">
-                  <Select
-                    value={effectiveProblemOrgId || "none"}
-                    onValueChange={(value) => setProblemIntelligenceOrgId(value === "none" ? null : value)}
-                  >
-                    <SelectTrigger data-testid="select-organization" className="flex-1">
-                      <SelectValue placeholder="Select organization (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No organization</SelectItem>
-                      {organizations.map((org) => (
-                        <SelectItem key={org.id} value={org.id}>
-                          {org.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <InlineOrgCreator
-                    onOrgCreated={(orgId) => setProblemIntelligenceOrgId(orgId)}
-                    triggerVariant="button"
-                    triggerSize="default"
-                  />
+                <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50">
+                  <Building className="w-4 h-4 text-muted-foreground" />
+                  <span>{SUPER_ORG_NAME}</span>
+                  <Badge variant="secondary" className="ml-auto">Super Organization</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Link this campaign to an organization to use its Problem Intelligence and messaging context
+                  Admin campaigns always use the super organization for Problem Intelligence and messaging context
                 </p>
               </div>
             </CardContent>
@@ -630,11 +596,9 @@ export default function PhoneCampaignEditPage() {
                   <Label htmlFor="ai-company-name">Company Name</Label>
                   <div className="flex items-center gap-2 h-10 px-3 rounded-md border bg-muted/50">
                     <Building className="w-4 h-4 text-muted-foreground" />
-                    <span className={problemIntelligenceOrgId ? "text-foreground" : "text-muted-foreground"}>
-                      {organizations.find(o => o.id === effectiveProblemOrgId)?.name || "Select organization in Basic Info tab"}
-                    </span>
+                    <span className="text-foreground">{SUPER_ORG_NAME}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">From selected organization</p>
+                  <p className="text-xs text-muted-foreground">From the super organization</p>
                 </div>
 
                 <div className="space-y-2">

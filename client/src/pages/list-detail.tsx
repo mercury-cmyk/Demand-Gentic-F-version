@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -20,6 +21,7 @@ import type { List, Contact, Account } from "@shared/schema";
 export default function ListDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
+  const { canExportData } = useExportAuthority();
 
   const { data: list, isLoading: listLoading } = useQuery<List>({
     queryKey: [`/api/lists/${id}`],
@@ -73,10 +75,12 @@ export default function ListDetailPage() {
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{list.entityType}</Badge>
           <Badge variant="outline">{list.sourceType}</Badge>
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+          {canExportData && (
+            <Button variant="outline" size="sm">
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+          )}
         </div>
       </div>
 

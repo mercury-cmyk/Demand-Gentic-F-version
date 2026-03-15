@@ -39,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -48,6 +49,7 @@ import type { FilterGroup } from "@shared/filter-types";
 
 export default function SegmentsPage() {
   const [, setLocation] = useLocation();
+  const { canExportData } = useExportAuthority();
   const [searchQuery, setSearchQuery] = useState("");
   const [createSegmentDialogOpen, setCreateSegmentDialogOpen] = useState(false);
   const [createListDialogOpen, setCreateListDialogOpen] = useState(false);
@@ -837,13 +839,15 @@ export default function SegmentsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => exportListMutation.mutate({ listId: list.id, format: 'csv' })}
-                                disabled={exportListMutation.isPending}
-                              >
-                                <Download className="mr-2 h-4 w-4" />
-                                Export CSV
-                              </DropdownMenuItem>
+                              {canExportData && (
+                                <DropdownMenuItem
+                                  onClick={() => exportListMutation.mutate({ listId: list.id, format: 'csv' })}
+                                  disabled={exportListMutation.isPending}
+                                >
+                                  <Download className="mr-2 h-4 w-4" />
+                                  Export CSV
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => {
                                   setCopySourceList(list);

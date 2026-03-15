@@ -7,6 +7,7 @@
 
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth";
+import { requireDataExportAuthority } from "../middleware/auth";
 import { db } from "../db";
 import { callQualityRecords, callSessions, campaigns, contacts, accounts, leads, dialerCallAttempts } from "@shared/schema";
 import { eq, and, gte, lte, desc, or, ilike, isNotNull, isNull, sql, count, avg } from "drizzle-orm";
@@ -339,7 +340,7 @@ router.get("/summary/:campaignId", requireAuth, requireRole('admin', 'manager', 
  * GET /api/call-intelligence/export/:campaignId
  * Export call quality data for analytics/training
  */
-router.get("/export/:campaignId", requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+router.get("/export/:campaignId", requireAuth, requireDataExportAuthority, async (req, res) => {
   try {
     const { campaignId } = req.params;
     const { startDate, endDate, format = "json" } = req.query;

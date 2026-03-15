@@ -5,6 +5,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { formatPhoneWithCountryCode } from "../lib/phone-formatter";
 import { requireAuth } from "../auth";
+import { requireDataExportAuthority } from "../middleware/auth";
 
 const router = Router();
 
@@ -307,7 +308,7 @@ router.get("/api/verification-campaigns/:campaignId/accounts/:accountName/cap", 
   }
 });
 
-router.get("/api/verification-campaigns/:campaignId/export", async (req, res) => {
+router.get("/api/verification-campaigns/:campaignId/export", requireAuth, requireDataExportAuthority, async (req, res) => {
   try {
     const { campaignId } = req.params;
     const { 
@@ -705,7 +706,7 @@ router.get("/api/verification-campaigns/:campaignId/export", async (req, res) =>
 // Smart Template Export - Intelligently selects best phone and address from multiple sources
 // Exports ALL eligible contacts (regardless of address completeness)
 // Quality metrics are still tracked for reporting purposes
-router.get("/api/verification-campaigns/:id/export-smart", async (req, res) => {
+router.get("/api/verification-campaigns/:id/export-smart", requireAuth, requireDataExportAuthority, async (req, res) => {
   try {
     const campaignId = req.params.id;
     const { templateId, markAsSubmitted } = req.query;

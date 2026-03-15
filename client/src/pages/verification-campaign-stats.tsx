@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { useExportAuthority } from "@/hooks/use-export-authority";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { CustomFieldDefinition } from "@shared/schema";
@@ -175,6 +176,7 @@ export default function VerificationCampaignStatsPage() {
   const { campaignId } = useParams();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { canExportData } = useExportAuthority();
   
   const [detailDialog, setDetailDialog] = useState<{
     open: boolean;
@@ -620,23 +622,27 @@ export default function VerificationCampaignStatsPage() {
                       Clear Filters
                     </Button>
                   )}
-                  <Button
-                    onClick={() => handleExport()}
-                    disabled={exportMutation.isPending}
-                    data-testid="button-export-filtered"
-                    variant="outline"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    {exportMutation.isPending ? "Exporting..." : "Export All Fields"}
-                  </Button>
-                  <Button
-                    onClick={() => handleSmartExport()}
-                    disabled={smartExportMutation.isPending}
-                    data-testid="button-export-smart"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    {smartExportMutation.isPending ? "Exporting..." : "Export Smart Template"}
-                  </Button>
+                  {canExportData && (
+                    <Button
+                      onClick={() => handleExport()}
+                      disabled={exportMutation.isPending}
+                      data-testid="button-export-filtered"
+                      variant="outline"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      {exportMutation.isPending ? "Exporting..." : "Export All Fields"}
+                    </Button>
+                  )}
+                  {canExportData && (
+                    <Button
+                      onClick={() => handleSmartExport()}
+                      disabled={smartExportMutation.isPending}
+                      data-testid="button-export-smart"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      {smartExportMutation.isPending ? "Exporting..." : "Export Smart Template"}
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -866,18 +872,20 @@ export default function VerificationCampaignStatsPage() {
               <CardTitle className="text-sm font-medium">Total Contacts</CardTitle>
               <div className="flex items-center gap-2">
                 <Database className="h-4 w-4 text-muted-foreground" />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExport('all');
-                  }}
-                  data-testid="button-export-all"
-                >
-                  <Download className="h-3 w-3" />
-                </Button>
+                {canExportData && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleExport('all');
+                    }}
+                    data-testid="button-export-all"
+                  >
+                    <Download className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -898,18 +906,20 @@ export default function VerificationCampaignStatsPage() {
               <CardTitle className="text-sm font-medium">Eligible</CardTitle>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-green-500" />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExport('eligible');
-                  }}
-                  data-testid="button-export-eligible"
-                >
-                  <Download className="h-3 w-3" />
-                </Button>
+                {canExportData && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleExport('eligible');
+                    }}
+                    data-testid="button-export-eligible"
+                  >
+                    <Download className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -930,18 +940,20 @@ export default function VerificationCampaignStatsPage() {
               <CardTitle className="text-sm font-medium">Suppressed</CardTitle>
               <div className="flex items-center gap-2">
                 <ShieldX className="h-4 w-4 text-red-500" />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExport('suppressed');
-                  }}
-                  data-testid="button-export-suppressed"
-                >
-                  <Download className="h-3 w-3" />
-                </Button>
+                {canExportData && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleExport('suppressed');
+                    }}
+                    data-testid="button-export-suppressed"
+                  >
+                    <Download className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -962,18 +974,20 @@ export default function VerificationCampaignStatsPage() {
               <CardTitle className="text-sm font-medium">Submitted</CardTitle>
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-blue-500" />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExport('submitted');
-                  }}
-                  data-testid="button-export-submitted"
-                >
-                  <Download className="h-3 w-3" />
-                </Button>
+                {canExportData && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleExport('submitted');
+                    }}
+                    data-testid="button-export-submitted"
+                  >
+                    <Download className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>

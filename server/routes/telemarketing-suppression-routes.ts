@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db';
+import { requireAuth } from '../auth';
+import { requireDataExportAuthority } from '../middleware/auth';
 import { 
   campaignSuppressionAccounts, 
   campaignSuppressionContacts,
@@ -665,7 +667,7 @@ router.delete('/bulk', async (req: Request, res: Response) => {
  * GET /api/telemarketing/suppressions/export
  * Export suppression list as CSV or JSON
  */
-router.get('/export', async (req: Request, res: Response) => {
+router.get('/export', requireAuth, requireDataExportAuthority, async (req: Request, res: Response) => {
   try {
     const { 
       format = 'csv',

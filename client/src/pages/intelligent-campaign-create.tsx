@@ -5,7 +5,7 @@
  * AI-powered campaign wizard with structured context.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useLocation, useSearch, Link } from 'wouter';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { IntelligentCampaignWizard } from '@/components/campaign-builder/intelligent-campaign-wizard';
-import { InlineOrgCreator } from '@/components/campaigns/inline-org-creator';
 import {
   Wand2,
   MessageSquare,
@@ -37,17 +36,11 @@ import {
   FileText,
 } from 'lucide-react';
 import type { StructuredCampaignContext } from '@shared/campaign-context-types';
+import { SUPER_ORG_ID, SUPER_ORG_NAME } from '@shared/schema';
 
 // ============================================================
 // TYPES
 // ============================================================
-
-interface Organization {
-  id: string;
-  name: string;
-  domain?: string;
-  industry?: string;
-}
 
 interface ClientAccount {
   id: string;
@@ -78,21 +71,11 @@ export default function IntelligentCampaignCreatePage() {
   const [campaignType, setCampaignType] = useState<'telemarketing' | 'email'>('telemarketing');
   const [selectedClientId, setSelectedClientId] = useState<string>(urlClientId);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(urlProjectId);
-  const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [showWizard, setShowWizard] = useState(false);
   const [preloadedContext, setPreloadedContext] = useState<Partial<StructuredCampaignContext> | null>(null);
   const [isLoadingContext, setIsLoadingContext] = useState(false);
-
-  // Fetch organizations
-  const { data: organizations = [] } = useQuery<Organization[]>({
-    queryKey: ['organizations'],
-    queryFn: async () => {
-      const res = await apiRequest('GET', '/api/organizations');
-      const data = await res.json();
-      // API returns { organizations: [...] }, extract the array
-      return data.organizations || [];
-    },
-  });
+  const selectedOrgId = SUPER_ORG_ID;
+  const hasLoadedSuperOrgContext = useRef(false);
 
   const { data: clientAccounts = [], isLoading: clientsLoading } = useQuery<ClientAccount[]>({
     queryKey: ['admin-client-accounts'],
@@ -145,18 +128,6 @@ export default function IntelligentCampaignCreatePage() {
     },
   });
 
-  // Handle organization selection - auto-fetch context
-  const handleOrgChange = useCallback((orgId: string) => {
-    setSelectedOrgId(orgId);
-    if (orgId) {
-      setIsLoadingContext(true);
-      fetchOrgContextMutation.mutate(orgId);
-    } else {
-      setPreloadedContext(null);
-    }
-  }, [fetchOrgContextMutation]);
-
-
   // Effect to manage selectedClientId based on loaded clientAccounts and URL params
   useEffect(() => {
     if (clientsLoading) return; // Wait for clients to load
@@ -187,6 +158,13 @@ export default function IntelligentCampaignCreatePage() {
       setSelectedProjectId('');
     }
   }, [selectedClientId, clientProjects, urlProjectId, projectsLoading]);
+
+  useEffect(() => {
+    if (hasLoadedSuperOrgContext.current) return;
+    hasLoadedSuperOrgContext.current = true;
+    setIsLoadingContext(true);
+    fetchOrgContextMutation.mutate(SUPER_ORG_ID);
+  }, [fetchOrgContextMutation]);
 
   // Create campaign mutation
   const createCampaignMutation = useMutation({
@@ -288,12 +266,10 @@ export default function IntelligentCampaignCreatePage() {
                 {selectedClient.name} / {selectedProject.name}
               </Badge>
             )}
-            {selectedOrgId && organizations.find(o => o.id === selectedOrgId) && (
-              <Badge variant="secondary" className="gap-1">
-                <Building2 className="h-3 w-3" />
-                {organizations.find(o => o.id === selectedOrgId)?.name}
-              </Badge>
-            )}
+            <Badge variant="secondary" className="gap-1">
+              <Building2 className="h-3 w-3" />
+              {SUPER_ORG_NAME}
+            </Badge>
           </div>
         </div>
         
@@ -462,7 +438,7 @@ export default function IntelligentCampaignCreatePage() {
         </CardContent>
       </Card>
 
-      {/* Organization Selection */}
+      {/* Organization Context */}
       <Card>
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -470,35 +446,19 @@ export default function IntelligentCampaignCreatePage() {
             Organization
           </CardTitle>
           <CardDescription>
-            Select or create the organization this campaign belongs to
+            Admin campaigns always run under the super organization context
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-3">
-            <Select value={selectedOrgId} onValueChange={handleOrgChange}>
-              <SelectTrigger className="flex-1" disabled={isLoadingContext}>
-                <SelectValue placeholder="Select organization (optional)" />
-              </SelectTrigger>
-              <SelectContent>
-                {organizations.map((org) => (
-                  <SelectItem key={org.id} value={org.id}>
-                    <div className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4 text-muted-foreground" />
-                      <span>{org.name}</span>
-                      {org.industry && (
-                        <Badge variant="outline" className="text-[10px]">
-                          {org.industry}
-                        </Badge>
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            
-            <InlineOrgCreator
-              onOrgCreated={(orgId) => handleOrgChange(orgId)}
-            />
+          <div className="flex items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3">
+            <Building2 className="h-5 w-5 text-muted-foreground" />
+            <div className="flex-1">
+              <p className="text-sm font-medium">{SUPER_ORG_NAME}</p>
+              <p className="text-xs text-muted-foreground">
+                Super organization workspace for internal admin campaign creation.
+              </p>
+            </div>
+            <Badge variant="secondary">Super Organization</Badge>
           </div>
           
           {isLoadingContext && (

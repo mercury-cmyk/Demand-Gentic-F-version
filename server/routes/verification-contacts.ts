@@ -15,6 +15,7 @@ import { z } from "zod";
 import { evaluateEligibility, computeNormalizedKeys, calculateContactPriority } from "../lib/verification-utils";
 import { applySuppressionForContacts } from "../lib/verification-suppression";
 import { requireAuth } from "../auth";
+import { requireDataExportAuthority } from "../middleware/auth";
 import { exportVerificationContactsToCsv, createCsvDownloadResponse } from "../lib/csv-export";
 import { validateEmail3Layer } from "../lib/email-validation-engine";
 
@@ -2332,7 +2333,7 @@ router.get("/api/verification-campaigns/:campaignId/email-validation-jobs", requ
 });
 
 // CSV Export endpoint (all contacts)
-router.get("/api/verification-campaigns/:campaignId/contacts/export/csv", async (req, res) => {
+router.get("/api/verification-campaigns/:campaignId/contacts/export/csv", requireAuth, requireDataExportAuthority, async (req, res) => {
   try {
     const { campaignId } = req.params;
     const includeCompanyFields = req.query.includeCompany !== 'false';
@@ -2381,7 +2382,7 @@ router.get("/api/verification-campaigns/:campaignId/contacts/export/csv", async 
 });
 
 // CSV Export endpoint (filtered: Validated + Email Verified contacts only)
-router.get("/api/verification-campaigns/:campaignId/contacts/export/validated-verified", async (req, res) => {
+router.get("/api/verification-campaigns/:campaignId/contacts/export/validated-verified", requireAuth, requireDataExportAuthority, async (req, res) => {
   try {
     const { campaignId } = req.params;
     const includeCompanyFields = req.query.includeCompany !== 'false';
