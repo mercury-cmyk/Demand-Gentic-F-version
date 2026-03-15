@@ -45,6 +45,7 @@ import leadFormsRouter from './routes/lead-forms-routes';
 import pipelineRouter from './routes/pipeline-routes';
 import pipelineAccountsRouter from './routes/pipeline-accounts-routes';
 import generativeStudioRouter from './routes/generative-studio-routes';
+import contentGovernanceRouter from './routes/content-governance-routes';
 import dispositionIntelligenceRouter from './routes/disposition-intelligence-routes';
 import showcaseCallsRouter from './routes/showcase-calls-routes';
 import dispositionReanalysisRouter from './routes/disposition-reanalysis-routes';
@@ -99,7 +100,6 @@ import campaignTestCallsRouter from './routes/campaign-test-calls';
 import agentCallControlRouter from './routes/agent-call-control';
 import healthRouter from './routes/health';
 import simulationsRouter from './routes/simulations';
-import voiceAgentTrainingRouter from './routes/voice-agent-training';
 import voiceProviderRoutes from './routes/voice-provider-routes';
 import iamRouter from './routes/iam';
 import iamClientAccessRouter from './routes/iam-client-access';
@@ -144,6 +144,7 @@ import campaignPipelineRouter from './routes/campaign-pipeline-routes';
 import precisionLeadsRouter from './routes/precision-leads-routes';
 import financeProgramRouter from './routes/finance-program-routes';
 import googleCloudAccountsRouter from './routes/google-cloud-accounts-routes';
+import openAiWebrtcRouter from './routes/openai-webrtc';
 import { autoEnrollJourneyLeadFromDisposition } from './services/client-journey-automation';
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
@@ -15886,8 +15887,6 @@ Provide JSON response with:
 
   // ==================== VOICE AGENT TRAINING (Development Preview Layer) ====================
 
-  app.use('/api/voice-agent-training', requireAuth, voiceAgentTrainingRouter);
-  app.use('/api/unified-agents/voice-training', requireAuth, voiceAgentTrainingRouter);
 
   // ==================== VOICE PROVIDER ROUTES (TTS, Voice Discovery) ====================
 
@@ -16571,6 +16570,7 @@ Provide JSON response with:
     return res.redirect(302, `/api/generative-studio/public/${req.params.slug}${query}`);
   });
   app.use('/api/generative-studio', generativeStudioRouter);
+  app.use('/api/content-governance', contentGovernanceRouter);
   app.use(contentPromotionRouter);
   app.use('/api/disposition-intelligence', dispositionIntelligenceRouter);
   app.use('/api/showcase-calls', showcaseCallsRouter);
@@ -16632,6 +16632,8 @@ Provide JSON response with:
 
   // ==================== EMAIL BUILDER (DRAG & DROP) ====================
   app.use('/api/email-builder', emailBuilderRouter);
+  app.use('/api/openai/webrtc', openAiWebrtcRouter);
+  app.use('/api/openai/realtime', openAiWebrtcRouter);
 
   // ==================== ADMIN MAILGUN WEBHOOK MANAGEMENT ====================
 

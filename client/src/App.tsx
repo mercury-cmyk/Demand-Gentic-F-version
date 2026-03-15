@@ -158,7 +158,6 @@ import IntelligentCampaignCreatePage from "@/pages/intelligent-campaign-create";
 import PreviewStudioPage from "@/pages/preview-studio";
 import VoiceSimulationPage from "@/pages/voice-simulation";
 import EmailSimulationPage from "@/pages/email-simulation";
-import VoiceAgentTrainingDashboard from "@/pages/voice-agent-training-dashboard";
 
 // Settings Hub Pages
 import SettingsIndexPage from "@/pages/settings/index";
@@ -246,13 +245,6 @@ const normalizeRoles = (roles: unknown): string[] => {
 function RouteGuard({ children, userRoles }: { children: React.ReactNode; userRoles: string[] }) {
   const [location, setLocation] = useLocation();
 
-  // Voice trainer users are restricted to the training dashboard only — redirect all non-allowed paths
-  const isVoiceTrainer = userRoles.includes('voice_trainer') && !userRoles.includes('admin');
-  if (isVoiceTrainer && location !== '/voice-agent-training' && location !== '/settings/profile') {
-    setLocation('/voice-agent-training');
-    return null;
-  }
-
   // Check if user can access the current route
   const hasAccess = canAccessRoute(userRoles, location);
 
@@ -303,114 +295,6 @@ function ClientPortalRedirectToDashboard() {
   return <Redirect to="/client-portal/dashboard" />;
 }
 
-function VoiceTrainerShell({ user, userRoles }: { user: any; userRoles: string[] }) {
-  const [showProfile, setShowProfile] = useState(false);
-  const { toast } = useToast();
-  const [firstName, setFirstName] = useState(user?.firstName || '');
-  const [lastName, setLastName] = useState(user?.lastName || '');
-  const [email, setEmail] = useState(user?.email || '');
-
-  const handleSaveProfile = async () => {
-    await new Promise(resolve => setTimeout(resolve, 500));
-    toast({ title: 'Profile Updated', description: 'Your profile information has been saved.' });
-  };
-
-  return (
-    <div className="flex flex-col h-screen w-full bg-background">
-      <header className="flex items-center justify-between px-4 py-2.5 border-b bg-card">
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/10">
-            <div className="relative flex items-center justify-center">
-              <span className="font-bold text-sm text-primary tracking-tighter">PB</span>
-              <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
-            </div>
-          </div>
-          <div className="flex flex-col">
-            <span className="font-semibold text-sm leading-tight">Voice Agent Training</span>
-            <span className="text-[10px] text-muted-foreground leading-tight">Pivotal B2B</span>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant={showProfile ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setShowProfile(!showProfile)}
-          >
-            <User className="h-4 w-4 mr-1" />
-            {`${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.username || 'Profile'}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              localStorage.removeItem('authToken');
-              localStorage.removeItem('authUser');
-              window.location.href = '/login';
-            }}
-          >
-            <LogOut className="h-4 w-4 mr-1" />
-            Logout
-          </Button>
-        </div>
-      </header>
-      <main className="flex-1 overflow-auto">
-        {showProfile ? (
-          <div className="max-w-2xl mx-auto p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h1 className="text-xl font-bold">Profile Settings</h1>
-                <p className="text-sm text-muted-foreground">Manage your personal information</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setShowProfile(false)}>
-                <ArrowLeft className="h-4 w-4 mr-1" />
-                Back to Training
-              </Button>
-            </div>
-            <Card>
-              <CardHeader>
-                <CardTitle>Profile Information</CardTitle>
-                <CardDescription>Update your personal details</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="vt-firstName">First Name</Label>
-                    <Input id="vt-firstName" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="First name" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="vt-lastName">Last Name</Label>
-                    <Input id="vt-lastName" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Last name" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="vt-email">Email</Label>
-                  <Input id="vt-email" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="vt-username">Username</Label>
-                  <Input id="vt-username" value={user?.username || ''} disabled />
-                  <p className="text-xs text-muted-foreground">Username cannot be changed</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="vt-role">Role</Label>
-                  <Input id="vt-role" value="Voice Trainer" disabled />
-                </div>
-                <Button onClick={handleSaveProfile}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Changes
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <RouteGuard userRoles={userRoles}>
-            <VoiceAgentTrainingDashboard />
-          </RouteGuard>
-        )}
-      </main>
-    </div>
-  );
-}
 
 function AuthenticatedApp() {
   const { user, token, getToken } = useAuth();
@@ -436,12 +320,6 @@ function AuthenticatedApp() {
   const resolvedUserRoles = userRoles.length > 0 ? userRoles : ['agent'];
   const primaryRole = resolvedUserRoles.includes('admin') ? 'admin' : resolvedUserRoles[0];
   const isOpsHubRoute = location.startsWith('/ops-hub');
-
-  // Voice trainer users get a clean, isolated full-screen layout — no sidebar, no top nav
-  const isVoiceTrainer = resolvedUserRoles.includes('voice_trainer') && !resolvedUserRoles.includes('admin');
-  if (isVoiceTrainer) {
-    return <VoiceTrainerShell user={user} userRoles={resolvedUserRoles} />;
-  }
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
@@ -708,7 +586,6 @@ function AuthenticatedApp() {
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
               <Route path="/preview-studio" component={PreviewStudioPage} />
-              <Route path="/voice-agent-training" component={VoiceAgentTrainingDashboard} />
 
               {/* Simulation Pages */}
               <Route path="/voice-simulation" component={VoiceSimulationPage} />

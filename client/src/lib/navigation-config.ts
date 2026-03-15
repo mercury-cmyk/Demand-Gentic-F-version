@@ -138,14 +138,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             description: 'Test and preview AI agent behavior',
           },
           {
-            id: 'voice-agent-training',
-            title: 'Voice Agent Training',
-            url: '/voice-agent-training',
-            roles: VOICE_TRAINING_ROLES,
-            badge: { text: 'New', variant: 'new' },
-            description: 'Draft, simulate, and publish unified voice prompt modules safely',
-          },
-          {
             id: 'agentic-operator',
             title: 'Agentic Demand Council',
             url: '/ai-studio/operator',
