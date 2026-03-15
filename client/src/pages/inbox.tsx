@@ -817,7 +817,12 @@ export default function InboxPage() {
     }
   }, [composerOpen, signatures, selectedSignatureId]);
 
-  // Inject/replace signature when signature changes
+  // Inject/replace signature when signature changes.
+  // For replies/forwards, signature goes BETWEEN the compose area and the quoted thread
+  // (Gmail/Outlook standard: fresh text → signature → quoted original).
+  const QUOTE_MARKER = '<div class="gmail_quote"';
+  const FORWARD_MARKER = '<div style="margin:0;padding:0;">';
+
   useEffect(() => {
     if (!composerOpen) return;
 
@@ -836,7 +841,20 @@ export default function InboxPage() {
       const signature = signatures.find(s => s.id === selectedSignatureId);
       if (signature) {
         newSignatureHtml = signature.signatureHtml;
-        cleanBody = `${cleanBody}<br><br>${newSignatureHtml}`;
+
+        // For replies/forwards: inject signature BEFORE the quoted thread
+        const quoteIdx = cleanBody.indexOf(QUOTE_MARKER);
+        const fwdIdx = cleanBody.indexOf(FORWARD_MARKER);
+        const threadIdx = quoteIdx >= 0 ? quoteIdx : fwdIdx;
+
+        if (threadIdx > 0 && (composerMode === 'reply' || composerMode === 'replyAll' || composerMode === 'forward')) {
+          const beforeThread = cleanBody.substring(0, threadIdx);
+          const threadAndAfter = cleanBody.substring(threadIdx);
+          cleanBody = `${beforeThread}<br><br>${newSignatureHtml}<br>${threadAndAfter}`;
+        } else {
+          // New compose — append at end
+          cleanBody = `${cleanBody}<br><br>${newSignatureHtml}`;
+        }
       }
     }
 
@@ -866,49 +884,93 @@ export default function InboxPage() {
     lastInjectedSignatureRef.current = null;
   };
 
+  // Collect all connected mailbox emails (lowercase) for filtering self from recipients
+  const myEmails = new Set(mailboxAccounts.map(m => m.mailboxEmail.toLowerCase()));
+
+  /**
+   * Build a quoted thread block in Gmail/Outlook style.
+   * Structure: empty compose area → (signature injected by useEffect) → quoted thread below.
+   * The quoted thread is separated by a clear divider so the fresh message, signature,
+   * and previous thread are visually distinct and never mixed.
+   */
+  function buildQuotedReply(email: InboxMessage): string {
+    const dateStr = new Date(email.receivedDateTime).toLocaleString('en-US', {
+      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
+    const senderDisplay = email.fromName ? `${email.fromName} &lt;${email.from}&gt;` : email.from;
+
+    return [
+      '<br><br>',
+      '<div class="gmail_quote" style="margin:0 0 0 0;">',
+      `  <div style="font-size:12px;color:#5f6368;padding:8px 0;">On ${dateStr}, ${senderDisplay} wrote:</div>`,
+      '  <blockquote style="margin:0 0 0 0;padding:0 0 0 12px;border-left:2px solid #ccc;color:#555;">',
+      `    ${email.bodyHtml || `<p>${email.bodyPreview || ''}</p>`}`,
+      '  </blockquote>',
+      '</div>',
+    ].join('\n');
+  }
+
+  function buildForwardedBlock(email: InboxMessage): string {
+    const dateStr = new Date(email.receivedDateTime).toLocaleString('en-US', {
+      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
+    return [
+      '<br><br>',
+      '<div style="margin:0;padding:0;">',
+      '  <div style="font-size:12px;color:#5f6368;padding:4px 0;border-top:1px solid #ccc;margin-top:4px;">',
+      '    <strong>---------- Forwarded message ----------</strong><br>',
+      `    <strong>From:</strong> ${email.fromName || email.from} &lt;${email.from}&gt;<br>`,
+      `    <strong>Date:</strong> ${dateStr}<br>`,
+      `    <strong>Subject:</strong> ${email.subject}<br>`,
+      `    <strong>To:</strong> ${email.to.join(', ')}<br>`,
+      email.cc.length > 0 ? `    <strong>Cc:</strong> ${email.cc.join(', ')}<br>` : '',
+      '  </div>',
+      '  <br>',
+      `  ${email.bodyHtml || `<p>${email.bodyPreview || ''}</p>`}`,
+      '</div>',
+    ].filter(Boolean).join('\n');
+  }
+
   const handleReply = (email: InboxMessage) => {
     setComposerMode('reply');
     setReplyingToEmail(email);
     setTo([email.from]);
+    setCc([]);
+    setShowCc(false);
     setSubject(email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`);
-    
-    // Quote original message
-    const quotedBody = `
-      <br><br>
-      <div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 12px; color: #666;">
-        <p><strong>On ${new Date(email.receivedDateTime).toLocaleString()}, ${email.fromName || email.from} wrote:</strong></p>
-        ${email.bodyHtml || `<p>${email.bodyPreview}</p>`}
-      </div>
-    `;
-    setBody(quotedBody);
+    // Body: empty compose area + quoted thread (signature injected by useEffect between them)
+    setBody(buildQuotedReply(email));
     setComposerOpen(true);
   };
 
   const handleReplyAll = (email: InboxMessage) => {
     setComposerMode('replyAll');
     setReplyingToEmail(email);
-    setTo([email.from]);
-    
-    // Include all other recipients in CC except the current user
-    const otherRecipients = [...email.to, ...email.cc].filter(recipient => 
-      recipient.toLowerCase() !== email.from.toLowerCase()
-    );
-    if (otherRecipients.length > 0) {
-      setCc(otherRecipients);
-      setShowCc(true);
+
+    // To: original sender (never yourself)
+    const toRecipients = [email.from].filter(addr => !myEmails.has(addr.toLowerCase()));
+    // If the sender IS yourself (sent mail), put the original To in the To field instead
+    if (toRecipients.length === 0) {
+      toRecipients.push(...email.to.filter(addr => !myEmails.has(addr.toLowerCase())));
     }
-    
+    setTo(toRecipients);
+
+    // CC: everyone else from To + CC, excluding sender (already in To) and self
+    const ccRecipients = [...email.to, ...email.cc].filter(addr => {
+      const lower = addr.toLowerCase();
+      return !myEmails.has(lower) && lower !== email.from.toLowerCase();
+    });
+    // Deduplicate
+    const uniqueCc = [...new Set(ccRecipients.map(e => e.toLowerCase()))].map(lower =>
+      ccRecipients.find(e => e.toLowerCase() === lower)!
+    );
+    setCc(uniqueCc);
+    setShowCc(uniqueCc.length > 0);
+
     setSubject(email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`);
-    
-    // Quote original message
-    const quotedBody = `
-      <br><br>
-      <div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 12px; color: #666;">
-        <p><strong>On ${new Date(email.receivedDateTime).toLocaleString()}, ${email.fromName || email.from} wrote:</strong></p>
-        ${email.bodyHtml || `<p>${email.bodyPreview}</p>`}
-      </div>
-    `;
-    setBody(quotedBody);
+    setBody(buildQuotedReply(email));
     setComposerOpen(true);
   };
 
@@ -916,23 +978,10 @@ export default function InboxPage() {
     setComposerMode('forward');
     setReplyingToEmail(email);
     setTo([]);
+    setCc([]);
+    setShowCc(false);
     setSubject(email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`);
-    
-    // Forward original message
-    const forwardedBody = `
-      <br><br>
-      <div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 12px;">
-        <p><strong>---------- Forwarded message ----------</strong></p>
-        <p><strong>From:</strong> ${email.fromName || email.from} &lt;${email.from}&gt;</p>
-        <p><strong>Date:</strong> ${new Date(email.receivedDateTime).toLocaleString()}</p>
-        <p><strong>Subject:</strong> ${email.subject}</p>
-        <p><strong>To:</strong> ${email.to.join(', ')}</p>
-        ${email.cc.length > 0 ? `<p><strong>Cc:</strong> ${email.cc.join(', ')}</p>` : ''}
-        <br>
-        ${email.bodyHtml || `<p>${email.bodyPreview}</p>`}
-      </div>
-    `;
-    setBody(forwardedBody);
+    setBody(buildForwardedBlock(email));
     setComposerOpen(true);
   };
 
@@ -1010,6 +1059,9 @@ export default function InboxPage() {
       // Ignore when typing in inputs/textareas
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+
+      // Never intercept modifier combos (Ctrl+C for copy, Ctrl+V for paste, Cmd+A, etc.)
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key) {
         case "?":
