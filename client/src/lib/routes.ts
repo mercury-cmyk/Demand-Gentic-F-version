@@ -48,7 +48,6 @@ export const ROUTES = {
   AI_STUDIO_CAMPAIGN_INTELLIGENCE: '/ai-studio/campaign-intelligence',
   AI_STUDIO_OPERATOR: '/ai-studio/operator',
   PREVIEW_STUDIO: '/preview-studio',
-  VIRTUAL_AGENTS: '/virtual-agents',
 
   // ==========================================
   // Settings Hub Routes

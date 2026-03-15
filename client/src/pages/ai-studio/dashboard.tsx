@@ -82,7 +82,7 @@ export default function IntelligenceStudioDashboard() {
       title: 'Virtual Agents',
       description: 'Create and configure AI voice agents with personalities',
       icon: Bot,
-      href: '/virtual-agents',
+      href: '/ai-studio/agents',
       color: 'bg-purple-500',
     },
     {
@@ -115,7 +115,7 @@ export default function IntelligenceStudioDashboard() {
       title: 'Virtual Agents',
       description: 'Manage AI voice agents',
       icon: Bot,
-      href: '/virtual-agents',
+      href: '/ai-studio/agents',
       badge: stats?.virtualAgents ? `${stats.virtualAgents} agents` : null,
     },
     {

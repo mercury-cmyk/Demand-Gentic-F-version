@@ -161,7 +161,7 @@ export default function CampaignIntelligencePage() {
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link href="/virtual-agents">
+            <Link href="/ai-studio/agents">
               <Bot className="h-4 w-4 mr-2" />
               Virtual Agents
             </Link>

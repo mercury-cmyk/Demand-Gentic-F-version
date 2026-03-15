@@ -50,8 +50,6 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: '/voice-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Voice Simulation' },
   { pattern: '/email-simulation', roles: CLIENT_ACCESS_ROLES, description: 'Email Simulation' },
   { pattern: '/ops-hub', roles: [...MANAGEMENT_ROLES, 'manager'], description: 'Operations Hub' },
-  { pattern: '/virtual-agents', roles: MANAGEMENT_ROLES, description: 'Virtual Agents' },
-  { pattern: /^\/virtual-agents\//, roles: MANAGEMENT_ROLES, description: 'Virtual Agent pages' },
   { pattern: '/create-ai-agent', roles: MANAGEMENT_ROLES, description: 'Create AI Agent' },
   { pattern: '/ai-project-creator', roles: MANAGEMENT_ROLES, description: 'AI Project Creator' },
 

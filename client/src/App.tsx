@@ -77,7 +77,6 @@ const DispositionIntelligenceHubPage = lazy(() => import("@/pages/unified-intell
 const PotentialLeadsPage = lazy(() => import("@/pages/potential-leads"));
 import CallReportsDetailsPage from "@/pages/call-reports-details";
 const EngagementAnalyticsPage = lazy(() => import("@/pages/engagement-analytics"));
-import VirtualAgentsPage from "@/pages/virtual-agents";
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
 import SettingsPage from "@/pages/settings";
 import UserManagementPage from "@/pages/user-management";
@@ -607,8 +606,6 @@ function AuthenticatedApp() {
               <Route path="/unified-agent-console" component={UnifiedAgentConsolePage} />
               <Route path="/agent-command-center" component={AgentCommandCenter} />
               <Route path="/unified-agent-architecture" component={UnifiedAgentArchitectureDashboard} />
-              <Route path="/virtual-agents" component={VirtualAgentsPage} />
-              <Route path="/virtual-agents/create" component={CreateAIAgentPage} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
               <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
               <Route path="/settings/ai-governance" component={AiGovernanceSettingsPage} />
