@@ -79,7 +79,13 @@ import {
   Save,
   X,
 } from 'lucide-react';
+import { Megaphone, Search, Loader2, Activity } from 'lucide-react';
 import { ROUTES } from '@/lib/routes';
+import { OrganizationTable } from '@/components/organization-manager/organization-table';
+import { CreateEditOrganizationDialog } from '@/components/organization-manager/create-edit-organization-dialog';
+import { OrganizationDetailPanel } from '@/components/organization-manager/organization-detail-panel';
+import { OrganizationMembersDialog } from '@/components/organization-manager/organization-members-dialog';
+import type { Organization, OrganizationStats } from '@/components/organization-manager/types';
 
 // Types
 interface SuperOrganization {
@@ -370,7 +376,7 @@ export default function SuperOrgSettingsPage() {
       description="Manage Pivotal B2B platform settings, members, and credentials"
     >
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <Building2 className="h-4 w-4" />
             Overview
@@ -386,6 +392,10 @@ export default function SuperOrgSettingsPage() {
           <TabsTrigger value="clients" className="flex items-center gap-2">
             <Building className="h-4 w-4" />
             Clients
+          </TabsTrigger>
+          <TabsTrigger value="organizations" className="flex items-center gap-2">
+            <Activity className="h-4 w-4" />
+            Client Organizations
           </TabsTrigger>
         </TabsList>
 
@@ -411,6 +421,11 @@ export default function SuperOrgSettingsPage() {
         {/* Clients Tab */}
         <TabsContent value="clients" className="space-y-6">
           <ClientsSection clients={clients} isLoading={clientsLoading} />
+        </TabsContent>
+
+        {/* Client Organizations Tab — merged from Organization Manager */}
+        <TabsContent value="organizations" className="space-y-6">
+          <ClientOrganizationsSection />
         </TabsContent>
       </Tabs>
     </SettingsLayout>
@@ -1470,5 +1485,207 @@ function ClientsSection({ clients, isLoading }: { clients: ClientOrganization[];
         </DialogContent>
       </Dialog>
     </Card>
+  );
+}
+
+// Client Organizations Section — merged from Organization Manager
+function ClientOrganizationsSection() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [activeFilter, setActiveFilter] = useState<string>('active');
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editingOrg, setEditingOrg] = useState<Organization | null>(null);
+  const [deletingOrg, setDeletingOrg] = useState<Organization | null>(null);
+  const [detailOrg, setDetailOrg] = useState<Organization | null>(null);
+  const [membersOrg, setMembersOrg] = useState<Organization | null>(null);
+
+  const { data: orgsData, isLoading: orgsLoading } = useQuery({
+    queryKey: ['/api/organizations', typeFilter, activeFilter, searchQuery],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (typeFilter && typeFilter !== 'all') params.set('type', typeFilter);
+      if (activeFilter && activeFilter !== 'all') params.set('active', activeFilter === 'active' ? 'true' : 'false');
+      if (searchQuery) params.set('search', searchQuery);
+      const url = `/api/organizations${params.toString() ? `?${params}` : ''}`;
+      const res = await fetch(url, { headers: getAuthHeaders(), credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch organizations');
+      return res.json() as Promise<{ organizations: Organization[]; total: number }>;
+    },
+  });
+
+  const { data: statsData } = useQuery({
+    queryKey: ['/api/organizations/stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/organizations/stats', { headers: getAuthHeaders(), credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch stats');
+      return res.json() as Promise<{ stats: OrganizationStats }>;
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (orgId: string) => {
+      const res = await fetch(`/api/organizations/${orgId}`, { method: 'DELETE', headers: getAuthHeaders(), credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to delete organization');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/organizations'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/organizations/stats'] });
+      toast({ title: 'Organization deleted', description: 'Organization has been deactivated.' });
+      setDeletingOrg(null);
+    },
+    onError: (error: Error) => {
+      toast({ variant: 'destructive', title: 'Error', description: error.message });
+      setDeletingOrg(null);
+    },
+  });
+
+  const organizations = orgsData?.organizations || [];
+  const stats = statsData?.stats;
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Client Organizations</h3>
+          <p className="text-sm text-muted-foreground">Organizations that use the platform services</p>
+        </div>
+        <Button onClick={() => setCreateDialogOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          New Organization
+        </Button>
+      </div>
+
+      {stats && (
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total</CardTitle>
+              <Building2 className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.total}</div>
+              <p className="text-xs text-muted-foreground">{stats.active} active</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Super</CardTitle>
+              <Crown className="h-4 w-4 text-amber-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.byType.super}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Client</CardTitle>
+              <Building className="h-4 w-4 text-blue-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.byType.client}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Campaign</CardTitle>
+              <Megaphone className="h-4 w-4 text-purple-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.byType.campaign}</div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by name or domain..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select value={typeFilter} onValueChange={setTypeFilter}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="super">Super</SelectItem>
+            <SelectItem value="client">Client</SelectItem>
+            <SelectItem value="campaign">Campaign</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={activeFilter} onValueChange={setActiveFilter}>
+          <SelectTrigger className="w-36">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {orgsLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
+        <OrganizationTable
+          organizations={organizations}
+          onEdit={(org) => setEditingOrg(org)}
+          onDelete={(org) => setDeletingOrg(org)}
+          onViewMembers={(org) => setMembersOrg(org)}
+          onViewDetails={(org) => setDetailOrg(org)}
+        />
+      )}
+
+      <CreateEditOrganizationDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} />
+      <CreateEditOrganizationDialog
+        open={!!editingOrg}
+        onOpenChange={(open) => { if (!open) setEditingOrg(null); }}
+        organization={editingOrg}
+      />
+      <OrganizationDetailPanel
+        open={!!detailOrg}
+        onOpenChange={(open) => { if (!open) setDetailOrg(null); }}
+        organization={detailOrg}
+        onEdit={(org) => { setDetailOrg(null); setEditingOrg(org); }}
+        onViewMembers={(org) => { setDetailOrg(null); setMembersOrg(org); }}
+      />
+      <OrganizationMembersDialog
+        open={!!membersOrg}
+        onOpenChange={(open) => { if (!open) setMembersOrg(null); }}
+        organization={membersOrg}
+      />
+      <AlertDialog open={!!deletingOrg} onOpenChange={() => setDeletingOrg(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Organization</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{deletingOrg?.name}</strong>? This will
+              deactivate the organization. It can be reactivated later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => { if (deletingOrg) deleteMutation.mutate(deletingOrg.id); }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

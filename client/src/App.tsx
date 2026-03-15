@@ -575,7 +575,7 @@ function AuthenticatedApp() {
               <Route path="/create-ai-agent" component={CreateAIAgentPage} />
               
               {/* Organization & Client Portal Management */}
-              <Route path="/organization-manager" component={OrganizationManagerPage} />
+              <Route path="/organization-manager">{() => { window.location.replace('/settings/super-org'); return null; }}</Route>
               <Route path="/client-portal-admin" component={ClientPortalAdmin} />
               <Route path="/admin/project-requests" component={AdminProjectRequests} />
               <Route path="/admin/todo-board" component={AdminTodoBoardPage} />

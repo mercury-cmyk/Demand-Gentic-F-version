@@ -442,7 +442,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           {
             id: 'organization-manager',
             title: 'Organizations',
-            url: '/organization-manager',
+            url: '/settings/super-org',
             roles: [USER_ROLES.ADMIN],
             description: 'Manage super, client, and campaign organizations',
           },
