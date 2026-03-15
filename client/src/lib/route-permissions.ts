@@ -118,7 +118,6 @@ export const ROUTE_PERMISSIONS: RoutePermission[] = [
   { pattern: /^\/disposition-intelligence\//, roles: [...QA_ROLES, USER_ROLES.AGENT], description: 'Disposition Intelligence Hub pages' },
   { pattern: '/conversation-quality', roles: QA_ROLES, description: 'Conversation Quality' },
   { pattern: '/disposition-reanalysis', roles: QA_ROLES, description: 'Disposition Reanalysis' },
-  { pattern: '/qa-review-center', roles: QA_ROLES, description: 'QA Review Center' },
 
   // ============================================
   // DATA & VERIFICATION - Data Ops + QA

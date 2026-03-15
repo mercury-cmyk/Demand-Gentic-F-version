@@ -2640,10 +2640,6 @@ export default function ClientPortalAdmin() {
                     <Network className="h-4 w-4 mr-2" />
                     View Full Hierarchy
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setLocation('/qa-review-center')}>
-                    <Eye className="h-4 w-4 mr-2" />
-                    QA Review Center
-                  </Button>
                 </div>
               </div>
             </CardContent>

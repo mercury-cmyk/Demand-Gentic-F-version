@@ -68,6 +68,7 @@ const CloudLogsMonitor = lazy(() => import("./pages/cloud-logs-monitor"));
 const CampaignManagerPage = lazy(() => import("@/pages/campaign-manager"));
 const ContentStudioPage = lazy(() => import("@/pages/content-studio"));
 const GenerativeStudioPage = lazy(() => import("@/pages/generative-studio"));
+const ContentGovernancePage = lazy(() => import("@/pages/content-governance"));
 const AIContentGeneratorPage = lazy(() => import("@/pages/ai-content-generator"));
 const SocialMediaPublisherPage = lazy(() => import("@/pages/social-media-publisher"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
@@ -144,7 +145,6 @@ const ClientPortalEmailInbox = lazy(() => import("@/pages/client-portal-email-in
 import ClientPortalEmailCampaigns from "@/pages/client-portal-email-campaigns";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
-import QAReviewCenter from "@/pages/qa-review-center";
 const OrganizationIntelligencePage = lazy(() => import("@/pages/ai-studio/intelligence"));
 const AIAgentsPage = lazy(() => import("@/pages/ai-studio/agents"));
 const AgenticCRMOperatorPage = lazy(() => import("@/pages/ai-studio/operator"));
@@ -545,6 +545,7 @@ function AuthenticatedApp() {
               <Route path="/ai-content-generator" component={AIContentGeneratorPage} />
               <Route path="/social-media-publisher" component={SocialMediaPublisherPage} />
               <Route path="/generative-studio" component={GenerativeStudioPage} />
+              <Route path="/content-governance" component={ContentGovernancePage} />
               <Route path="/content-promotion" component={ContentPromotionManagerPage} />
 
               {/* Suppressions */}
@@ -707,8 +708,6 @@ function AuthenticatedApp() {
               <Route path="/data-management" component={DataManagementPage} />
               <Route path="/admin/bookings" component={AdminBookingsPage} />
               <Route path="/client-hierarchy-manager" component={ClientHierarchyManager} />
-              <Route path="/qa-review-center" component={QAReviewCenter} />
-              
               {/* Testing & Development */}
               <Route path="/campaign-test" component={CampaignTestPage} />
               <Route path="/preview-studio" component={PreviewStudioPage} />
