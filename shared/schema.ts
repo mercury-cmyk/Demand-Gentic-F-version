@@ -539,6 +539,23 @@ export const contentToneEnum = pgEnum('content_tone', [
   'technical'
 ]);
 
+// Content Governance enums
+export const contentGovernanceFeatureStatusEnum = pgEnum('content_governance_feature_status', [
+  'draft',
+  'active',
+  'deprecated',
+  'sunset',
+]);
+
+export const contentGovernanceActionTypeEnum = pgEnum('content_governance_action_type', [
+  'refresh_recommended',
+  'refresh_in_progress',
+  'refresh_completed',
+  'design_update',
+  'rollback',
+  'coverage_gap_detected',
+]);
+
 // Content distribution enums
 export const eventTypeEnum = pgEnum('event_type', [
   'webinar',
@@ -2037,6 +2054,7 @@ export const campaigns = pgTable("campaigns", {
   type: campaignTypeEnum("type").notNull(),
   name: text("name").notNull(),
   status: campaignStatusEnum("status").notNull().default('draft'),
+  isArchived: boolean("is_archived").notNull().default(false),
   // Client & project linkage (governed access)
   clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'set null' }),
   projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
@@ -14395,6 +14413,9 @@ export const generativeStudioPublishedPages = pgTable("generative_studio_publish
   publishedAt: timestamp("published_at"),
   unpublishedAt: timestamp("unpublished_at"),
   viewCount: integer("view_count").notNull().default(0),
+  // Resource Center fields
+  isResourceCenter: boolean("is_resource_center").notNull().default(false),
+  resourceCategory: text("resource_category"), // e.g. "Whitepapers & eBooks", "Solution Briefs"
   ownerId: varchar("owner_id").notNull(),
   tenantId: varchar("tenant_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -14403,6 +14424,7 @@ export const generativeStudioPublishedPages = pgTable("generative_studio_publish
   slugIdx: index("gen_studio_published_slug_idx").on(table.slug),
   contentTypeIdx: index("gen_studio_published_type_idx").on(table.contentType),
   isPublishedIdx: index("gen_studio_published_is_published_idx").on(table.isPublished),
+  resourceCenterIdx: index("gen_studio_published_resource_center_idx").on(table.isResourceCenter),
 }));
 
 // Generative Studio insert schemas
@@ -14433,6 +14455,118 @@ export type GenerativeStudioChatMessage = typeof generativeStudioChatMessages.$i
 export type InsertGenerativeStudioChatMessage = z.infer<typeof insertGenerativeStudioChatMessageSchema>;
 export type GenerativeStudioPublishedPage = typeof generativeStudioPublishedPages.$inferSelect;
 export type InsertGenerativeStudioPublishedPage = z.infer<typeof insertGenerativeStudioPublishedPageSchema>;
+
+// ============================================
+// CONTENT GOVERNANCE — Product Feature Registry, Page Mappings, Versions, Actions
+// ============================================
+
+export const productFeatures = pgTable("product_features", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: varchar("organization_id").notNull().references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  name: text("name").notNull(),
+  slug: text("slug").notNull(),
+  description: text("description"),
+  category: text("category"), // e.g. "Platform", "Integration", "Analytics"
+  status: contentGovernanceFeatureStatusEnum("status").notNull().default('draft'),
+  releaseDate: timestamp("release_date"),
+  keyBenefits: jsonb("key_benefits").$type<string[]>().default(sql`'[]'::jsonb`),
+  targetPersonas: jsonb("target_personas").$type<string[]>().default(sql`'[]'::jsonb`),
+  competitiveAngle: text("competitive_angle"),
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  ownerId: varchar("owner_id").notNull(),
+  tenantId: varchar("tenant_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  orgIdx: index("product_features_org_idx").on(table.organizationId),
+  orgSlugIdx: uniqueIndex("product_features_org_slug_idx").on(table.organizationId, table.slug),
+  statusIdx: index("product_features_status_idx").on(table.status),
+}));
+
+export const pageFeatureMappings = pgTable("page_feature_mappings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  publishedPageId: varchar("published_page_id").notNull().references(() => generativeStudioPublishedPages.id, { onDelete: 'cascade' }),
+  featureId: varchar("feature_id").notNull().references(() => productFeatures.id, { onDelete: 'cascade' }),
+  coverageDepth: text("coverage_depth").notNull().default('mentioned'), // 'primary' | 'mentioned' | 'detailed'
+  aiConfidence: real("ai_confidence"), // 0-1
+  lastVerifiedAt: timestamp("last_verified_at"),
+  tenantId: varchar("tenant_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  pageIdx: index("page_feature_mappings_page_idx").on(table.publishedPageId),
+  featureIdx: index("page_feature_mappings_feature_idx").on(table.featureId),
+  pageFeatureIdx: uniqueIndex("page_feature_mappings_page_feature_idx").on(table.publishedPageId, table.featureId),
+}));
+
+export const pageVersions = pgTable("page_versions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  publishedPageId: varchar("published_page_id").notNull().references(() => generativeStudioPublishedPages.id, { onDelete: 'cascade' }),
+  versionNumber: integer("version_number").notNull(),
+  htmlContent: text("html_content").notNull(),
+  cssContent: text("css_content"),
+  changeDescription: text("change_description"),
+  changeTrigger: text("change_trigger").notNull().default('manual'), // 'manual' | 'ai_refresh' | 'design_update' | 'rollback'
+  featureContext: jsonb("feature_context").$type<string[]>(),
+  designPrompt: text("design_prompt"),
+  createdBy: varchar("created_by"),
+  tenantId: varchar("tenant_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  pageVersionIdx: index("page_versions_page_version_idx").on(table.publishedPageId, table.versionNumber),
+  pageCreatedIdx: index("page_versions_page_created_idx").on(table.publishedPageId, table.createdAt),
+}));
+
+export const contentGovernanceActions = pgTable("content_governance_actions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: varchar("organization_id").notNull().references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  actionType: contentGovernanceActionTypeEnum("action_type").notNull(),
+  publishedPageId: varchar("published_page_id").references(() => generativeStudioPublishedPages.id, { onDelete: 'set null' }),
+  featureId: varchar("feature_id").references(() => productFeatures.id, { onDelete: 'set null' }),
+  description: text("description"),
+  aiAnalysis: jsonb("ai_analysis"),
+  status: text("status").notNull().default('pending'), // 'pending' | 'approved' | 'applied' | 'dismissed'
+  resolvedBy: varchar("resolved_by"),
+  resolvedAt: timestamp("resolved_at"),
+  tenantId: varchar("tenant_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => ({
+  orgStatusIdx: index("content_governance_actions_org_status_idx").on(table.organizationId, table.status),
+  pageIdx: index("content_governance_actions_page_idx").on(table.publishedPageId),
+  featureIdx: index("content_governance_actions_feature_idx").on(table.featureId),
+}));
+
+// Content Governance insert schemas
+export const insertProductFeatureSchema = createInsertSchema(productFeatures).omit({
+  id: true,
+  ownerId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPageFeatureMappingSchema = createInsertSchema(pageFeatureMappings).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPageVersionSchema = createInsertSchema(pageVersions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertContentGovernanceActionSchema = createInsertSchema(contentGovernanceActions).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Content Governance types
+export type ProductFeature = typeof productFeatures.$inferSelect;
+export type InsertProductFeature = z.infer<typeof insertProductFeatureSchema>;
+export type PageFeatureMapping = typeof pageFeatureMappings.$inferSelect;
+export type InsertPageFeatureMapping = z.infer<typeof insertPageFeatureMappingSchema>;
+export type PageVersion = typeof pageVersions.$inferSelect;
+export type InsertPageVersion = z.infer<typeof insertPageVersionSchema>;
+export type ContentGovernanceAction = typeof contentGovernanceActions.$inferSelect;
+export type InsertContentGovernanceAction = z.infer<typeof insertContentGovernanceActionSchema>;
 
 // ============================================
 // EXTERNAL EVENTS (Argyle Event-Sourced Campaign Drafts)

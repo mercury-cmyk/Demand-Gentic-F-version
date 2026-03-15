@@ -14,8 +14,9 @@ import { db } from "../db";
 import {
   campaignOrganizations,
   brandKits,
+  productFeatures,
 } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { chat as vertexChat } from "./vertex-ai/vertex-client";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 import { withAiConcurrency } from "../lib/ai-concurrency";
@@ -362,6 +363,50 @@ export async function getBrandContext(brandKitId?: string): Promise<string> {
     }
     return parts.join('\n');
   } catch {
+    return '';
+  }
+}
+
+// ============================================================================
+// PRODUCT FEATURE REGISTRY — ENRICHMENT FOR CONTENT GENERATION
+// ============================================================================
+
+/**
+ * Retrieves active product features for an organization and formats them
+ * as a prompt-ready context block. Injected into landing page generation
+ * so AI can reference registered features automatically.
+ */
+export async function getFeatureRegistryContext(organizationId?: string): Promise<string> {
+  if (!organizationId) return '';
+
+  try {
+    const features = await db.select({
+      name: productFeatures.name,
+      description: productFeatures.description,
+      keyBenefits: productFeatures.keyBenefits,
+      targetPersonas: productFeatures.targetPersonas,
+      category: productFeatures.category,
+      competitiveAngle: productFeatures.competitiveAngle,
+    })
+      .from(productFeatures)
+      .where(and(eq(productFeatures.organizationId, organizationId), eq(productFeatures.status, 'active')));
+
+    if (features.length === 0) return '';
+
+    const lines = features.map(f => {
+      const parts = [`- ${f.name}`];
+      if (f.description) parts.push(f.description);
+      const benefits = (f.keyBenefits as string[] || []);
+      if (benefits.length > 0) parts.push(`Benefits: ${benefits.join('; ')}`);
+      const personas = (f.targetPersonas as string[] || []);
+      if (personas.length > 0) parts.push(`For: ${personas.join(', ')}`);
+      if (f.competitiveAngle) parts.push(`Differentiator: ${f.competitiveAngle}`);
+      return parts.join(' | ');
+    });
+
+    return `\n=== PRODUCT FEATURES & CAPABILITIES REGISTRY ===\n${lines.join('\n')}\n=== END PRODUCT FEATURES REGISTRY ===`;
+  } catch (err) {
+    console.error('[UnifiedLPEngine] Failed to load feature registry:', err);
     return '';
   }
 }
@@ -766,6 +811,7 @@ export async function generateLandingPageHTML(
   const orgIntel = await assertOrganizationIntelligence(params.organizationId);
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
+  const featureRegistryContext = await getFeatureRegistryContext(params.organizationId);
   const baseContext = buildBaseContext(params, orgIntel.raw, orgIntel);
 
   let systemPrompt: string;
@@ -790,6 +836,7 @@ Asset Download/View URL: ${resolvedAssetUrl || 'https://example.com/asset-downlo
 
 ${baseContext}
 ${brandContext}
+${featureRegistryContext}
 ${campaignBlock}
 
 Generate a complete, production-ready landing page following the conversion architecture in your instructions. The page MUST include:
@@ -876,6 +923,7 @@ export async function generateLandingPageStructured(
   const orgIntel = await assertOrganizationIntelligence(params.organizationId);
   const startTime = Date.now();
   const brandContext = await getBrandContext(params.brandKitId);
+  const featureRegistryContext = await getFeatureRegistryContext(params.organizationId);
   const baseContext = buildBaseContext(params, orgIntel.raw, orgIntel);
 
   let systemPrompt: string;
@@ -894,6 +942,7 @@ export async function generateLandingPageStructured(
 
 ${baseContext}
 ${brandContext}
+${featureRegistryContext}
 ${campaignBlock}
 
 Return a JSON object with EXACTLY these keys (match this structure precisely):

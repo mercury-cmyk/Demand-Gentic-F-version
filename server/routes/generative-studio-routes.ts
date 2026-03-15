@@ -14,8 +14,10 @@ import {
   contentPromotionPageViews,
   contentAssets,
   clientProjects,
+  pageVersions,
+  pageFeatureMappings,
 } from "@shared/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, max } from "drizzle-orm";
 import { requireAuth, verifyToken } from "../auth";
 import { resolveScopedOrganizationId } from "../lib/client-organization-scope";
 import {
@@ -722,7 +724,7 @@ router.delete("/chat/sessions/:sessionId", requireDualAuth, async (req: Request,
 router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response) => {
   try {
     const { userId, tenantId } = getAuthedUserContext(req);
-    const { slug, metaTitle, metaDescription } = req.body;
+    const { slug, metaTitle, metaDescription, publishToResourceCenter, resourceCategory, featureIds } = req.body;
     const organizationId = await resolveRequestOrganizationId(req, "body", false);
     const clientProjectId = normalizeOptionalId(req.body.clientProjectId);
 
@@ -757,6 +759,25 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
       .where(eq(generativeStudioPublishedPages.projectId, project.id)).limit(1);
 
     if (existing) {
+      // Snapshot current content into version history before overwriting
+      try {
+        const [maxVer] = await db.select({ max: max(pageVersions.versionNumber) })
+          .from(pageVersions).where(eq(pageVersions.publishedPageId, existing.id));
+        const nextVersion = ((maxVer?.max as number) || 0) + 1;
+        await db.insert(pageVersions).values({
+          publishedPageId: existing.id,
+          versionNumber: nextVersion,
+          htmlContent: existing.htmlContent,
+          cssContent: existing.cssContent,
+          changeDescription: `Snapshot before republish of "${project.title}"`,
+          changeTrigger: 'manual',
+          createdBy: userId,
+          tenantId,
+        });
+      } catch (versionErr) {
+        console.error('[GenerativeStudio] Failed to create version snapshot on republish', versionErr);
+      }
+
       // Update existing published page
       const [updated] = await db.update(generativeStudioPublishedPages)
         .set({
@@ -766,6 +787,8 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
           metaDescription: metaDescription || metadata.metaDescription || metadata.seoDescription || '',
           isPublished: true,
           publishedAt: new Date(),
+          isResourceCenter: publishToResourceCenter === true,
+          resourceCategory: publishToResourceCenter ? (resourceCategory || null) : undefined,
           tenantId: tenantId,
           updatedAt: new Date(),
         })
@@ -776,6 +799,26 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
       await db.update(generativeStudioProjects)
         .set({ status: 'published', updatedAt: new Date() })
         .where(eq(generativeStudioProjects.id, project.id));
+
+      // Create feature mappings if provided
+      if (Array.isArray(featureIds) && featureIds.length > 0) {
+        try {
+          for (const fId of featureIds) {
+            await db.insert(pageFeatureMappings).values({
+              publishedPageId: updated.id,
+              featureId: fId,
+              coverageDepth: 'primary',
+              lastVerifiedAt: new Date(),
+              tenantId,
+            }).onConflictDoUpdate({
+              target: [pageFeatureMappings.publishedPageId, pageFeatureMappings.featureId],
+              set: { coverageDepth: 'primary', lastVerifiedAt: new Date() },
+            });
+          }
+        } catch (mapErr) {
+          console.error('[GenerativeStudio] Failed to create feature mappings on publish', mapErr);
+        }
+      }
 
       return res.json({ publishedPage: updated, url: `/generative-studio/public/${updated.slug}` });
     }
@@ -791,6 +834,8 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
       metaDescription: metaDescription || metadata.metaDescription || metadata.seoDescription || '',
       isPublished: true,
       publishedAt: new Date(),
+      isResourceCenter: publishToResourceCenter === true,
+      resourceCategory: publishToResourceCenter ? (resourceCategory || null) : null,
       ownerId: userId,
       tenantId: tenantId,
     }).returning();
@@ -799,6 +844,26 @@ router.post("/publish/:id", requireDualAuth, async (req: Request, res: Response)
     await db.update(generativeStudioProjects)
       .set({ status: 'published', updatedAt: new Date() })
       .where(eq(generativeStudioProjects.id, project.id));
+
+    // Create feature mappings if provided
+    if (Array.isArray(featureIds) && featureIds.length > 0) {
+      try {
+        for (const fId of featureIds) {
+          await db.insert(pageFeatureMappings).values({
+            publishedPageId: published.id,
+            featureId: fId,
+            coverageDepth: 'primary',
+            lastVerifiedAt: new Date(),
+            tenantId,
+          }).onConflictDoUpdate({
+            target: [pageFeatureMappings.publishedPageId, pageFeatureMappings.featureId],
+            set: { coverageDepth: 'primary', lastVerifiedAt: new Date() },
+          });
+        }
+      } catch (mapErr) {
+        console.error('[GenerativeStudio] Failed to create feature mappings on publish', mapErr);
+      }
+    }
 
     res.json({ publishedPage: published, url: `/generative-studio/public/${pageSlug}` });
   } catch (error: any) {

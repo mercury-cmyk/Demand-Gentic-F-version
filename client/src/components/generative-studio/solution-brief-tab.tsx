@@ -8,6 +8,7 @@ import { Briefcase } from "lucide-react";
 import GenerationForm from "./shared/generation-form";
 import ContentPreview from "./shared/content-preview";
 import ExportDialog from "./shared/export-dialog";
+import PublishDialog from "./shared/publish-dialog";
 
 import type { OrgIntelligenceProfile } from "@/pages/generative-studio";
 
@@ -29,6 +30,7 @@ export default function SolutionBriefTab({
   const [result, setResult] = useState<any>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
   const [problemStatement, setProblemStatement] = useState("");
   const [fullHtml, setFullHtml] = useState("");
   const projectsQueryKey = `/api/generative-studio/projects?organizationId=${organizationId || ""}&clientProjectId=${clientProjectId || ""}`;
@@ -102,6 +104,24 @@ export default function SolutionBriefTab({
     },
   });
 
+  const publishMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", `/api/generative-studio/publish/${projectId}`, {
+        ...data,
+        organizationId,
+        clientProjectId,
+      });
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      setPublishOpen(false);
+      toast({ title: "Solution brief published!", description: `Available at ${data.url}` });
+    },
+    onError: (error: any) => {
+      toast({ title: "Publish failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const handleGenerate = (params: Record<string, any>) => {
     generateMutation.mutate({
       ...params,
@@ -159,10 +179,21 @@ export default function SolutionBriefTab({
           } : undefined}
           projectId={projectId || undefined}
           status={projectId ? "generated" : undefined}
+          onPublish={projectId ? () => setPublishOpen(true) : undefined}
           onExport={() => setExportOpen(true)}
           onSaveAsAsset={projectId ? () => saveAsAssetMutation.mutate() : undefined}
         />
       </div>
+
+      <PublishDialog
+        open={publishOpen}
+        onOpenChange={setPublishOpen}
+        onPublish={(data) => publishMutation.mutate(data)}
+        isPublishing={publishMutation.isPending}
+        title={result?.title || "Solution Brief"}
+        contentType="solution_brief"
+        organizationId={organizationId}
+      />
 
       <ExportDialog
         open={exportOpen}

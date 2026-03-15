@@ -261,13 +261,14 @@ export function securityHeaders(req: Request, res: Response, next: NextFunction)
   
   // Content Security Policy
   // Allow ws: and http://localhost for Vite HMR in development
+  // Allow cdn.jsdelivr.net for Monaco Editor (@monaco-editor/react loads from CDN)
   const scriptSrc = isDev
-    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-    : "script-src 'self' 'unsafe-inline'"; // No unsafe-eval in production
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net"
+    : "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net";
   const frameAncestors = isDev ? "frame-ancestors 'self'" : "frame-ancestors 'none'";
   res.setHeader(
     'Content-Security-Policy',
-    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob: https://s3.amazonaws.com https://*.s3.amazonaws.com https://storage.googleapis.com https://*.storage.googleapis.com; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; ${frameAncestors}`
+    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; media-src 'self' blob: https://s3.amazonaws.com https://*.s3.amazonaws.com https://storage.googleapis.com https://*.storage.googleapis.com; connect-src 'self' https: wss:${isDev ? ' ws: http://localhost:* http://127.0.0.1:*' : ''}; worker-src 'self' blob:; ${frameAncestors}`
   );
 
   // Strict Transport Security (enforce HTTPS for 1 year, include subdomains)

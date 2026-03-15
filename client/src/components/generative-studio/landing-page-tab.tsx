@@ -331,6 +331,7 @@ export default function LandingPageTab({
         isPublishing={publishMutation.isPending}
         title={result?.title || "Landing Page"}
         contentType="landing_page"
+        organizationId={organizationId}
       />
     </div>
   );

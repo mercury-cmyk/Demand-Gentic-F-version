@@ -26,6 +26,7 @@ import {
   Mic,
   Check,
   Brain,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { apiRequest, getAuthHeaders } from '@/lib/queryClient';
@@ -43,6 +44,12 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { InvalidRecordsModal } from './invalid-records-modal';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export interface QueueStats {
   total: number;
@@ -487,117 +494,105 @@ export function PhoneCampaignPanel({
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div className="flex flex-wrap gap-2 pt-2 border-t">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setLocation(`/campaigns/${campaign.id}/queue`)}
-        >
-          <Users className="w-4 h-4 mr-2" />
-          View Queue
-        </Button>
+      <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Dialer Controls
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isAiAgent
+                ? 'Use the queue as the control plane for AI dialing, agent capacity, and voice rotation.'
+                : 'Manage queue flow, agent coverage, and reporting from a more compact action surface.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={() => setLocation(`/campaigns/${campaign.id}/queue`)}
+            >
+              <Users className="h-4 w-4" />
+              View Queue
+            </Button>
 
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setLocation(`/campaigns/${campaign.id}/queue?tab=intelligence`)}
-          className="text-violet-600 border-violet-300 hover:bg-violet-50 dark:text-violet-400 dark:border-violet-700 dark:hover:bg-violet-950/30"
-        >
-          <Brain className="w-4 h-4 mr-2" />
-          Queue Analysis
-        </Button>
-
-        {onAssignAgents && (
-          <Button size="sm" variant="outline" onClick={onAssignAgents}>
-            <UserPlus className="w-4 h-4 mr-2" />
-            Assign Agents
-          </Button>
-        )}
-
-        {onToggleStatus && (
-          <Button size="sm" variant="outline" onClick={onToggleStatus} disabled={isToggling}>
-            {campaign.status === 'active' ? (
-              <>
-                <Pause className="w-4 h-4 mr-2" />
-                Pause
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 mr-2" />
-                Resume
-              </>
+            {onToggleStatus && (
+              <Button size="sm" variant="outline" className="gap-2" onClick={onToggleStatus} disabled={isToggling}>
+                {campaign.status === 'active' ? (
+                  <>
+                    <Pause className="h-4 w-4" />
+                    Pause
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    Resume
+                  </>
+                )}
+              </Button>
             )}
-          </Button>
-        )}
 
-        {isAiAgent && campaign.status === 'active' && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleStartAiCalls}
-            disabled={startAiCallsMutation.isPending}
-          >
-            {startAiCallsMutation.isPending ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <PhoneOutgoing className="w-4 h-4 mr-2" />
+            {isAiAgent && campaign.status === 'active' && (
+              <Button
+                size="sm"
+                className="gap-2"
+                onClick={handleStartAiCalls}
+                disabled={startAiCallsMutation.isPending}
+              >
+                {startAiCallsMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PhoneOutgoing className="h-4 w-4" />
+                )}
+                Start AI Calls
+              </Button>
             )}
-            Start AI Calls
-          </Button>
-        )}
 
-        {isAiAgent && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setLocation(`/campaigns/${campaign.id}/test`)}
-          >
-            <Bot className="w-4 h-4 mr-2" />
-            Test AI Agent
-          </Button>
-        )}
-
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleSyncQueue}
-          disabled={syncQueueMutation.isPending}
-        >
-          {syncQueueMutation.isPending ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          ) : (
-            <RefreshCw className="w-4 h-4 mr-2" />
-          )}
-          Sync Queue
-        </Button>
-
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setScaleDialogOpen(true)}
-        >
-          <Zap className="w-4 h-4 mr-2" />
-          Deployment Scale
-        </Button>
-
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setVoiceDialogOpen(true)}
-        >
-          <Mic className="w-4 h-4 mr-2" />
-          Assign Voices {selectedVoices.length > 0 && `(${selectedVoices.length})`}
-        </Button>
-
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setLocation(`/reports?campaign=${campaign.id}`)}
-        >
-          <BarChart className="w-4 h-4 mr-2" />
-          Reports
-        </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-2">
+                  <MoreHorizontal className="h-4 w-4" />
+                  More
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setLocation(`/campaigns/${campaign.id}/queue?tab=intelligence`)}>
+                  <Brain className="mr-2 h-4 w-4" />
+                  Queue Analysis
+                </DropdownMenuItem>
+                {onAssignAgents && (
+                  <DropdownMenuItem onClick={onAssignAgents}>
+                    <UserPlus className="mr-2 h-4 w-4" />
+                    Assign Agents
+                  </DropdownMenuItem>
+                )}
+                {isAiAgent && (
+                  <DropdownMenuItem onClick={() => setLocation(`/campaigns/${campaign.id}/test`)}>
+                    <Bot className="mr-2 h-4 w-4" />
+                    Test AI Agent
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleSyncQueue} disabled={syncQueueMutation.isPending}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Sync Queue
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setScaleDialogOpen(true)}>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Deployment Scale
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setVoiceDialogOpen(true)}>
+                  <Mic className="mr-2 h-4 w-4" />
+                  Assign Voices {selectedVoices.length > 0 ? `(${selectedVoices.length})` : ''}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation(`/reports?campaign=${campaign.id}`)}>
+                  <BarChart className="mr-2 h-4 w-4" />
+                  Reports
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
       </div>
 
       <Dialog open={scaleDialogOpen} onOpenChange={setScaleDialogOpen}>

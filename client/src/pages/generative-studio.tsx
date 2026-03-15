@@ -39,6 +39,7 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
+  ShieldCheck,
 } from "lucide-react";
 import ImageGenerationTab from "@/components/generative-studio/image-generation-tab";
 import LandingPageTab from "@/components/generative-studio/landing-page-tab";
@@ -48,6 +49,7 @@ import BlogPostTab from "@/components/generative-studio/blog-post-tab";
 import EbookTab from "@/components/generative-studio/ebook-tab";
 import SolutionBriefTab from "@/components/generative-studio/solution-brief-tab";
 import ProjectHistoryPanel from "@/components/generative-studio/shared/project-history-panel";
+import StudioGovernancePanel from "@/components/content-governance/studio-governance-panel";
 import { OrganizationSelector } from "@/components/ai-studio/org-intelligence/organization-selector";
 
 export interface OrgIntelligenceProfile {
@@ -187,6 +189,18 @@ const MODULES = [
     textClass: "text-amber-600",
     activeClass: "bg-amber-500/10 text-amber-700 border-amber-200",
     dotClass: "bg-amber-500",
+  },
+  {
+    id: "governance",
+    label: "Content Governance",
+    shortLabel: "Govern",
+    icon: ShieldCheck,
+    color: "cyan",
+    description: "Feature registry, page health & design governance",
+    bgClass: "bg-cyan-500/10",
+    textClass: "text-cyan-600",
+    activeClass: "bg-cyan-500/10 text-cyan-700 border-cyan-200",
+    dotClass: "bg-cyan-500",
   },
 ] as const;
 
@@ -699,6 +713,11 @@ export default function GenerativeStudioPage() {
           {activeModule === "chat" && (
             <ChatTab
               orgIntelligence={orgProfile}
+              organizationId={selectedOrgId || undefined}
+            />
+          )}
+          {activeModule === "governance" && (
+            <StudioGovernancePanel
               organizationId={selectedOrgId || undefined}
             />
           )}

@@ -58,20 +58,55 @@ export default function ResourcesCentrePublic() {
     queryKey: ["/api/events"],
   });
 
+  // Fetch governed content from Creative Studio Resource Center
+  const { data: governedContent = [] } = useQuery<any[]>({
+    queryKey: ["/api/content-governance/resource-center"],
+    queryFn: async () => {
+      try {
+        const res = await fetch("/api/content-governance/resource-center/public");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.resources || [];
+      } catch { return []; }
+    },
+  });
+
   // Filter only published content
   const publishedResources = resources.filter((r) => r.status === "published");
   const publishedNews = news.filter((n) => n.status === "published");
   const publishedEvents = events.filter((e) => e.status === "published");
 
+  // Map governed content to resource-like format for display
+  const governedAsResources = governedContent.map((g: any) => ({
+    id: g.id,
+    title: g.title,
+    description: g.metaDescription || "",
+    resourceType: g.contentType === "ebook" ? "ebook" : g.contentType === "solution_brief" ? "solution_brief" : g.contentType === "blog_post" ? "insight" : "whitepaper",
+    status: "published" as const,
+    url: `/api/generative-studio/public/${g.slug}`,
+    publishedAt: g.publishedAt,
+    resourceCategory: g.resourceCategory,
+    _governed: true,
+  }));
+
   // Combine and categorize content
   const announcements = publishedNews;
-  const insights = publishedResources.filter((r) =>
-    r.resourceType === "insight" || r.resourceType === "blog" || r.resourceType === "article"
-  );
-  const ebooks = publishedResources.filter((r) => r.resourceType === "ebook");
-  const solutionBriefs = publishedResources.filter((r) =>
-    r.resourceType === "solution_brief" || r.resourceType === "whitepaper"
-  );
+  const insights = [
+    ...publishedResources.filter((r) =>
+      r.resourceType === "insight" || r.resourceType === "blog" || r.resourceType === "article"
+    ),
+    ...governedAsResources.filter((g: any) => g.resourceType === "insight"),
+  ];
+  const ebooks = [
+    ...publishedResources.filter((r) => r.resourceType === "ebook"),
+    ...governedAsResources.filter((g: any) => g.resourceType === "ebook"),
+  ];
+  const solutionBriefs = [
+    ...publishedResources.filter((r) =>
+      r.resourceType === "solution_brief" || r.resourceType === "whitepaper"
+    ),
+    ...governedAsResources.filter((g: any) => g.resourceType === "solution_brief" || g.resourceType === "whitepaper"),
+  ];
   const webinars = publishedEvents.filter((e) =>
     e.eventType === "webinar" || e.eventType === "virtual"
   );

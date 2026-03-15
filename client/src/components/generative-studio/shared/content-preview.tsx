@@ -179,7 +179,7 @@ export default function ContentPreview({
               <Save className="w-3.5 h-3.5 mr-1" /> Save
             </Button>
           )}
-          {onPublish && (contentType === "landing_page" || contentType === "blog_post") && (
+          {onPublish && (contentType === "landing_page" || contentType === "blog_post" || contentType === "ebook" || contentType === "solution_brief") && (
             <Button
               size="sm"
               className="h-7 px-2.5 text-xs bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"

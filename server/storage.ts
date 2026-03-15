@@ -614,11 +614,18 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   private campaignTimezonePriorityColumnReady = false;
+  private campaignArchivedColumnReady = false;
   private ensureCampaignTimezonePriorityColumnPromise: Promise<void> | null = null;
+  private ensureCampaignArchivedColumnPromise: Promise<void> | null = null;
 
   private isMissingTimezonePriorityConfigColumnError(error: unknown): boolean {
     const dbError = error as { code?: string; message?: string } | undefined;
     return dbError?.code === "42703" && String(dbError?.message || "").includes("timezone_priority_config");
+  }
+
+  private isMissingCampaignArchivedColumnError(error: unknown): boolean {
+    const dbError = error as { code?: string; message?: string } | undefined;
+    return dbError?.code === "42703" && String(dbError?.message || "").includes("is_archived");
   }
 
   private async ensureCampaignTimezonePriorityColumn(): Promise<void> {
@@ -637,6 +644,24 @@ export class DatabaseStorage implements IStorage {
     }
 
     await this.ensureCampaignTimezonePriorityColumnPromise;
+  }
+
+  private async ensureCampaignArchivedColumn(): Promise<void> {
+    if (this.campaignArchivedColumnReady) {
+      return;
+    }
+
+    if (!this.ensureCampaignArchivedColumnPromise) {
+      this.ensureCampaignArchivedColumnPromise = (async () => {
+        await db.execute(sql`ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS is_archived boolean NOT NULL DEFAULT false`);
+        this.campaignArchivedColumnReady = true;
+        console.warn("[DB] Added missing campaigns.is_archived column on demand.");
+      })().finally(() => {
+        this.ensureCampaignArchivedColumnPromise = null;
+      });
+    }
+
+    await this.ensureCampaignArchivedColumnPromise;
   }
 
   // Users
@@ -1410,11 +1435,20 @@ export class DatabaseStorage implements IStorage {
     try {
       return await runQuery();
     } catch (error) {
+      if (this.isMissingTimezonePriorityConfigColumnError(error)) {
+        await this.ensureCampaignTimezonePriorityColumn();
+        return await runQuery();
+      }
+
+      if (this.isMissingCampaignArchivedColumnError(error)) {
+        await this.ensureCampaignArchivedColumn();
+        return await runQuery();
+      }
+
       if (!this.isMissingTimezonePriorityConfigColumnError(error)) {
         throw error;
       }
 
-      await this.ensureCampaignTimezonePriorityColumn();
       return await runQuery();
     }
   }
@@ -1428,11 +1462,20 @@ export class DatabaseStorage implements IStorage {
     try {
       return await runQuery();
     } catch (error) {
+      if (this.isMissingTimezonePriorityConfigColumnError(error)) {
+        await this.ensureCampaignTimezonePriorityColumn();
+        return await runQuery();
+      }
+
+      if (this.isMissingCampaignArchivedColumnError(error)) {
+        await this.ensureCampaignArchivedColumn();
+        return await runQuery();
+      }
+
       if (!this.isMissingTimezonePriorityConfigColumnError(error)) {
         throw error;
       }
 
-      await this.ensureCampaignTimezonePriorityColumn();
       return await runQuery();
     }
   }
@@ -1445,12 +1488,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateCampaign(id: string, updateData: Partial<InsertCampaign>): Promise<Campaign | undefined> {
-    const [campaign] = await db
-      .update(campaigns)
-      .set({ ...updateData, updatedAt: new Date() })
-      .where(eq(campaigns.id, id))
-      .returning();
-    return campaign || undefined;
+    const runQuery = async () => {
+      const [campaign] = await db
+        .update(campaigns)
+        .set({ ...updateData, updatedAt: new Date() })
+        .where(eq(campaigns.id, id))
+        .returning();
+      return campaign || undefined;
+    };
+
+    try {
+      return await runQuery();
+    } catch (error) {
+      if (this.isMissingCampaignArchivedColumnError(error)) {
+        await this.ensureCampaignArchivedColumn();
+        return await runQuery();
+      }
+
+      throw error;
+    }
   }
 
   async deleteCampaign(id: string): Promise<void> {

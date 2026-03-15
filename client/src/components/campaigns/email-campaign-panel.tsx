@@ -22,6 +22,7 @@ import {
   MousePointerClick,
   UserMinus,
   AlertTriangle,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
@@ -37,6 +38,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export interface EmailStats {
   totalRecipients: number;
@@ -185,6 +193,7 @@ export function EmailCampaignPanel({
   const deliveryRate = emailStats?.totalRecipients
     ? Math.round((emailStats.delivered / emailStats.totalRecipients) * 100)
     : 0;
+  const canOpenReports = campaign.status !== 'draft' || Boolean(emailStats?.totalRecipients);
 
   return (
     <div className={className}>
@@ -262,138 +271,163 @@ export function EmailCampaignPanel({
         </div>
       )}
 
-      {/* Action Buttons */}
-      <div className="flex flex-wrap gap-2 pt-2 border-t">
-        {/* Launch - Draft only */}
-        {campaign.status === 'draft' && (
-          <>
-            <Button
-              size="sm"
-              onClick={() => launchMutation.mutate(campaign.id.toString())}
-              disabled={launchMutation.isPending}
-            >
-              {launchMutation.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="mr-2 h-4 w-4" />
-              )}
-              Launch
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setLocation(`/campaigns/email/${campaign.id}/edit`)}
-            >
-              <Edit className="mr-2 h-4 w-4" />
-              Edit
-            </Button>
-          </>
-        )}
-
-        {/* Pause - Active only */}
-        {campaign.status === 'active' && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => pauseMutation.mutate(campaign.id.toString())}
-            disabled={pauseMutation.isPending}
-            className="border-amber-300 text-amber-700 hover:bg-amber-50"
-          >
-            {pauseMutation.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Pause className="mr-2 h-4 w-4" />
-            )}
-            Pause
-          </Button>
-        )}
-
-        {/* Resume - Paused only */}
-        {campaign.status === 'paused' && (
-          <Button
-            size="sm"
-            onClick={() => resumeMutation.mutate(campaign.id.toString())}
-            disabled={resumeMutation.isPending}
-          >
-            {resumeMutation.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RotateCcw className="mr-2 h-4 w-4" />
-            )}
-            Resume
-          </Button>
-        )}
-
-        {/* Cancel - Active or Paused */}
-        {(campaign.status === 'active' || campaign.status === 'paused') && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button size="sm" variant="destructive" disabled={cancelMutation.isPending}>
-                {cancelMutation.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <StopCircle className="mr-2 h-4 w-4" />
-                )}
-                Cancel
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Cancel Campaign?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will permanently stop the campaign. Any remaining unsent emails will not be
-                  delivered. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Keep Running</AlertDialogCancel>
-                <AlertDialogAction
-                  onClick={() => cancelMutation.mutate(campaign.id.toString())}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+      <div className="rounded-xl border border-border/70 bg-background/70 p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Campaign Controls
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {campaign.status === 'draft' && 'Review the draft, then launch when the route is ready.'}
+              {campaign.status === 'active' && 'Sending is live. Pause the run or review reporting as engagement updates.'}
+              {campaign.status === 'paused' && 'The campaign is paused. Resume when the audience and content are ready.'}
+              {(campaign.status === 'completed' || campaign.status === 'cancelled') && 'Create a fresh draft from this campaign to iterate without touching the original record.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {campaign.status === 'draft' && (
+              <>
+                <Button
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => launchMutation.mutate(campaign.id.toString())}
+                  disabled={launchMutation.isPending}
                 >
-                  Yes, Cancel Campaign
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-
-        {/* Requeue - Cancelled or Completed */}
-        {(campaign.status === 'cancelled' || campaign.status === 'completed') && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => requeueMutation.mutate(campaign.id.toString())}
-            disabled={requeueMutation.isPending}
-            className="border-blue-300 text-blue-700 hover:bg-blue-50"
-          >
-            {requeueMutation.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
+                  {launchMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  Send Now
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => setLocation(`/campaigns/email/${campaign.id}/edit`)}
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit Draft
+                </Button>
+              </>
             )}
-            Requeue
-          </Button>
-        )}
 
-        {/* Common Actions */}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setLocation(`/campaigns/${campaign.id}/suppressions`)}
-        >
-          <Shield className="mr-2 h-4 w-4" />
-          Suppressions
-        </Button>
+            {campaign.status === 'active' && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50"
+                onClick={() => pauseMutation.mutate(campaign.id.toString())}
+                disabled={pauseMutation.isPending}
+              >
+                {pauseMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Pause className="h-4 w-4" />
+                )}
+                Pause
+              </Button>
+            )}
 
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setLocation(`/campaigns/email/${campaign.id}/reports`)}
-        >
-          <BarChart3 className="mr-2 h-4 w-4" />
-          Stats
-        </Button>
+            {campaign.status === 'paused' && (
+              <Button
+                size="sm"
+                className="gap-2"
+                onClick={() => resumeMutation.mutate(campaign.id.toString())}
+                disabled={resumeMutation.isPending}
+              >
+                {resumeMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
+                Resume
+              </Button>
+            )}
+
+            {(campaign.status === 'completed' || campaign.status === 'cancelled') && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+                onClick={() => requeueMutation.mutate(campaign.id.toString())}
+                disabled={requeueMutation.isPending}
+              >
+                {requeueMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Duplicate Draft
+              </Button>
+            )}
+
+            {canOpenReports && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={() => setLocation(`/campaigns/email/${campaign.id}/reports`)}
+              >
+                <BarChart3 className="h-4 w-4" />
+                Reports
+              </Button>
+            )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="gap-2">
+                  <MoreHorizontal className="h-4 w-4" />
+                  More
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setLocation(`/campaigns/${campaign.id}/suppressions`)}>
+                  <Shield className="mr-2 h-4 w-4" />
+                  Suppressions
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setLocation(`/campaigns/email/${campaign.id}/edit`)}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Open Builder
+                </DropdownMenuItem>
+                {(campaign.status === 'active' || campaign.status === 'paused') && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          <StopCircle className="mr-2 h-4 w-4" />
+                          Cancel Campaign
+                        </DropdownMenuItem>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Cancel Campaign?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently stop the campaign. Any remaining unsent emails will not be
+                            delivered. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Keep Running</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => cancelMutation.mutate(campaign.id.toString())}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Yes, Cancel Campaign
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
       </div>
     </div>
   );

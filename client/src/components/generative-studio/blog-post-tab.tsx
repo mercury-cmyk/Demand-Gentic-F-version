@@ -201,6 +201,7 @@ export default function BlogPostTab({
         isPublishing={publishMutation.isPending}
         title={result?.title || "Blog Post"}
         contentType="blog_post"
+        organizationId={organizationId}
       />
 
       <ExportDialog

@@ -27,13 +27,7 @@ interface EphemeralTokenResponse {
   expires_at: number;
 }
 
-/**
- * POST /api/openai/webrtc/ephemeral-token
- * 
- * Creates an ephemeral session token for OpenAI Realtime WebRTC.
- * Requires authentication - user must be logged in.
- */
-router.post("/ephemeral-token", requireAuth, async (req: Request, res: Response) => {
+async function handleEphemeralTokenRequest(req: Request, res: Response) {
   try {
     const { model, voice, instructions } = req.body as EphemeralTokenRequest;
     
@@ -83,14 +77,12 @@ router.post("/ephemeral-token", requireAuth, async (req: Request, res: Response)
     console.log(`${LOG_PREFIX} Ephemeral token created, expires at:`, 
       new Date(sessionData.client_secret.expires_at * 1000).toISOString());
 
-    // Return ephemeral token to client
     const result: EphemeralTokenResponse = {
       token: sessionData.client_secret.value,
       expires_at: sessionData.client_secret.expires_at,
     };
 
     return res.json(result);
-
   } catch (error) {
     console.error(`${LOG_PREFIX} Error creating ephemeral token:`, error);
     return res.status(500).json({ 
@@ -98,7 +90,22 @@ router.post("/ephemeral-token", requireAuth, async (req: Request, res: Response)
       message: error instanceof Error ? error.message : "Unknown error",
     });
   }
-});
+}
+
+/**
+ * POST /api/openai/webrtc/ephemeral-token
+ * 
+ * Creates an ephemeral session token for OpenAI Realtime WebRTC.
+ * Requires authentication - user must be logged in.
+ */
+router.post("/ephemeral-token", requireAuth, handleEphemeralTokenRequest);
+
+/**
+ * POST /api/openai/realtime/session
+ *
+ * Backward-compatible alias used by older browser WebRTC clients.
+ */
+router.post("/session", requireAuth, handleEphemeralTokenRequest);
 
 /**
  * GET /api/openai/webrtc/status
