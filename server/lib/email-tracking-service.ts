@@ -11,6 +11,18 @@ export interface TrackingOptions {
 export class EmailTrackingService {
   private _fallbackSecret: string | null = null;
 
+  private splitSignedToken(decoded: string): { payload: string; signature: string } | null {
+    const separatorIndex = decoded.lastIndexOf('.');
+    if (separatorIndex <= 0 || separatorIndex === decoded.length - 1) {
+      return null;
+    }
+
+    return {
+      payload: decoded.slice(0, separatorIndex),
+      signature: decoded.slice(separatorIndex + 1),
+    };
+  }
+
   private get trackingBaseUrl(): string {
     return process.env.APP_BASE_URL
       || (process.env.REPLIT_DEPLOYMENT === '1' ? 'https://demandgentic.ai' : null)
@@ -147,12 +159,14 @@ export class EmailTrackingService {
   decodeTrackingToken(token: string): { messageId: string; recipientEmail: string; timestamp: number } | null {
     try {
       const decoded = Buffer.from(token, 'base64url').toString('utf-8');
-      const [payload, signature] = decoded.split('.');
+      const parts = this.splitSignedToken(decoded);
 
-      if (!payload || !signature) {
+      if (!parts) {
         console.error('[EMAIL-TRACKING] Invalid token format');
         return null;
       }
+
+      const { payload, signature } = parts;
 
       // Parse payload first
       const data = JSON.parse(payload);
@@ -198,12 +212,14 @@ export class EmailTrackingService {
   decodeLinkTrackingToken(token: string): { messageId: string; recipientEmail: string; originalUrl: string; timestamp: number } | null {
     try {
       const decoded = Buffer.from(token, 'base64url').toString('utf-8');
-      const [payload, signature] = decoded.split('.');
+      const parts = this.splitSignedToken(decoded);
 
-      if (!payload || !signature) {
+      if (!parts) {
         console.error('[EMAIL-TRACKING] Invalid token format');
         return null;
       }
+
+      const { payload, signature } = parts;
 
       // Parse payload
       const data = JSON.parse(payload);
