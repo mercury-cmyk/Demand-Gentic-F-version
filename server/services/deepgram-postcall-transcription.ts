@@ -257,7 +257,13 @@ export async function submitStructuredTranscription(
 
   const inferredS3Key = options?.recordingS3Key || extractStorageKeyFromUrl(audioUrl);
 
-  // Strategy 1: Try GCS presigned URL from S3 key
+  // Strategy 1: Try the original URL first if it's a direct HTTPS URL (Telnyx S3)
+  // This is the most reliable path — fresh Telnyx URLs are publicly accessible
+  if (/^https?:\/\//i.test(audioUrl) && !audioUrl.startsWith('gcs-internal://') && !audioUrl.startsWith('gs://')) {
+    attempts.push(audioUrl);
+  }
+
+  // Strategy 2: Try GCS presigned URL from S3 key (for recordings already in GCS)
   if (inferredS3Key) {
     const s3RefreshedUrl = await getRefreshedUrlFromS3(inferredS3Key);
     if (s3RefreshedUrl && !attempts.includes(s3RefreshedUrl)) {
@@ -265,20 +271,12 @@ export async function submitStructuredTranscription(
     }
   }
 
-  // Strategy 2: Try Telnyx recording URL via call ID
-  if (attempts.length === 0 && options?.telnyxCallId) {
+  // Strategy 3: Try Telnyx recording URL via call ID (refresh expired URLs)
+  if (options?.telnyxCallId) {
     const telnyxUrl = await getRefreshedUrlFromTelnyx(options.telnyxCallId);
     if (telnyxUrl && !attempts.includes(telnyxUrl)) {
-      console.log(`${LOG_PREFIX} Using Telnyx recording URL for transcription`);
       attempts.push(telnyxUrl);
     }
-  }
-
-  // Strategy 3: If the original audioUrl is a publicly accessible HTTPS URL
-  // (not GCS internal, not gs://), use it directly — covers Telnyx download URLs
-  if (attempts.length === 0 && /^https?:\/\//i.test(audioUrl) && !audioUrl.startsWith('gcs-internal://') && !audioUrl.startsWith('gs://')) {
-    console.log(`${LOG_PREFIX} Using direct HTTPS URL for Deepgram: ${audioUrl.slice(0, 100)}...`);
-    attempts.push(audioUrl);
   }
 
   if (attempts.length === 0) {

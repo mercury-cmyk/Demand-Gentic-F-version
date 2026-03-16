@@ -21,15 +21,15 @@ const POOL_CONCURRENCY = parseInt(process.env.TRANSCRIPTION_POOL_CONCURRENCY || 
 const POOL_INTER_CHUNK_DELAY_MS = parseInt(process.env.TRANSCRIPTION_POOL_DELAY_MS || '200', 10);
 
 const PROVIDER_WEIGHTS: Record<string, number> = {
-  deepgram: parseInt(process.env.TRANSCRIPTION_POOL_DEEPGRAM_WEIGHT || '5', 10),
-  google_stt: parseInt(process.env.TRANSCRIPTION_POOL_GOOGLE_WEIGHT || '3', 10),
-  telnyx: parseInt(process.env.TRANSCRIPTION_POOL_TELNYX_WEIGHT || '2', 10),
+  deepgram: parseInt(process.env.TRANSCRIPTION_POOL_DEEPGRAM_WEIGHT || '8', 10),
+  google_stt: parseInt(process.env.TRANSCRIPTION_POOL_GOOGLE_WEIGHT || '1', 10),
+  telnyx: parseInt(process.env.TRANSCRIPTION_POOL_TELNYX_WEIGHT || '1', 10),
 };
 
 const MAX_CONCURRENT_PER_PROVIDER: Record<string, number> = {
-  deepgram: 5,
-  google_stt: 3,
-  telnyx: 4,
+  deepgram: 8,
+  google_stt: 2,
+  telnyx: 2,
 };
 
 const CIRCUIT_OPEN_THRESHOLD = 5;   // Open circuit after 5 consecutive failures
