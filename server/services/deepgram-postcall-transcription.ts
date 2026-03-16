@@ -172,6 +172,13 @@ async function submitToDeepgram(audioUrl: string): Promise<StructuredTranscript 
     language: DEEPGRAM_LANGUAGE,
     punctuate: "true",
     smart_format: "true",
+    // CRITICAL: Enable multichannel to get per-channel speaker attribution.
+    // Our recordings are stereo: channel 0 = contact (inbound), channel 1 = agent (outbound).
+    // Without multichannel, Deepgram uses diarization which assigns speaker IDs randomly —
+    // the first speaker gets speaker 0 regardless of which channel they're on. Since the AI
+    // agent speaks first in outbound calls, diarization mislabels ALL agent speech as "contact"
+    // and vice versa, causing "no contact engagement" in quality analysis.
+    multichannel: "true",
     diarize: "true",
     utterances: "true",
     paragraphs: "true",
@@ -208,14 +215,38 @@ async function submitToDeepgram(audioUrl: string): Promise<StructuredTranscript 
 
   const payload: any = await response.json();
   const results = payload?.results;
-  const alt = results?.channels?.[0]?.alternatives?.[0];
-  const transcriptText: string = (alt?.transcript || "").trim();
 
+  // With multichannel enabled, Deepgram returns per-channel results.
+  // Merge transcripts from all channels for the combined text.
+  const channels = results?.channels || [];
+  const transcriptParts: string[] = [];
+  for (const ch of channels) {
+    const altText = ch?.alternatives?.[0]?.transcript;
+    if (typeof altText === "string" && altText.trim()) {
+      transcriptParts.push(altText.trim());
+    }
+  }
+  const transcriptText = transcriptParts.join(" ").trim();
+
+  // Prefer top-level utterances (available with multichannel + utterances=true).
+  // Each utterance includes a `channel` field for reliable speaker attribution.
   const rawUtterances: DeepgramUtterance[] = Array.isArray(results?.utterances)
     ? results.utterances
-    : Array.isArray(alt?.utterances)
-      ? alt.utterances
-      : [];
+    : [];
+
+  // Fallback: if top-level utterances are missing, extract from per-channel alternatives
+  if (rawUtterances.length === 0) {
+    for (let chIdx = 0; chIdx < channels.length; chIdx++) {
+      const chUtterances = channels[chIdx]?.alternatives?.[0]?.utterances;
+      if (Array.isArray(chUtterances)) {
+        for (const u of chUtterances) {
+          rawUtterances.push({ ...u, channel: chIdx });
+        }
+      }
+    }
+    // Sort by start time to interleave channels chronologically
+    rawUtterances.sort((a, b) => (a.start || 0) - (b.start || 0));
+  }
 
   const utterances = rawUtterances
     .filter((u) => typeof u?.transcript === "string" && u.transcript.trim().length > 0)
