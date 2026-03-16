@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,7 +34,7 @@ import {
   downloadCSV,
   generateContactsWithAccountTemplate,
 } from "@/lib/csv-utils";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { CSVFieldMapper } from "@/components/csv-field-mapper";
 import type { List as ListType } from "@shared/schema";
@@ -53,6 +53,20 @@ interface FieldMapping {
 
 type ImportStage = "upload" | "mapping" | "validate" | "preview" | "importing" | "complete";
 
+const LARGE_FILE_THRESHOLD_BYTES = 5 * 1024 * 1024;
+const PREVIEW_READ_BYTES = 2 * 1024 * 1024;
+const PREVIEW_ROW_LIMIT = 25;
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
+}
+
 export function CSVImportDialog({
   open,
   onOpenChange,
@@ -66,6 +80,9 @@ export function CSVImportDialog({
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [importProgress, setImportProgress] = useState(0);
   const [importResults, setImportResults] = useState({ success: 0, created: 0, updated: 0, failed: 0 });
+  const [isPreviewOnly, setIsPreviewOnly] = useState(false);
+  const [backgroundJobId, setBackgroundJobId] = useState<string | null>(null);
+  const [importStatusMessage, setImportStatusMessage] = useState("Preparing import...");
   const { toast } = useToast();
 
   // List selection state
@@ -74,33 +91,158 @@ export function CSVImportDialog({
   const [newListName, setNewListName] = useState("");
 
   // Fetch available lists for selection
-  const { data: existingLists = [] } = useQuery<ListType[]>({
+  const { data: existingLists = [], isLoading: listsLoading, error: listsError, refetch: refetchLists } = useQuery<ListType[]>({
     queryKey: ['/api/lists'],
     enabled: open,
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/lists");
+      return res.json();
+    },
   });
 
   // Filter to only show contact lists
   const contactLists = existingLists.filter(list => list.entityType === 'contact');
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const getEffectiveFieldMappings = () =>
+    fieldMappings.filter(
+      (mapping): mapping is FieldMapping & { targetField: string; targetEntity: "contact" | "account" } =>
+        Boolean(mapping.targetField && mapping.targetEntity),
+    );
+
+  const loadParsedCSVFromFile = async (selectedFile: File): Promise<{ parsedHeaders: string[]; parsedRows: string[][]; previewOnly: boolean }> => {
+    const previewOnly = selectedFile.size > LARGE_FILE_THRESHOLD_BYTES;
+    const rawContent = previewOnly
+      ? await selectedFile.slice(0, PREVIEW_READ_BYTES).text()
+      : await selectedFile.text();
+
+    let parsed = parseCSV(rawContent);
+
+    // Drop the trailing partial row when the preview only reads a file slice.
+    if (previewOnly && selectedFile.size > PREVIEW_READ_BYTES && parsed.length > 2) {
+      parsed = parsed.slice(0, -1);
+    }
+
+    if (parsed.length === 0) {
+      throw new Error("The selected CSV file appears to be empty.");
+    }
+
+    return {
+      parsedHeaders: parsed[0],
+      parsedRows: parsed
+        .slice(1)
+        .filter(row => row.some(cell => Boolean(cell?.trim())))
+        .slice(0, previewOnly ? PREVIEW_ROW_LIMIT : Number.MAX_SAFE_INTEGER),
+      previewOnly,
+    };
+  };
+
+  const loadAllRowsForDirectImport = async (): Promise<{ parsedHeaders: string[]; parsedRows: string[][] }> => {
+    if (!file) {
+      throw new Error("No CSV file selected.");
+    }
+
+    const parsed = parseCSV(await file.text());
+    if (parsed.length === 0) {
+      throw new Error("The selected CSV file appears to be empty.");
+    }
+
+    return {
+      parsedHeaders: parsed[0],
+      parsedRows: parsed.slice(1).filter(row => row.some(cell => Boolean(cell?.trim()))),
+    };
+  };
+
+  const autoRegisterMappedCustomFields = async () => {
+    const effectiveMappings = getEffectiveFieldMappings();
+    const contactCustomFieldKeys = Array.from(
+      new Set(
+        effectiveMappings
+          .filter(mapping => mapping.targetEntity === "contact" && mapping.targetField.startsWith("custom_"))
+          .map(mapping => mapping.targetField.replace(/^custom_/, "")),
+      ),
+    );
+    const accountCustomFieldKeys = Array.from(
+      new Set(
+        effectiveMappings
+          .filter(mapping => mapping.targetEntity === "account" && mapping.targetField.startsWith("custom_"))
+          .map(mapping => mapping.targetField.replace(/^custom_/, "")),
+      ),
+    );
+
+    try {
+      if (contactCustomFieldKeys.length > 0) {
+        await apiRequest("POST", "/api/custom-fields/auto-register", {
+          entityType: "contact",
+          fieldKeys: contactCustomFieldKeys,
+        });
+      }
+
+      if (accountCustomFieldKeys.length > 0) {
+        await apiRequest("POST", "/api/custom-fields/auto-register", {
+          entityType: "account",
+          fieldKeys: accountCustomFieldKeys,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to auto-register mapped custom fields:", error);
+    }
+  };
+
+  const resolveTargetList = async (): Promise<{ id: string | null; name: string | null }> => {
+    if (isCreatingNewList && newListName.trim()) {
+      const createListResponse = await apiRequest("POST", "/api/lists", {
+        name: newListName.trim(),
+        entityType: "contact",
+        sourceType: "manual_upload",
+        recordIds: [],
+      });
+      const newList = await createListResponse.json();
+      await queryClient.invalidateQueries({ queryKey: ["/api/lists"] });
+      return { id: newList.id, name: newListName.trim() };
+    }
+
+    if (selectedListId && selectedListId !== "__none__") {
+      const foundList = contactLists.find(list => list.id === selectedListId);
+      return { id: selectedListId, name: foundList?.name || null };
+    }
+
+    return { id: null, name: null };
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
+    if (!selectedFile) {
+      return;
+    }
+
+    try {
       setFile(selectedFile);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        const parsed = parseCSV(content);
-        
-        if (parsed.length > 0) {
-          const headers = parsed[0];
-          setHeaders(headers);
-          setCsvData(parsed.slice(1));
-          
-          // Always go to mapping stage first - let user review/confirm field mappings
-          setStage("mapping");
-        }
-      };
-      reader.readAsText(selectedFile);
+      setErrors([]);
+      setFieldMappings([]);
+      setImportProgress(0);
+      setImportResults({ success: 0, created: 0, updated: 0, failed: 0 });
+      setBackgroundJobId(null);
+      setImportStatusMessage("Preparing import...");
+
+      const { parsedHeaders, parsedRows, previewOnly } = await loadParsedCSVFromFile(selectedFile);
+      setHeaders(parsedHeaders);
+      setCsvData(parsedRows);
+      setIsPreviewOnly(previewOnly);
+      setStage("mapping");
+
+      if (previewOnly) {
+        toast({
+          title: "Large CSV detected",
+          description: `Loaded a fast preview from ${formatFileSize(selectedFile.size)}. The full file will import in the background.`,
+        });
+      }
+    } catch (error) {
+      console.error("Failed to read CSV file:", error);
+      toast({
+        title: "File Read Failed",
+        description: error instanceof Error ? error.message : "Unable to read the selected CSV file.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -254,330 +396,293 @@ export function CSVImportDialog({
     }
   };
 
-  const handleImport = async () => {
-    setStage("importing");
-    setImportProgress(0);
+  useEffect(() => {
+    if (!backgroundJobId || stage !== "importing") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollJob = async () => {
+      try {
+        const response = await apiRequest("GET", `/api/contacts-csv-import/${backgroundJobId}`);
+        const payload = await response.json() as {
+          state: string;
+          progress?: Record<string, number | string>;
+          result?: {
+            successRows?: number;
+            createdRows?: number;
+            updatedRows?: number;
+            failedRows?: number;
+          };
+          error?: string;
+        };
+
+        if (cancelled) {
+          return;
+        }
+
+        const progress = payload.progress || {};
+        const nextProgress =
+          typeof progress.percent === "number"
+            ? progress.percent
+            : typeof progress.totalRows === "number" && progress.totalRows > 0
+            ? Math.min(
+                99,
+                Math.round(
+                  ((((progress.successRows as number | undefined) ?? 0) + ((progress.failedRows as number | undefined) ?? 0)) /
+                    progress.totalRows) *
+                    100,
+                ),
+              )
+            : null;
+
+        setImportProgress(prev => (typeof nextProgress === "number" ? nextProgress : prev));
+
+        const processedRows =
+          typeof progress.processed === "number"
+            ? progress.processed
+            : typeof progress.totalRows === "number"
+            ? progress.totalRows
+            : null;
+
+        if (payload.state === "completed") {
+          const result = payload.result || {};
+          const created = result.createdRows ?? 0;
+          const updated = result.updatedRows ?? 0;
+          const failed = result.failedRows ?? 0;
+          const success = result.successRows ?? created + updated;
+
+          setImportProgress(100);
+          setImportStatusMessage("Background import complete.");
+          setImportResults({ success, created, updated, failed });
+          await queryClient.invalidateQueries({ queryKey: ["/api/lists"] });
+          setStage("complete");
+
+          const parts = [];
+          if (created > 0) parts.push(`${created} new contact(s) created`);
+          if (updated > 0) parts.push(`${updated} existing contact(s) updated`);
+          if (failed > 0) parts.push(`${failed} failed`);
+
+          toast({
+            title: "Import Complete",
+            description: parts.length > 0 ? parts.join(", ") : "Background import finished.",
+          });
+
+          onImportComplete();
+          return;
+        }
+
+        if (payload.state === "failed") {
+          throw new Error(payload.error || "Background import failed.");
+        }
+
+        setImportStatusMessage(
+          processedRows !== null
+            ? `Processed ${processedRows.toLocaleString()} row(s) in background...`
+            : "Queued for background processing...",
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("Failed to poll contacts CSV import job:", error);
+        setStage("upload");
+        toast({
+          title: "Import Failed",
+          description: error instanceof Error ? error.message : "Failed to monitor the import job.",
+          variant: "destructive",
+        });
+      }
+    };
+
+    void pollJob();
+    const intervalId = window.setInterval(() => {
+      void pollJob();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [backgroundJobId, onImportComplete, stage, toast]);
+
+  const runDirectImport = async (targetListId: string | null) => {
+    const effectiveMappings = getEffectiveFieldMappings();
+    const { parsedHeaders, parsedRows } = isPreviewOnly
+      ? await loadAllRowsForDirectImport()
+      : { parsedHeaders: headers, parsedRows: csvData };
 
     let successCount = 0;
     let createdCount = 0;
     let updatedCount = 0;
     let failedCount = 0;
-    let targetListId: string | null = null;
-    let targetListName: string | null = null;
 
-    try {
-      // Step 0: Handle list creation/selection
-      if (isCreatingNewList && newListName.trim()) {
-        // Create a new list first
-        console.log('[CSV-IMPORT] Creating new list:', newListName);
-        const createListResponse = await apiRequest("POST", "/api/lists", {
-          name: newListName.trim(),
-          entityType: 'contact',
-          sourceType: 'manual_upload',
-          recordIds: [],
-        });
-        const newList = await createListResponse.json();
-        targetListId = newList.id;
-        targetListName = newListName.trim();
-        console.log('[CSV-IMPORT] Created list:', targetListId);
-      } else if (selectedListId && selectedListId !== "__none__") {
-        targetListId = selectedListId;
-        const foundList = contactLists.find(l => l.id === selectedListId);
-        targetListName = foundList?.name || null;
-        console.log('[CSV-IMPORT] Using existing list:', targetListId);
-      }
+    const hasAccountFields = effectiveMappings.some(mapping => mapping.targetEntity === "account");
+    const mappedHeaders = effectiveMappings.map(mapping =>
+      mapping.targetEntity === "account" ? `account_${mapping.targetField}` : mapping.targetField,
+    );
+    const csvColumnIndexMap = new Map<string, number>();
+    parsedHeaders.forEach((header, idx) => {
+      csvColumnIndexMap.set(header.trim().toLowerCase(), idx);
+    });
 
-      console.log('[CSV-IMPORT] Starting import with', csvData.length, 'rows');
-      console.log('[CSV-IMPORT] Field mappings:', fieldMappings);
+    const batchSize = 500;
+    const totalBatches = Math.max(1, Math.ceil(parsedRows.length / batchSize));
 
-      // Check if we have account fields in the mapping
-      const hasAccountFields = fieldMappings.some(m => m.targetEntity === "account");
-      const isUnifiedFormat = hasAccountFields;
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const start = batchIndex * batchSize;
+      const end = Math.min(start + batchSize, parsedRows.length);
+      const batchRows = parsedRows.slice(start, end);
 
-      console.log('[CSV-IMPORT] Is unified format:', isUnifiedFormat);
-
-      // Process in batches for better performance with large files
-      // Reduced to 500 rows per batch to avoid client-side timeout on large imports
-      const BATCH_SIZE = 500;
-      const totalBatches = Math.ceil(csvData.length / BATCH_SIZE);
-      
-      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-        const start = batchIndex * BATCH_SIZE;
-        const end = Math.min(start + BATCH_SIZE, csvData.length);
-        const batchRows = csvData.slice(start, end);
-
-        console.log(`[CSV-IMPORT] Processing batch ${batchIndex + 1}/${totalBatches} (${batchRows.length} rows)`);
-
-        try {
-          if (isUnifiedFormat) {
-            // Unified format with account data
-            // Create a map from CSV column name to its index (case-insensitive, trimmed)
-            const csvColumnIndexMap = new Map<string, number>();
-            headers.forEach((header, idx) => {
-              csvColumnIndexMap.set(header.trim().toLowerCase(), idx);
-            });
-
-            const mappedHeaders = fieldMappings.map(m => {
-              if (!m.targetField || !m.targetEntity) return "";
-              return m.targetEntity === "account" ? `account_${m.targetField}` : m.targetField;
-            });
-
-            // Debug: Log first row mapping
-            if (batchIndex === 0) {
-              console.log('[CSV-IMPORT] Field mappings:', fieldMappings.map(m => ({ csv: m.csvColumn, target: m.targetField, entity: m.targetEntity })));
-              console.log('[CSV-IMPORT] Mapped headers:', mappedHeaders);
-              console.log('[CSV-IMPORT] CSV column index map:', Array.from(csvColumnIndexMap.entries()));
-              console.log('[CSV-IMPORT] First row raw:', batchRows[0]);
-            }
-
-            const records = batchRows
-              .map((row, idx) => {
-                // Map row data by getting values from correct CSV column positions
-                const mappedRow = fieldMappings.map(mapping => {
-                  if (!mapping.csvColumn) return "";
-                  const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn.trim().toLowerCase());
-                  return csvColumnIndex !== undefined ? (row[csvColumnIndex] || "") : "";
-                });
-
-                // Debug: Log first row mapping details
-                if (batchIndex === 0 && idx === 0) {
-                  console.log('[CSV-IMPORT] First mapped row:', mappedRow);
-                  // Find email mapping
-                  const emailMappingIdx = mappedHeaders.findIndex(h => h === 'email');
-                  console.log('[CSV-IMPORT] Email mapping index:', emailMappingIdx, 'value:', mappedRow[emailMappingIdx]);
-                }
-
-                const contactData = csvRowToContactFromUnified(mappedRow, mappedHeaders);
-                const accountData = csvRowToAccountFromUnified(mappedRow, mappedHeaders);
-
-                // Debug: Log first contact
-                if (batchIndex === 0 && idx === 0) {
-                  console.log('[CSV-IMPORT] First contact data:', contactData);
-                }
-
-                return {
-                  contact: contactData,
-                  account: accountData,
-                  rowIndex: start + idx + 2
-                };
-              })
-              .filter((record) => {
-                // Filter out records with empty emails
-                if (!record.contact.email || !record.contact.email.trim()) {
-                  failedCount++;
-                  console.error(`Row ${record.rowIndex}: Skipped - Email is required`);
-                  return false;
-                }
-                return true;
-              });
-
-            console.log('[CSV-IMPORT] Filtered records:', records.length);
-
-            if (records.length > 0) {
-              const response = await apiRequest(
-                "POST",
-                "/api/contacts/batch-import",
-                { 
-                  records: records.map(r => ({ contact: r.contact, account: r.account })),
-                  listId: targetListId,
-                },
-                { timeout: 120000 }
-              );
-              
-              const result = await response.json() as {
-                success: number;
-                created: number;
-                updated: number;
-                failed: number;
-                errors: Array<{ index: number; error: string }>;
-              };
-              
-              console.log('[CSV-IMPORT] Batch result:', result);
-              
-              successCount += result.success;
-              createdCount += result.created || 0;
-              updatedCount += result.updated || 0;
-              failedCount += result.failed;
-
-              if (result.errors.length > 0) {
-                result.errors.forEach((err: { index: number; error: string }) => {
-                  const actualRowIndex = records[err.index]?.rowIndex || (start + err.index + 2);
-                  console.error(`Row ${actualRowIndex}: ${err.error}`);
-                });
-              }
-            }
-          } else {
-            // Contacts-only format with mapping - use batch import for efficiency
-            const csvColumnIndexMap = new Map<string, number>();
-            headers.forEach((header, idx) => {
-              csvColumnIndexMap.set(header.trim().toLowerCase(), idx);
-            });
-
-            const mappedHeaders = fieldMappings.map(m => m.targetField || "");
-
-            // Debug: Log first row mapping
-            if (batchIndex === 0) {
-              console.log('[CSV-IMPORT] Contacts-only - Field mappings:', fieldMappings.map(m => ({ csv: m.csvColumn, target: m.targetField })));
-              console.log('[CSV-IMPORT] Contacts-only - Mapped headers:', mappedHeaders);
-              console.log('[CSV-IMPORT] Contacts-only - CSV column index map:', Array.from(csvColumnIndexMap.entries()));
-            }
-
-            const records = batchRows
-              .map((row, idx) => {
-                const mappedRow = fieldMappings.map(mapping => {
-                  if (!mapping.csvColumn) return "";
-                  const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn.trim().toLowerCase());
-                  return csvColumnIndex !== undefined ? (row[csvColumnIndex] || "") : "";
-                });
-
-                // Debug: Log first row
-                if (batchIndex === 0 && idx === 0) {
-                  console.log('[CSV-IMPORT] Contacts-only - First mapped row:', mappedRow);
-                  const emailIdx = mappedHeaders.findIndex(h => h === 'email');
-                  console.log('[CSV-IMPORT] Contacts-only - Email index:', emailIdx, 'value:', mappedRow[emailIdx]);
-                }
-
-                const contactData = csvRowToContact(mappedRow, mappedHeaders);
-
-                if (batchIndex === 0 && idx === 0) {
-                  console.log('[CSV-IMPORT] Contacts-only - First contact:', contactData);
-                }
-
-                return {
-                  contact: contactData,
-                  account: null,
-                  rowIndex: start + idx + 2
-                };
-              })
-              .filter((record) => {
-                if (!record.contact.email || !record.contact.email.trim()) {
-                  failedCount++;
-                  console.error(`Row ${record.rowIndex}: Skipped - Email is required`);
-                  return false;
-                }
-                return true;
-              });
-
-            console.log('[CSV-IMPORT] Contacts to import:', records.length);
-
-            if (records.length > 0) {
-              const response = await apiRequest(
-                "POST",
-                "/api/contacts/batch-import",
-                { 
-                  records: records.map(r => ({ contact: r.contact, account: r.account })),
-                  listId: targetListId,
-                },
-                { timeout: 120000 }
-              );
-              
-              const result = await response.json() as {
-                success: number;
-                created: number;
-                updated: number;
-                failed: number;
-                errors: Array<{ index: number; error: string }>;
-              };
-              
-              console.log('[CSV-IMPORT] Batch result:', result);
-              
-              successCount += result.success;
-              createdCount += result.created || 0;
-              updatedCount += result.updated || 0;
-              failedCount += result.failed;
-
-              if (result.errors.length > 0) {
-                result.errors.forEach((err: { index: number; error: string }) => {
-                  const actualRowIndex = records[err.index]?.rowIndex || (start + err.index + 2);
-                  console.error(`Row ${actualRowIndex}: ${err.error}`);
-                });
-              }
-            }
-          }
-        } catch (error) {
-          failedCount += batchRows.length;
-          console.error(`Failed to import batch ${batchIndex + 1}:`, error);
-        }
-
-        setImportProgress(Math.round(((end) / csvData.length) * 100));
-      }
-
-      console.log('[CSV-IMPORT] Import complete - Created:', createdCount, 'Updated:', updatedCount, 'Failed:', failedCount);
-
-      setImportResults({ success: successCount, created: createdCount, updated: updatedCount, failed: failedCount });
-      
-      // Auto-register any discovered custom fields for contacts and accounts
       try {
-        const allContactFields = new Set<string>();
-        const allAccountFields = new Set<string>();
-        
-        // Create a map from CSV column name to its index
-        const csvColumnIndexMap = new Map<string, number>();
-        headers.forEach((header, idx) => {
-          csvColumnIndexMap.set(header, idx);
-        });
-        
-        const mappedHeaders = fieldMappings.map(m => {
-          if (!m.targetField || !m.targetEntity) return "";
-          return m.targetEntity === "account" ? `account_${m.targetField}` : m.targetField;
-        });
-        
-        // Process all rows to collect custom field keys
-        for (const row of csvData) {
-          const mappedRow = fieldMappings.map(mapping => {
-            if (!mapping.csvColumn) return "";
-            const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn);
-            return csvColumnIndex !== undefined ? (row[csvColumnIndex] || "") : "";
-          });
-          
-          const contactData = csvRowToContactFromUnified(mappedRow, mappedHeaders);
-          const accountData = csvRowToAccountFromUnified(mappedRow, mappedHeaders);
-          
-          if (contactData.customFields && typeof contactData.customFields === 'object') {
-            Object.keys(contactData.customFields).forEach(key => allContactFields.add(key));
-          }
-          
-          if (accountData && accountData.customFields && typeof accountData.customFields === 'object') {
-            Object.keys(accountData.customFields).forEach(key => allAccountFields.add(key));
-          }
-        }
+        const records = batchRows
+          .map((row, idx) => {
+            const mappedRow = effectiveMappings.map(mapping => {
+              const csvColumnIndex = csvColumnIndexMap.get(mapping.csvColumn.trim().toLowerCase());
+              return csvColumnIndex !== undefined ? (row[csvColumnIndex] || "") : "";
+            });
 
-        // Register contact custom fields
-        if (allContactFields.size > 0) {
-          await apiRequest('POST', '/api/custom-fields/auto-register', {
-            entityType: 'contact',
-            fieldKeys: Array.from(allContactFields)
+            return {
+              contact: hasAccountFields
+                ? csvRowToContactFromUnified(mappedRow, mappedHeaders)
+                : csvRowToContact(mappedRow, mappedHeaders.map(header => header.replace(/^account_/, ""))),
+              account: hasAccountFields ? csvRowToAccountFromUnified(mappedRow, mappedHeaders) : null,
+              rowIndex: start + idx + 2,
+            };
+          })
+          .filter(record => {
+            if (!record.contact.email || !record.contact.email.trim()) {
+              failedCount++;
+              console.error(`Row ${record.rowIndex}: Skipped - Email is required`);
+              return false;
+            }
+            return true;
           });
-        }
 
-        // Register account custom fields
-        if (allAccountFields.size > 0) {
-          await apiRequest('POST', '/api/custom-fields/auto-register', {
-            entityType: 'account',
-            fieldKeys: Array.from(allAccountFields)
+        if (records.length > 0) {
+          const response = await apiRequest(
+            "POST",
+            "/api/contacts/batch-import",
+            {
+              records: records.map(record => ({ contact: record.contact, account: record.account })),
+              listId: targetListId,
+            },
+            { timeout: 120000 },
+          );
+
+          const result = await response.json() as {
+            success: number;
+            created: number;
+            updated: number;
+            failed: number;
+            errors: Array<{ index: number; error: string }>;
+          };
+
+          successCount += result.success;
+          createdCount += result.created || 0;
+          updatedCount += result.updated || 0;
+          failedCount += result.failed;
+
+          result.errors.forEach(err => {
+            const actualRowIndex = records[err.index]?.rowIndex || (start + err.index + 2);
+            console.error(`Row ${actualRowIndex}: ${err.error}`);
           });
         }
       } catch (error) {
-        console.error('Failed to auto-register custom fields:', error);
-        // Don't fail the whole import if custom field registration fails
+        failedCount += batchRows.length;
+        console.error(`Failed to import batch ${batchIndex + 1}:`, error);
       }
 
-      setStage("complete");
+      setImportProgress(Math.round((end / Math.max(parsedRows.length, 1)) * 100));
+      setImportStatusMessage(`Processed batch ${batchIndex + 1} of ${totalBatches}...`);
+    }
 
-      const messageParts = [];
-      if (createdCount > 0) messageParts.push(`${createdCount} new contact(s) created`);
-      if (updatedCount > 0) messageParts.push(`${updatedCount} existing contact(s) updated`);
-      if (failedCount > 0) messageParts.push(`${failedCount} failed`);
-      
-      const message = messageParts.length > 0 ? messageParts.join(', ') : 'Import complete';
+    setImportResults({ success: successCount, created: createdCount, updated: updatedCount, failed: failedCount });
+    await queryClient.invalidateQueries({ queryKey: ["/api/lists"] });
+    setStage("complete");
 
-      toast({
-        title: "Import Complete",
-        description: message,
+    const parts = [];
+    if (createdCount > 0) parts.push(`${createdCount} new contact(s) created`);
+    if (updatedCount > 0) parts.push(`${updatedCount} existing contact(s) updated`);
+    if (failedCount > 0) parts.push(`${failedCount} failed`);
+
+    toast({
+      title: "Import Complete",
+      description: parts.length > 0 ? parts.join(", ") : "Import complete",
+    });
+
+    onImportComplete();
+  };
+
+  const handleImport = async () => {
+    if (!file) {
+      return;
+    }
+
+    setStage("importing");
+    setImportProgress(0);
+    setBackgroundJobId(null);
+    setImportStatusMessage("Preparing import...");
+
+    let resolvedTargetListId: string | null = null;
+    let resolvedTargetListName: string | null = null;
+
+    try {
+      const { id: targetListId, name: targetListName } = await resolveTargetList();
+      resolvedTargetListId = targetListId;
+      resolvedTargetListName = targetListName;
+      await autoRegisterMappedCustomFields();
+
+      const effectiveMappings = getEffectiveFieldMappings();
+      const isUnifiedFormat = effectiveMappings.some(mapping => mapping.targetEntity === "account");
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("isUnifiedFormat", String(isUnifiedFormat));
+      formData.append("fieldMappings", JSON.stringify(effectiveMappings));
+      formData.append("headers", JSON.stringify(headers));
+      formData.append("batchSize", String(file.size > LARGE_FILE_THRESHOLD_BYTES ? 5000 : 2000));
+      if (resolvedTargetListId) {
+        formData.append("listId", resolvedTargetListId);
+      }
+
+      const token = localStorage.getItem("authToken");
+      const response = await fetch("/api/contacts-csv-import", {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: "include",
+        body: formData,
       });
 
-      onImportComplete();
+      const payload = await response.json().catch(async () => ({ message: await response.text() }));
+
+      if (!response.ok) {
+        const error = new Error(payload?.message || payload?.error || "Failed to start background import.");
+        (error as Error & { useDirectProcessing?: boolean }).useDirectProcessing = Boolean(payload?.useDirectProcessing);
+        throw error;
+      }
+
+      setBackgroundJobId(payload.jobId);
+      setImportProgress(5);
+      setImportStatusMessage(
+        resolvedTargetListName
+          ? `Queued background import and will add imported contacts to "${resolvedTargetListName}".`
+          : "Queued background import.",
+      );
     } catch (error) {
+      const shouldFallback =
+        Boolean((error as Error & { useDirectProcessing?: boolean }).useDirectProcessing) ||
+        (error instanceof Error && error.message.includes("Redis"));
+
+      if (shouldFallback) {
+        setImportStatusMessage("Background queue unavailable. Falling back to direct import...");
+        await runDirectImport(resolvedTargetListId);
+        return;
+      }
+
       console.error("Import failed:", error);
       setStage("upload");
       toast({

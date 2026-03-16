@@ -26,6 +26,7 @@ export interface ContactsCSVImportJobData {
   s3Key: string;                    // S3 key to the CSV file
   userId: string;                   // User who initiated the import
   campaignId?: string;              // Optional: Verification campaign ID to assign contacts to
+  listId?: string;                  // Optional: Contact list to append imported contacts to
   isUnifiedFormat: boolean;         // Whether CSV includes account data
   fieldMappings: Array<{            // Field mapping from CSV to DB
     csvColumn: string;
@@ -52,6 +53,53 @@ export interface ContactsCSVImportJobResult {
   duration: number;
 }
 
+interface BatchImportResult {
+  created: number;
+  updated: number;
+  failed: number;
+  missingEmail: number;
+  duplicateEmail: number;
+  processedIds: string[];
+}
+
+async function appendContactIdsToList(listId: string, contactIds: string[]): Promise<void> {
+  const uniqueIds = Array.from(new Set(contactIds.filter(Boolean)));
+  if (!listId || uniqueIds.length === 0) {
+    return;
+  }
+
+  const { workerPool } = await import('../db');
+  const client = await workerPool.connect();
+
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `
+        WITH current AS (
+          SELECT COALESCE(record_ids, ARRAY[]::text[]) AS record_ids
+          FROM lists
+          WHERE id = $1
+          FOR UPDATE
+        )
+        UPDATE lists
+        SET record_ids = (
+          SELECT COALESCE(array_agg(DISTINCT value), ARRAY[]::text[])
+          FROM unnest((SELECT record_ids FROM current) || $2::text[]) AS value
+        ),
+        updated_at = NOW()
+        WHERE id = $1
+      `,
+      [listId, uniqueIds],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /**
  * OPTIMIZED: Process batch using PostgreSQL COPY command (10-100x faster than INSERT)
  * Uses pg-copy-streams for direct streaming to PostgreSQL
@@ -60,12 +108,12 @@ async function processBatchWithCOPY(
   records: any[],
   accountCache: Map<string, string>,
   isUnifiedFormat: boolean
-): Promise<{ created: number; updated: number; failed: number; missingEmail: number; duplicateEmail: number }> {
+): Promise<BatchImportResult> {
   if (records.length === 0) {
-    return { created: 0, updated: 0, failed: 0, missingEmail: 0, duplicateEmail: 0 };
+    return { created: 0, updated: 0, failed: 0, missingEmail: 0, duplicateEmail: 0, processedIds: [] };
   }
 
-  const result = { created: 0, updated: 0, failed: 0, missingEmail: 0, duplicateEmail: 0 };
+  const result: BatchImportResult = { created: 0, updated: 0, failed: 0, missingEmail: 0, duplicateEmail: 0, processedIds: [] };
   const newCacheEntries = new Map<string, string>();
 
   // Get raw pg client for entire transaction (accounts + contacts)
@@ -405,6 +453,7 @@ async function processBatchWithCOPY(
 
       // Count created vs updated for contacts with emails
       for (const row of upsertResult.rows) {
+        result.processedIds.push(row.id);
         if (row.is_new) {
           result.created++;
         } else {
@@ -442,6 +491,7 @@ async function processBatchWithCOPY(
 
       // All contacts without emails are new
       result.created += insertNoEmailResult.rows.length;
+      result.processedIds.push(...insertNoEmailResult.rows.map((row: { id: string }) => row.id));
     }
 
     // Transaction successful - commit everything (accounts + contacts)
@@ -475,6 +525,7 @@ export async function processContactsCSVImport(
   const { 
     s3Key, 
     userId, 
+    listId,
     isUnifiedFormat, 
     fieldMappings, 
     headers, 
@@ -489,6 +540,7 @@ export async function processContactsCSVImport(
   console.log(`[ContactsCSVImportWorker] Starting import job ${job.id}`);
   console.log(`[ContactsCSVImportWorker] S3 Key: ${s3Key}`);
   console.log(`[ContactsCSVImportWorker] User: ${userId}`);
+  console.log(`[ContactsCSVImportWorker] Target List: ${listId || 'none'}`);
   console.log(`[ContactsCSVImportWorker] Unified Format: ${isUnifiedFormat}`);
   console.log(`[ContactsCSVImportWorker] Batch size: ${batchSize}`);
   console.log(`[ContactsCSVImportWorker] Optimized COPY: ${useOptimizedCopy ? 'ENABLED ⚡' : 'disabled'}`);
@@ -514,6 +566,30 @@ export async function processContactsCSVImport(
 
   // Account lookup cache
   const accountCache = new Map<string, string>(); // normalized name -> account ID
+  let pendingListAssignments: string[] = [];
+
+  async function flushPendingListAssignments(force = false): Promise<void> {
+    if (!listId || pendingListAssignments.length === 0) {
+      return;
+    }
+
+    if (!force && pendingListAssignments.length < 10000) {
+      return;
+    }
+
+    const idsToFlush = Array.from(new Set(pendingListAssignments));
+    pendingListAssignments = [];
+
+    try {
+      await appendContactIdsToList(listId, idsToFlush);
+    } catch (error) {
+      console.error(`[ContactsCSVImportWorker] Failed to append ${idsToFlush.length} contact(s) to list ${listId}:`, error);
+      errors.push({
+        row: 0,
+        message: `Imported contacts were not added to list ${listId}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
 
   /**
    * Process a single batch of records - Routes to optimized COPY or legacy INSERT method
@@ -524,27 +600,34 @@ export async function processContactsCSVImport(
     const batchStartTime = Date.now();
     batchesProcessed++;
 
-    let batchResults = {
+    let batchResults: BatchImportResult = {
       created: 0,
       updated: 0,
       failed: 0,
       missingEmail: 0,
       duplicateEmail: 0,
+      processedIds: [],
     };
 
     try {
       // Use optimized COPY command if enabled
       if (useOptimizedCopy) {
         batchResults = await processBatchWithCOPY(records, accountCache, isUnifiedFormat);
-        createdRows += batchResults.created;
-        updatedRows += batchResults.updated;
-        failedRows += batchResults.failed;
-        missingEmailRows += batchResults.missingEmail; // NEW: Track missing emails
-        duplicateEmailRows += batchResults.duplicateEmail; // NEW: Track duplicates
-        successRows += batchResults.created + batchResults.updated;
       } else {
         // Fall back to legacy INSERT method
-        await processBatchLegacy(records);
+        batchResults = await processBatchLegacy(records);
+      }
+
+      createdRows += batchResults.created;
+      updatedRows += batchResults.updated;
+      failedRows += batchResults.failed;
+      missingEmailRows += batchResults.missingEmail;
+      duplicateEmailRows += batchResults.duplicateEmail;
+      successRows += batchResults.created + batchResults.updated;
+
+      if (batchResults.processedIds.length > 0) {
+        pendingListAssignments.push(...batchResults.processedIds);
+        await flushPendingListAssignments();
       }
 
       // Track batch performance
@@ -586,11 +669,14 @@ export async function processContactsCSVImport(
   /**
    * LEGACY: Process batch using manual SQL INSERT (kept for fallback)
    */
-  async function processBatchLegacy(records: any[]): Promise<void> {
-    const batchResults = {
+  async function processBatchLegacy(records: any[]): Promise<BatchImportResult> {
+    const batchResults: BatchImportResult = {
       created: 0,
       updated: 0,
       failed: 0,
+      missingEmail: 0,
+      duplicateEmail: 0,
+      processedIds: [],
     };
 
     // Prepare contacts list (needed for error handling scope)
@@ -739,13 +825,12 @@ export async function processContactsCSVImport(
               message: error instanceof Error ? error.message : String(error),
             });
             batchResults.failed++;
-            failedRows++;
           }
         }
         
         // Track batch-level metrics
-        missingEmailRows += batchMissingEmails;
-        duplicateEmailRows += batchDuplicateEmails;
+        batchResults.missingEmail += batchMissingEmails;
+        batchResults.duplicateEmail += batchDuplicateEmails;
 
         contactsToUpsert = Array.from(uniqueContacts.values());
 
@@ -820,16 +905,13 @@ export async function processContactsCSVImport(
 
           // Count created vs updated using the is_new flag from xmax
           for (const row of upsertResults.rows as any[]) {
+            batchResults.processedIds.push(row.id);
             if (row.is_new) {
               batchResults.created++;
             } else {
               batchResults.updated++;
             }
           }
-          
-          updatedRows += batchResults.updated;
-          createdRows += batchResults.created;
-          successRows += upsertResults.rowCount || 0;
         }
         
         // PART 2: Contacts WITHOUT emails - simple insert (always new, no conflict)
@@ -868,8 +950,7 @@ export async function processContactsCSVImport(
 
           // All contacts without emails are new
           batchResults.created += insertResults.rowCount || 0;
-          createdRows += insertResults.rowCount || 0;
-          successRows += insertResults.rowCount || 0;
+          batchResults.processedIds.push(...(insertResults.rows as Array<{ id: string }>).map(row => row.id));
         }
       });
       
@@ -878,10 +959,6 @@ export async function processContactsCSVImport(
         accountCache.set(name, id);
       }
       
-      // Update tracking variables (logging is handled in processBatch wrapper)
-      updatedRows += batchResults.updated;
-      createdRows += batchResults.created;
-      successRows += batchResults.created + batchResults.updated;
     } catch (error) {
       console.error(`[ContactsCSVImportWorker] Transaction failed:`, error);
       // DON'T commit cache entries on failure - they were rolled back
@@ -891,13 +968,15 @@ export async function processContactsCSVImport(
       // Only mark the valid contacts as failed (not those already marked as failed for missing email)
       const validContactsCount = contactsToUpsert.length;
       if (validContactsCount > 0) {
-        failedRows += validContactsCount;
+        batchResults.failed += validContactsCount;
         errors.push({
           row: 0,
           message: `Batch transaction failed: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
     }
+
+    return batchResults;
   }
 
   return new Promise(async (resolve, reject) => {
@@ -1001,6 +1080,8 @@ export async function processContactsCSVImport(
             await processBatch(batch);
           }
 
+          await flushPendingListAssignments(true);
+
           const duration = Date.now() - startTime;
           const avgBatchTime = batchesProcessed > 0 ? totalBatchTime / batchesProcessed : 0;
           const rowsPerSecond = duration > 0 ? (totalRows / (duration / 1000)).toFixed(0) : '0';
@@ -1027,6 +1108,9 @@ export async function processContactsCSVImport(
           }
           
           console.log(`[ContactsCSVImportWorker] Account cache size: ${accountCache.size} entries`);
+          if (listId) {
+            console.log(`[ContactsCSVImportWorker] Contacts appended to list: ${listId}`);
+          }
           console.log(`[ContactsCSVImportWorker] ========================================`);
 
           resolve({

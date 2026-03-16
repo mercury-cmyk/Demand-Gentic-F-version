@@ -6,7 +6,8 @@
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
 import multer from 'multer';
-import { uploadToS3, uploadStreamToS3 } from '../lib/storage';
+import { requireAuth } from '../auth';
+import { uploadToS3 } from '../lib/storage';
 import { addContactsCSVImportJob, getContactsCSVImportJobStatus, contactsCSVImportQueue } from '../lib/contacts-csv-import-queue';
 import { ContactsCSVImportJobData } from '../workers/contacts-csv-import-worker';
 
@@ -24,7 +25,7 @@ const upload = multer({
  * POST /api/contacts-csv-import
  * Upload CSV file and create background import job
  */
-router.post('/api/contacts-csv-import', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/api/contacts-csv-import', requireAuth, upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -33,13 +34,20 @@ router.post('/api/contacts-csv-import', upload.single('file'), async (req: Reque
       });
     }
 
+    if (!req.user?.userId) {
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication is required to import contacts',
+      });
+    }
+
     // Parse job data from form
     const jobDataSchema = z.object({
-      userId: z.string().min(1),
       isUnifiedFormat: z.string().transform(val => val === 'true'),
       fieldMappings: z.string().transform(val => JSON.parse(val)),
       headers: z.string().transform(val => JSON.parse(val)),
       batchSize: z.string().optional().transform(val => val ? parseInt(val) : 1000),
+      listId: z.string().optional().transform(val => val?.trim() || undefined),
     });
 
     let jobData;
@@ -77,11 +85,12 @@ router.post('/api/contacts-csv-import', upload.single('file'), async (req: Reque
     // Add job to queue
     const jobId = await addContactsCSVImportJob({
       s3Key,
-      userId: jobData.userId,
+      userId: req.user.userId,
       isUnifiedFormat: jobData.isUnifiedFormat,
       fieldMappings: jobData.fieldMappings,
       headers: jobData.headers,
       batchSize: jobData.batchSize,
+      listId: jobData.listId,
     } as ContactsCSVImportJobData);
 
     if (!jobId) {
@@ -111,7 +120,7 @@ router.post('/api/contacts-csv-import', upload.single('file'), async (req: Reque
  * GET /api/contacts-csv-import/:jobId
  * Get status and progress of a contacts CSV import job
  */
-router.get('/api/contacts-csv-import/:jobId', async (req: Request, res: Response) => {
+router.get('/api/contacts-csv-import/:jobId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { jobId } = req.params;
 

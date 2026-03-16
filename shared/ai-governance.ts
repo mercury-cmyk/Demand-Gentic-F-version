@@ -55,7 +55,7 @@ export const AI_GOVERNANCE_TASKS = [
     key: "voice_realtime",
     label: "Voice Realtime",
     description: "Live outbound calling, realtime speech, and live voice agent sessions.",
-    allowedProviders: ["google", "openai"] as const,
+    allowedProviders: ["google", "vertex", "openai"] as const,
   },
   {
     key: "analysis_standard",
@@ -121,6 +121,11 @@ export const AI_MODEL_SUGGESTIONS: Record<
   voice_realtime: {
     google: [
       "gemini-live-2.5-flash-native-audio",
+    ],
+    vertex: [
+      "gemini-2.0-flash-live-001",
+      "gemini-live-2.5-flash-native-audio",
+      "gemini-2.5-flash-preview-native-audio-dialog",
     ],
     openai: [
       "gpt-realtime",
@@ -205,12 +210,12 @@ export type AiModelPolicyMap = Record<AiGovernanceScope, AiGovernancePolicy>;
 export const DEFAULT_AI_MODEL_POLICIES: AiModelPolicyMap = {
   voice_realtime: {
     enabled: true,
-    primaryProvider: "openai",
-    primaryModel: "gpt-4o-realtime-preview-2024-12-17",
+    primaryProvider: "vertex",
+    primaryModel: "gemini-2.0-flash-live-001",
     allowFallback: true,
     fallbackProvider: "google",
     fallbackModel: "gemini-live-2.5-flash-native-audio",
-    notes: "Primary live calling path — OpenAI Realtime with Gemini fallback.",
+    notes: "Primary live calling via Vertex AI Gemini native, with Google Gemini Live fallback.",
   },
   analysis_standard: {
     enabled: true,
