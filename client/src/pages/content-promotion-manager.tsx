@@ -336,6 +336,9 @@ export default function ContentPromotionManager() {
     } else {
       // Content Promotion pages always use /promo/:slug route
       path = `/promo/${page.slug}`;
+      if (page.status !== "published") {
+        path += "?preview=true";
+      }
     }
     
     window.open(path, "_blank");

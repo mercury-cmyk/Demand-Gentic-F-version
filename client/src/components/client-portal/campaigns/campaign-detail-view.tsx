@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowLeft, Target, BarChart3, Users, Building2, FileText, TestTube, Mail, Bot, Loader2, CheckCircle, TrendingUp, Phone } from 'lucide-react';
+import { ArrowLeft, Target, BarChart3, Users, Building2, FileText, TestTube, Mail, Bot, Loader2, CheckCircle, TrendingUp, Phone, Download } from 'lucide-react';
 import {
   Table,
   TableBody,
@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 
 // Define types for props
 interface Campaign {
@@ -55,6 +56,21 @@ export function CampaignDetailView({ campaign, onBack }: CampaignDetailViewProps
     queryKey: ['campaign-contacts', campaign.id],
     queryFn: () => fetchCampaignData(campaign.id, 'contacts'),
   });
+
+  const { data: promoSubmissionsData, isLoading: isLoadingSubmissions } = useQuery({
+    queryKey: ['campaign-promo-submissions', campaign.id],
+    queryFn: async () => {
+      const token = localStorage.getItem('clientPortalToken');
+      const res = await fetch(`/api/client-portal/campaigns/${campaign.id}/promo-submissions?limit=200`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Failed to fetch submissions');
+      return res.json();
+    },
+  });
+
+  const promoSubmissions = promoSubmissionsData?.submissions || [];
+  const promoSubmissionsTotal = promoSubmissionsData?.total || 0;
 
   const campaignAccounts = accountsData?.accounts || [];
   const campaignContacts = contactsData?.contacts || [];
@@ -280,11 +296,57 @@ export function CampaignDetailView({ campaign, onBack }: CampaignDetailViewProps
         <TabsContent value="reports">
           <Card>
             <CardHeader>
-              <CardTitle>Reports</CardTitle>
-              <CardDescription>Downloadable reports for this campaign.</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                Reports
+                {promoSubmissionsTotal > 0 && (
+                  <Badge variant="secondary">{promoSubmissionsTotal} submissions</Badge>
+                )}
+              </CardTitle>
+              <CardDescription>Email campaign performance analytics and engagement metrics.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p>Reports content for {campaign.name}.</p>
+              {isLoadingSubmissions ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : promoSubmissions.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Download className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                  <p className="font-medium">No form submissions yet</p>
+                  <p className="text-sm mt-1">Submissions from content promotion pages linked to this campaign will appear here.</p>
+                </div>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Company</TableHead>
+                        <TableHead>Job Title</TableHead>
+                        <TableHead>Submitted At</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {promoSubmissions.map((sub: any) => (
+                        <TableRow key={sub.id}>
+                          <TableCell className="font-medium">
+                            {[sub.visitorFirstName, sub.visitorLastName].filter(Boolean).join(' ') || '—'}
+                          </TableCell>
+                          <TableCell>{sub.visitorEmail || '—'}</TableCell>
+                          <TableCell>{sub.visitorCompany || '—'}</TableCell>
+                          <TableCell>{sub.jobTitle || '—'}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {sub.createdAt ? new Date(sub.createdAt).toLocaleDateString('en-US', {
+                              month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                            }) : '—'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

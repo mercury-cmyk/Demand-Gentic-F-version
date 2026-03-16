@@ -14944,6 +14944,17 @@ export const contentPromotionPages = pgTable("content_promotion_pages", {
     noIndex?: boolean;
   }>(),
 
+  clientAccountId: varchar("client_account_id"),
+  campaignId: varchar("campaign_id"),
+  confirmationEmailConfig: jsonb("confirmation_email_config").$type<{
+    enabled: boolean;
+    subject: string;
+    headline: string;
+    bodyText: string;
+    downloadButtonText: string;
+    footerText?: string;
+    replyTo?: string;
+  }>(),
   linkedLeadFormId: varchar("linked_lead_form_id"),
   viewCount: integer("view_count").notNull().default(0),
   uniqueViewCount: integer("unique_view_count").notNull().default(0),

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +46,13 @@ import {
   X,
   Sparkles,
   AlertCircle,
+  Mail,
+  Download,
+  Eye,
+  Clock,
+  Zap,
+  ExternalLink,
+  Link2,
 } from "lucide-react";
 import type { ContentPromotionPage } from "@shared/schema";
 
@@ -99,6 +106,7 @@ interface FormData {
     backgroundStyle: string;
     backgroundValue: string;
     badgeText?: string;
+    badgeIcon?: string;
   };
   assetConfig: {
     title: string;
@@ -115,6 +123,7 @@ interface FormData {
     accentColor: string;
     companyName: string;
     logoUrl?: string;
+    textColor?: string;
   };
   formConfig: {
     fields: FormField[];
@@ -127,6 +136,7 @@ interface FormData {
     stats: StatItem[];
     trustBadges: TrustBadge[];
     testimonials: Testimonial[];
+    companyLogos: Array<{ name: string; logoUrl: string }>;
   };
   benefitsConfig: {
     sectionTitle: string;
@@ -136,6 +146,10 @@ interface FormData {
   urgencyConfig: {
     enabled: boolean;
     type: "countdown" | "limited_quantity" | "social_proof_count";
+    countdownEndDate?: string;
+    quantityRemaining?: number;
+    recentDownloadsCount?: number;
+    messageTemplate?: string;
   };
   thankYouConfig: {
     headline: string;
@@ -145,11 +159,21 @@ interface FormData {
     redirectUrl?: string;
     redirectDelay?: number;
     showSocialShare: boolean;
+    additionalCta?: { text: string; url: string };
   };
   seoConfig: {
     metaTitle?: string;
     metaDescription?: string;
     noIndex?: boolean;
+  };
+  confirmationEmailConfig: {
+    enabled: boolean;
+    subject: string;
+    headline: string;
+    bodyText: string;
+    downloadButtonText: string;
+    footerText?: string;
+    replyTo?: string;
   };
 }
 
@@ -250,17 +274,24 @@ function getDefaultFormData(): FormData {
       consentRequired: true,
       showProgressBar: true,
     },
-    socialProofConfig: { stats: [], trustBadges: [], testimonials: [] },
+    socialProofConfig: { stats: [], trustBadges: [], testimonials: [], companyLogos: [] },
     benefitsConfig: { sectionTitle: "What You'll Learn", items: [] },
     urgencyConfig: { enabled: false, type: "social_proof_count" as const },
     thankYouConfig: {
-      headline: "Thank You!",
-      message: "Your download is ready. Check your email for a copy as well.",
+      headline: "Thank you for downloading!",
+      message: "Your download should start automatically. You can also use the button below.",
       showDownloadButton: true,
-      downloadButtonText: "Download Your Copy",
+      downloadButtonText: "Download Again",
       showSocialShare: true,
     },
     seoConfig: {},
+    confirmationEmailConfig: {
+      enabled: false,
+      subject: "Your download is ready!",
+      headline: "Thank you for downloading!",
+      bodyText: "Here's your download link. You can access it anytime.",
+      downloadButtonText: "Download Now",
+    },
   };
 }
 
@@ -290,11 +321,13 @@ function formDataFromPage(page: ContentPromotionPage): FormData {
       stats: social?.stats ?? [],
       trustBadges: social?.trustBadges ?? [],
       testimonials: social?.testimonials ?? [],
+      companyLogos: (social as any)?.companyLogos ?? [],
     },
     benefitsConfig: benefits ?? defaults.benefitsConfig,
-    urgencyConfig: urgency ?? defaults.urgencyConfig,
+    urgencyConfig: urgency ? { ...defaults.urgencyConfig, ...urgency } : defaults.urgencyConfig,
     thankYouConfig: thankYou ?? defaults.thankYouConfig,
     seoConfig: seo ?? defaults.seoConfig,
+    confirmationEmailConfig: (page as any).confirmationEmailConfig ?? defaults.confirmationEmailConfig,
   };
 }
 
@@ -371,6 +404,7 @@ export default function PageBuilderDialog({
   }, [open, editingPage]);
 
   // Auto-generate slug from title (only when creating, and only if slug hasn't been manually edited)
+  const [selectedClientId, setSelectedClientId] = useState<string>(clientId || "");
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   useEffect(() => {
     if (!isEditing && !slugManuallyEdited && formData.title) {
@@ -378,12 +412,25 @@ export default function PageBuilderDialog({
     }
   }, [formData.title, isEditing, slugManuallyEdited]);
 
-  // Reset manual slug flag when dialog opens
+  // Reset manual slug flag and client selection when dialog opens
   useEffect(() => {
     if (open) {
       setSlugManuallyEdited(false);
+      setSelectedClientId(editingPage?.clientAccountId ?? clientId ?? "");
     }
-  }, [open]);
+  }, [open, editingPage, clientId]);
+
+  // Fetch client accounts for the selector
+  const { data: clientAccounts = [], isLoading: clientsLoading } = useQuery<Array<{ id: string; name: string; companyName?: string }>>({
+    queryKey: ['content-promo-client-accounts'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/client-portal/admin/clients');
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: open,
+    staleTime: 60_000,
+  });
 
   // ---- Mutations ----
 
@@ -467,6 +514,7 @@ export default function PageBuilderDialog({
             urgencyConfig: data.urgencyConfig ? { ...defaults.urgencyConfig, ...data.urgencyConfig } : prev.urgencyConfig,
             thankYouConfig: data.thankYouConfig ? { ...defaults.thankYouConfig, ...data.thankYouConfig } : prev.thankYouConfig,
             seoConfig: data.seoConfig ? { ...defaults.seoConfig, ...data.seoConfig } : prev.seoConfig,
+            confirmationEmailConfig: data.confirmationEmailConfig ? { ...defaults.confirmationEmailConfig, ...data.confirmationEmailConfig } : prev.confirmationEmailConfig,
           };
         });
       }
@@ -504,7 +552,7 @@ export default function PageBuilderDialog({
       setActiveTab("hero");
       return;
     }
-    saveMutation.mutate(formData);
+    saveMutation.mutate({ ...formData, clientAccountId: selectedClientId || undefined, campaignId: campaignId || undefined } as any);
   }
 
   // ---- Helpers for nested state updates ----
@@ -560,7 +608,7 @@ export default function PageBuilderDialog({
 
   // ---- Array builder helpers ----
 
-  function addArrayItem<K extends "stats" | "trustBadges" | "testimonials">(
+  function addArrayItem<K extends "stats" | "trustBadges" | "testimonials" | "companyLogos">(
     key: K,
     item: FormData["socialProofConfig"][K][number],
   ) {
@@ -573,7 +621,7 @@ export default function PageBuilderDialog({
     }));
   }
 
-  function removeArrayItem<K extends "stats" | "trustBadges" | "testimonials">(
+  function removeArrayItem<K extends "stats" | "trustBadges" | "testimonials" | "companyLogos">(
     key: K,
     index: number,
   ) {
@@ -586,7 +634,7 @@ export default function PageBuilderDialog({
     }));
   }
 
-  function updateArrayItem<K extends "stats" | "trustBadges" | "testimonials">(
+  function updateArrayItem<K extends "stats" | "trustBadges" | "testimonials" | "companyLogos">(
     key: K,
     index: number,
     updates: Partial<FormData["socialProofConfig"][K][number]>,
@@ -666,7 +714,7 @@ export default function PageBuilderDialog({
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
-          <TabsList className="mx-6 mt-4 mb-0 grid grid-cols-7 h-auto">
+          <TabsList className="mx-6 mt-4 mb-0 grid grid-cols-8 h-auto">
             <TabsTrigger value="basics" className="text-xs gap-1 py-2">
               <FileText className="h-3.5 w-3.5" />
               Basics
@@ -695,6 +743,10 @@ export default function PageBuilderDialog({
               <Settings className="h-3.5 w-3.5" />
               Thank You
             </TabsTrigger>
+            <TabsTrigger value="email" className="text-xs gap-1 py-2">
+              <Mail className="h-3.5 w-3.5" />
+              Email
+            </TabsTrigger>
           </TabsList>
 
           {/* Scrollable content area */}
@@ -703,6 +755,33 @@ export default function PageBuilderDialog({
             {/* TAB 1: BASICS */}
             {/* ============================================================= */}
             <TabsContent value="basics" className="mt-0 space-y-6">
+              {/* Client selector */}
+              <div className="space-y-1.5">
+                <Label>Client</Label>
+                {clientsLoading ? (
+                  <div className="flex h-10 items-center justify-center rounded-md border border-border bg-muted/50">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <Select value={selectedClientId || "__none"} onValueChange={(v) => setSelectedClientId(v === "__none" ? "" : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a client (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">No client</SelectItem>
+                      {clientAccounts.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.companyName || client.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Associate this page with a client account for tracking and AI generation context.
+                </p>
+              </div>
+
               <div className="space-y-1.5">
                 <Label htmlFor="page-title">Title <span className="text-destructive">*</span></Label>
                 <Input
@@ -825,6 +904,19 @@ export default function PageBuilderDialog({
                 </p>
               </div>
 
+              <div className="space-y-1.5">
+                <Label htmlFor="hero-badge-icon">Badge Icon</Label>
+                <Input
+                  id="hero-badge-icon"
+                  value={formData.heroConfig.badgeIcon || ""}
+                  onChange={(e) => updateNested("heroConfig", "badgeIcon", e.target.value || undefined)}
+                  placeholder="e.g. Download, Zap, Star"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Lucide icon name shown next to the badge text.
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label>Background Style</Label>
@@ -897,6 +989,15 @@ export default function PageBuilderDialog({
                   onChange={(v) => updateNested("brandingConfig", "accentColor", v)}
                 />
               </div>
+
+              <ColorInput
+                label="Text Color Override"
+                value={formData.brandingConfig.textColor || ""}
+                onChange={(v) => updateNested("brandingConfig", "textColor", v || undefined)}
+              />
+              <p className="text-xs text-muted-foreground -mt-4">
+                Override the default text color on the landing page.
+              </p>
             </TabsContent>
 
             {/* ============================================================= */}
@@ -1420,6 +1521,74 @@ export default function PageBuilderDialog({
                   )}
                 </div>
               </div>
+
+              <Separator />
+
+              {/* Company Logos */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Company Logos</h3>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => addArrayItem("companyLogos", { name: "", logoUrl: "" })}
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add Logo
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Display a strip of company/partner logos for credibility.
+                </p>
+                <div className="space-y-2">
+                  {formData.socialProofConfig.companyLogos.map((logo, index) => (
+                    <Card key={index}>
+                      <CardContent className="p-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <Label className="text-xs">Company Name</Label>
+                              <Input
+                                value={logo.name}
+                                onChange={(e) =>
+                                  updateArrayItem("companyLogos", index, { name: e.target.value })
+                                }
+                                placeholder="Acme Corp"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Logo URL</Label>
+                              <Input
+                                value={logo.logoUrl}
+                                onChange={(e) =>
+                                  updateArrayItem("companyLogos", index, { logoUrl: e.target.value })
+                                }
+                                placeholder="https://example.com/logo.png"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeArrayItem("companyLogos", index)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {formData.socialProofConfig.companyLogos.length === 0 && (
+                    <p className="text-xs text-muted-foreground py-2">
+                      No company logos added yet.
+                    </p>
+                  )}
+                </div>
+              </div>
             </TabsContent>
 
             {/* ============================================================= */}
@@ -1523,6 +1692,133 @@ export default function PageBuilderDialog({
                   </div>
                 )}
               </div>
+
+              <Separator />
+
+              {/* Urgency Bar */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5" />
+                      Urgency Bar
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Create urgency with a countdown timer, limited quantity, or social proof counter.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.urgencyConfig.enabled}
+                    onCheckedChange={(checked) =>
+                      updateNested("urgencyConfig", "enabled", checked)
+                    }
+                  />
+                </div>
+
+                {formData.urgencyConfig.enabled && (
+                  <div className="space-y-4 pl-1">
+                    <div className="space-y-1.5">
+                      <Label>Urgency Type</Label>
+                      <Select
+                        value={formData.urgencyConfig.type}
+                        onValueChange={(v) => updateNested("urgencyConfig", "type", v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="countdown">Countdown Timer</SelectItem>
+                          <SelectItem value="limited_quantity">Limited Quantity</SelectItem>
+                          <SelectItem value="social_proof_count">Social Proof Count</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {formData.urgencyConfig.type === "countdown" && (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="urgency-countdown">Countdown End Date</Label>
+                          <Input
+                            id="urgency-countdown"
+                            type="datetime-local"
+                            value={formData.urgencyConfig.countdownEndDate || ""}
+                            onChange={(e) =>
+                              updateNested("urgencyConfig", "countdownEndDate", e.target.value || undefined)
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="urgency-msg-countdown">Message Template</Label>
+                          <Input
+                            id="urgency-msg-countdown"
+                            value={formData.urgencyConfig.messageTemplate || ""}
+                            onChange={(e) =>
+                              updateNested("urgencyConfig", "messageTemplate", e.target.value || undefined)
+                            }
+                            placeholder="Offer ends in:"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {formData.urgencyConfig.type === "limited_quantity" && (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="urgency-qty">Quantity Remaining</Label>
+                          <Input
+                            id="urgency-qty"
+                            type="number"
+                            value={formData.urgencyConfig.quantityRemaining ?? ""}
+                            onChange={(e) =>
+                              updateNested("urgencyConfig", "quantityRemaining", e.target.value ? parseInt(e.target.value, 10) : undefined)
+                            }
+                            placeholder="50"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="urgency-msg-qty">Message Template</Label>
+                          <Input
+                            id="urgency-msg-qty"
+                            value={formData.urgencyConfig.messageTemplate || ""}
+                            onChange={(e) =>
+                              updateNested("urgencyConfig", "messageTemplate", e.target.value || undefined)
+                            }
+                            placeholder="Only {n} spots remaining!"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {formData.urgencyConfig.type === "social_proof_count" && (
+                      <>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="urgency-downloads">Recent Downloads Count</Label>
+                          <Input
+                            id="urgency-downloads"
+                            type="number"
+                            value={formData.urgencyConfig.recentDownloadsCount ?? ""}
+                            onChange={(e) =>
+                              updateNested("urgencyConfig", "recentDownloadsCount", e.target.value ? parseInt(e.target.value, 10) : undefined)
+                            }
+                            placeholder="127"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="urgency-msg-social">Message Template</Label>
+                          <Input
+                            id="urgency-msg-social"
+                            value={formData.urgencyConfig.messageTemplate || ""}
+                            onChange={(e) =>
+                              updateNested("urgencyConfig", "messageTemplate", e.target.value || undefined)
+                            }
+                            placeholder="people downloaded this today"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </TabsContent>
 
             {/* ============================================================= */}
@@ -1619,6 +1915,46 @@ export default function PageBuilderDialog({
 
               <Separator />
 
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Additional Call-to-Action
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Show a secondary CTA button on the thank you page (e.g. "Learn More", "Visit Our Blog").
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ty-cta-text">Button Text</Label>
+                    <Input
+                      id="ty-cta-text"
+                      value={formData.thankYouConfig.additionalCta?.text || ""}
+                      onChange={(e) => {
+                        const text = e.target.value;
+                        const url = formData.thankYouConfig.additionalCta?.url || "";
+                        updateNested("thankYouConfig", "additionalCta", text || url ? { text, url } : undefined);
+                      }}
+                      placeholder="Learn More"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ty-cta-url">Button URL</Label>
+                    <Input
+                      id="ty-cta-url"
+                      value={formData.thankYouConfig.additionalCta?.url || ""}
+                      onChange={(e) => {
+                        const url = e.target.value;
+                        const text = formData.thankYouConfig.additionalCta?.text || "";
+                        updateNested("thankYouConfig", "additionalCta", text || url ? { text, url } : undefined);
+                      }}
+                      placeholder="https://example.com/learn-more"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
               <h3 className="text-sm font-semibold">SEO Settings</h3>
 
               <div className="space-y-1.5">
@@ -1651,6 +1987,199 @@ export default function PageBuilderDialog({
                 />
                 No Index (prevent search engine indexing)
               </label>
+            </TabsContent>
+
+            {/* ---- Email Tab ---- */}
+            <TabsContent value="email" className="mt-0 space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold">Confirmation Email</h3>
+                  <p className="text-xs text-muted-foreground">Send an email with a download link after form submission</p>
+                </div>
+                <Switch
+                  checked={formData.confirmationEmailConfig.enabled}
+                  onCheckedChange={(checked) =>
+                    updateNested("confirmationEmailConfig", "enabled", checked)
+                  }
+                />
+              </div>
+
+              {formData.confirmationEmailConfig.enabled && (
+                <>
+                  <Separator />
+                  <div className="grid grid-cols-5 gap-6">
+                    {/* Left panel — Form controls */}
+                    <div className="col-span-2 space-y-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email-subject">Subject Line</Label>
+                        <Input
+                          id="email-subject"
+                          value={formData.confirmationEmailConfig.subject}
+                          onChange={(e) =>
+                            updateNested("confirmationEmailConfig", "subject", e.target.value)
+                          }
+                          placeholder="Your download is ready!"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email-headline">Headline</Label>
+                        <Input
+                          id="email-headline"
+                          value={formData.confirmationEmailConfig.headline}
+                          onChange={(e) =>
+                            updateNested("confirmationEmailConfig", "headline", e.target.value)
+                          }
+                          placeholder="Thank you for downloading!"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email-body">Body Text</Label>
+                        <Textarea
+                          id="email-body"
+                          value={formData.confirmationEmailConfig.bodyText}
+                          onChange={(e) =>
+                            updateNested("confirmationEmailConfig", "bodyText", e.target.value)
+                          }
+                          placeholder="Here's your download link. You can access it anytime."
+                          rows={3}
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email-btn-text">Download Button Text</Label>
+                        <Input
+                          id="email-btn-text"
+                          value={formData.confirmationEmailConfig.downloadButtonText}
+                          onChange={(e) =>
+                            updateNested("confirmationEmailConfig", "downloadButtonText", e.target.value)
+                          }
+                          placeholder="Download Now"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email-footer">Footer Text (optional)</Label>
+                        <Textarea
+                          id="email-footer"
+                          value={formData.confirmationEmailConfig.footerText || ""}
+                          onChange={(e) =>
+                            updateNested("confirmationEmailConfig", "footerText", e.target.value || undefined)
+                          }
+                          placeholder="Questions? Reply to this email."
+                          rows={2}
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="email-replyto">Reply-To Address (optional)</Label>
+                        <Input
+                          id="email-replyto"
+                          type="email"
+                          value={formData.confirmationEmailConfig.replyTo || ""}
+                          onChange={(e) =>
+                            updateNested("confirmationEmailConfig", "replyTo", e.target.value || undefined)
+                          }
+                          placeholder="support@company.com"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Right panel — Live email preview */}
+                    <div className="col-span-3">
+                      <div className="rounded-lg border overflow-hidden bg-muted/30 sticky top-0">
+                        {/* Mock email client header */}
+                        <div className="bg-muted px-4 py-2.5 border-b space-y-1">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="font-medium text-muted-foreground w-12">From:</span>
+                            <span className="text-foreground">{formData.brandingConfig.companyName || "Your Company"}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="font-medium text-muted-foreground w-12">Subject:</span>
+                            <span className="text-foreground font-medium">{formData.confirmationEmailConfig.subject || "Your download is ready!"}</span>
+                          </div>
+                          {formData.confirmationEmailConfig.replyTo && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <span className="font-medium text-muted-foreground w-12">Reply-To:</span>
+                              <span className="text-foreground">{formData.confirmationEmailConfig.replyTo}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Email body preview */}
+                        <div className="bg-white p-6">
+                          <div style={{ fontFamily: "Arial, sans-serif", maxWidth: 640, margin: "0 auto", color: "#111827" }}>
+                            {/* Logo */}
+                            {formData.brandingConfig.logoUrl && (
+                              <div style={{ textAlign: "center", marginBottom: 16 }}>
+                                <img
+                                  src={formData.brandingConfig.logoUrl}
+                                  alt={formData.brandingConfig.companyName || "Logo"}
+                                  style={{ maxHeight: 48, maxWidth: 180 }}
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                />
+                              </div>
+                            )}
+
+                            {/* Branded header bar */}
+                            <div style={{
+                              background: formData.brandingConfig.primaryColor || "#7c3aed",
+                              height: 4,
+                              borderRadius: 2,
+                              marginBottom: 24,
+                            }} />
+
+                            {/* Headline */}
+                            <h2 style={{
+                              marginBottom: 12,
+                              color: formData.brandingConfig.primaryColor || "#7c3aed",
+                              fontSize: 22,
+                              fontWeight: 700,
+                            }}>
+                              {formData.confirmationEmailConfig.headline || "Headline"}
+                            </h2>
+
+                            {/* Body */}
+                            <p style={{ lineHeight: 1.6, fontSize: 15, color: "#374151", marginBottom: 24 }}>
+                              {formData.confirmationEmailConfig.bodyText || "Body text..."}
+                            </p>
+
+                            {/* Download button */}
+                            <div style={{ margin: "24px 0" }}>
+                              <span style={{
+                                background: formData.brandingConfig.primaryColor || "#7c3aed",
+                                color: "#fff",
+                                textDecoration: "none",
+                                padding: "14px 24px",
+                                borderRadius: 8,
+                                display: "inline-block",
+                                fontWeight: 600,
+                                fontSize: 15,
+                              }}>
+                                <Download className="h-3.5 w-3.5 inline-block mr-1.5 -mt-0.5" />
+                                {formData.confirmationEmailConfig.downloadButtonText || "Download Now"}
+                              </span>
+                            </div>
+
+                            {/* Footer */}
+                            {formData.confirmationEmailConfig.footerText && (
+                              <p style={{ lineHeight: 1.6, fontSize: 13, color: "#6b7280", marginTop: 24, borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
+                                {formData.confirmationEmailConfig.footerText}
+                              </p>
+                            )}
+
+                            {/* Company name footer */}
+                            <p style={{ fontSize: 12, color: "#9ca3af", marginTop: 16, textAlign: "center" as const }}>
+                              Sent by {formData.brandingConfig.companyName || "Your Company"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </TabsContent>
           </div>
 

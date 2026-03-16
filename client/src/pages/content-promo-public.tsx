@@ -457,9 +457,19 @@ export default function ContentPromoPublicPage() {
 
   // ─── Fetch Page Config ──────────────────────────────────────────────────────
 
+  const isPreview = urlParams.get("preview") === "true";
+
   const { data: pageConfig, isLoading, error } = useQuery<PageConfig>({
-    queryKey: [`/api/public/promo/${slug}`],
+    queryKey: [`/api/public/promo/${slug}`, isPreview],
     enabled: !!slug,
+    queryFn: async () => {
+      const url = isPreview
+        ? `/api/public/promo/${slug}?preview=true`
+        : `/api/public/promo/${slug}`;
+      const res = await apiRequest("GET", url);
+      if (!res.ok) throw new Error("Page not found");
+      return res.json();
+    },
   });
 
   // ─── SEO ────────────────────────────────────────────────────────────────────
@@ -490,10 +500,13 @@ export default function ContentPromoPublicPage() {
         duration: timeOnPage,
         ...utmParams,
       });
+      const trackUrl = isPreview
+        ? `/api/public/promo/${slug}/track?preview=true`
+        : `/api/public/promo/${slug}/track`;
       if (navigator.sendBeacon) {
-        navigator.sendBeacon(`/api/public/promo/${slug}/track`, data);
+        navigator.sendBeacon(trackUrl, data);
       } else {
-        fetch(`/api/public/promo/${slug}/track`, {
+        fetch(trackUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: data,
@@ -588,13 +601,16 @@ export default function ContentPromoPublicPage() {
     if (!formStartSentRef.current && !formStarted) {
       setFormStarted(true);
       formStartSentRef.current = true;
-      fetch(`/api/public/promo/${slug}/track`, {
+      const trackUrl = isPreview
+        ? `/api/public/promo/${slug}/track?preview=true`
+        : `/api/public/promo/${slug}/track`;
+      fetch(trackUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event: "form_start", ...utmParams }),
       }).catch(() => {});
     }
-  }, [slug, utmParams, formStarted]);
+  }, [slug, utmParams, formStarted, isPreview]);
 
   // ─── Form Submit ────────────────────────────────────────────────────────────
 
@@ -610,10 +626,23 @@ export default function ContentPromoPublicPage() {
             payload[f.name] = val;
           });
       }
-      const response = await apiRequest("POST", `/api/public/promo/${slug}/submit`, payload);
+      const submitUrl = isPreview
+        ? `/api/public/promo/${slug}/submit?preview=true`
+        : `/api/public/promo/${slug}/submit`;
+      const response = await apiRequest("POST", submitUrl, payload);
       return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
+      // Auto-download the file directly
+      if (result?.assetUrl) {
+        const link = document.createElement('a');
+        link.href = result.assetUrl;
+        link.download = '';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
       setSubmitted(true);
       if (pageConfig?.thankYouConfig?.redirectUrl && pageConfig.thankYouConfig.redirectDelay) {
         setRedirectCountdown(pageConfig.thankYouConfig.redirectDelay);
@@ -856,10 +885,18 @@ export default function ContentPromoPublicPage() {
                   size="lg"
                   className={`${theme.submitButton} w-full max-w-sm mx-auto text-lg py-6`}
                   style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
-                  onClick={() => window.open(pageConfig.assetConfig!.fileUrl, "_blank")}
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = pageConfig.assetConfig!.fileUrl;
+                    link.download = '';
+                    link.style.display = 'none';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
                 >
                   <Download className="mr-2 h-5 w-5" />
-                  {tyConfig.downloadButtonText || "Download Now"}
+                  {tyConfig.downloadButtonText || "Download Again"}
                 </Button>
               )}
 

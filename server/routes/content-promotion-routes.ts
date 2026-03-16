@@ -15,6 +15,8 @@ import {
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
 import { generateContentPromotionPage } from "../services/ai-content-promotion";
+import { smtpOAuthService } from "../services/smtp-oauth-service";
+import { transactionalEmailService } from "../services/transactional-email-service";
 
 const router = Router();
 
@@ -457,14 +459,38 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
       return res.status(409).json({ error: "A page with this slug already exists" });
     }
 
+    // Whitelist only known schema columns to prevent unknown fields leaking into INSERT
+    const safeValues: Record<string, any> = {
+      title: body.title,
+      slug,
+      pageType: body.pageType,
+      status: body.status,
+      templateTheme: body.templateTheme,
+      heroConfig: body.heroConfig,
+      assetConfig: body.assetConfig,
+      brandingConfig: body.brandingConfig,
+      formConfig: body.formConfig,
+      socialProofConfig: body.socialProofConfig,
+      benefitsConfig: body.benefitsConfig,
+      urgencyConfig: body.urgencyConfig,
+      thankYouConfig: body.thankYouConfig,
+      seoConfig: body.seoConfig,
+      linkedLeadFormId: body.linkedLeadFormId,
+      clientAccountId: body.clientAccountId,
+      campaignId: body.campaignId,
+      confirmationEmailConfig: body.confirmationEmailConfig,
+      expiresAt: body.expiresAt,
+      tenantId,
+      createdBy,
+    };
+    // Remove undefined values so DB defaults apply
+    for (const key of Object.keys(safeValues)) {
+      if (safeValues[key] === undefined) delete safeValues[key];
+    }
+
     const [page] = await db
       .insert(contentPromotionPages)
-      .values({
-        ...body,
-        slug,
-        tenantId,
-        createdBy,
-      } as any)
+      .values(safeValues as any)
       .returning();
 
     res.json(page);
@@ -485,7 +511,19 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
 // Update page config
 router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => {
   try {
-    const { id, createdAt, updatedAt, tenantId, createdBy, ...updateData } = req.body;
+    const body = req.body;
+    // Whitelist only known mutable schema columns
+    const updateData: Record<string, any> = {};
+    const allowedUpdateKeys = [
+      'title', 'slug', 'pageType', 'status', 'templateTheme',
+      'heroConfig', 'assetConfig', 'brandingConfig', 'formConfig',
+      'socialProofConfig', 'benefitsConfig', 'urgencyConfig',
+      'thankYouConfig', 'seoConfig', 'linkedLeadFormId', 'clientAccountId',
+      'campaignId', 'confirmationEmailConfig', 'expiresAt',
+    ];
+    for (const key of allowedUpdateKeys) {
+      if (body[key] !== undefined) updateData[key] = body[key];
+    }
 
     // If slug is being changed, validate uniqueness
     if (updateData.slug) {
@@ -903,15 +941,18 @@ router.post("/api/public/promo/:slug/submit", async (req, res) => {
   try {
     const { slug } = req.params;
 
+    // Allow submissions on draft pages when previewing (authenticated)
+    const allowDraft = req.query.preview === 'true' && req.headers.authorization;
+
+    const conditions: any[] = [eq(contentPromotionPages.slug, slug)];
+    if (!allowDraft) {
+      conditions.push(eq(contentPromotionPages.status, "published" as any));
+    }
+
     const [page] = await db
       .select()
       .from(contentPromotionPages)
-      .where(
-        and(
-          eq(contentPromotionPages.slug, slug),
-          eq(contentPromotionPages.status, "published" as any)
-        )
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (!page) {
@@ -988,6 +1029,57 @@ router.post("/api/public/promo/:slug/submit", async (req, res) => {
       } as any)
       .where(eq(contentPromotionPages.id, page.id));
 
+    // Send confirmation email if enabled and submitter email exists
+    const emailConfig = (page as any).confirmationEmailConfig as {
+      enabled: boolean; subject: string; headline: string;
+      bodyText: string; downloadButtonText: string;
+      footerText?: string; replyTo?: string;
+    } | null;
+    const assetUrl = (page.assetConfig as any)?.fileUrl || null;
+
+    if (emailConfig?.enabled && submitterEmail) {
+      try {
+        const provider = await (transactionalEmailService as any).getProvider(undefined, undefined);
+        if (provider) {
+          const transporter = await smtpOAuthService.createTransporter(provider);
+          const fromEmail = provider.emailAddress;
+          const fromName = provider.displayName || "DemandGentic";
+          const brandColor = (page.brandingConfig as any)?.primaryColor || "#7c3aed";
+          const logoUrl = (page.brandingConfig as any)?.logoUrl || "";
+          const companyName = (page.brandingConfig as any)?.companyName || "";
+
+          const html = `
+            <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #111827;">
+              ${logoUrl ? `<div style="text-align: center; margin-bottom: 16px;">
+                <img src="${logoUrl}" alt="${companyName}" style="max-height: 48px; max-width: 180px;" />
+              </div>` : ""}
+              <div style="background: ${brandColor}; height: 4px; border-radius: 2px; margin-bottom: 24px;"></div>
+              <h2 style="margin-bottom: 12px; color: ${brandColor}; font-size: 22px; font-weight: 700;">${emailConfig.headline}</h2>
+              <p style="line-height: 1.6; font-size: 15px; color: #374151; margin-bottom: 24px;">${emailConfig.bodyText}</p>
+              ${assetUrl ? `<p style="line-height: 1.6; margin: 24px 0;">
+                <a href="${assetUrl}" style="background:${brandColor};color:#fff;text-decoration:none;padding:14px 24px;border-radius:8px;display:inline-block;font-weight:600;font-size:15px;">
+                  ${emailConfig.downloadButtonText || "Download Now"}
+                </a>
+              </p>` : ""}
+              ${emailConfig.footerText ? `<p style="line-height: 1.6; font-size: 13px; color: #6b7280; margin-top: 24px; border-top: 1px solid #e5e7eb; padding-top: 16px;">${emailConfig.footerText}</p>` : ""}
+              ${companyName ? `<p style="font-size: 12px; color: #9ca3af; margin-top: 16px; text-align: center;">Sent by ${companyName}</p>` : ""}
+            </div>
+          `;
+
+          await transporter.sendMail({
+            from: `${fromName} <${fromEmail}>`,
+            to: submitterEmail,
+            replyTo: emailConfig.replyTo || undefined,
+            subject: emailConfig.subject,
+            html,
+          });
+        }
+      } catch (emailErr: any) {
+        console.error("[Content Promotion] Confirmation email failed:", emailErr.message);
+        // Don't fail the submission if email fails
+      }
+    }
+
     res.json({
       success: true,
       thankYouConfig: page.thankYouConfig,
@@ -1019,16 +1111,19 @@ router.post("/api/public/promo/:slug/track", async (req, res) => {
       company,
     } = req.body;
 
+    // Allow tracking on draft pages when previewing (authenticated)
+    const allowDraft = req.query.preview === 'true' && req.headers.authorization;
+
+    const conditions: any[] = [eq(contentPromotionPages.slug, slug)];
+    if (!allowDraft) {
+      conditions.push(eq(contentPromotionPages.status, "published" as any));
+    }
+
     // Look up page by slug to get the page ID
     const [page] = await db
       .select({ id: contentPromotionPages.id })
       .from(contentPromotionPages)
-      .where(
-        and(
-          eq(contentPromotionPages.slug, slug),
-          eq(contentPromotionPages.status, "published" as any)
-        )
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (!page) {
@@ -1066,6 +1161,77 @@ router.post("/api/public/promo/:slug/track", async (req, res) => {
   } catch (error: any) {
     console.error("[Content Promotion] Error tracking event:", error);
     res.status(500).json({ error: "Failed to track event" });
+  }
+});
+
+// ==================== Campaign Promo Submissions ====================
+
+// Get all form submissions for promo pages linked to a campaign
+router.get("/api/campaigns/:id/promo-submissions", requireAuth, async (req, res) => {
+  try {
+    const campaignId = req.params.id;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Find all content promotion pages linked to this campaign
+    const pages = await db
+      .select({ id: contentPromotionPages.id, title: contentPromotionPages.title, slug: contentPromotionPages.slug })
+      .from(contentPromotionPages)
+      .where(eq(contentPromotionPages.campaignId, campaignId));
+
+    if (pages.length === 0) {
+      return res.json({ submissions: [], total: 0 });
+    }
+
+    const pageIds = pages.map((p) => p.id);
+    const pageMap = Object.fromEntries(pages.map((p) => [p.id, p]));
+
+    // Get form_submit events for these pages
+    const submissions = await db
+      .select()
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          inArray(contentPromotionPageViews.pageId, pageIds),
+          eq(contentPromotionPageViews.eventType, "form_submit")
+        )
+      )
+      .orderBy(desc(contentPromotionPageViews.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          inArray(contentPromotionPageViews.pageId, pageIds),
+          eq(contentPromotionPageViews.eventType, "form_submit")
+        )
+      );
+
+    const mapped = submissions.map((s) => {
+      const formData = s.formData as Record<string, any> | null;
+      const page = pageMap[s.pageId];
+      return {
+        id: s.id,
+        visitorFirstName: s.visitorFirstName,
+        visitorLastName: s.visitorLastName,
+        visitorEmail: s.visitorEmail,
+        visitorCompany: s.visitorCompany,
+        jobTitle: formData?.jobTitle || null,
+        formData,
+        createdAt: s.createdAt,
+        pageTitle: page?.title || null,
+        pageSlug: page?.slug || null,
+      };
+    });
+
+    res.json({ submissions: mapped, total: countResult?.count || 0 });
+  } catch (error: any) {
+    console.error("[Content Promotion] Error fetching campaign submissions:", error);
+    res.status(500).json({ error: "Failed to fetch submissions" });
   }
 });
 

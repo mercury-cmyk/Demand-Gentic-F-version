@@ -29,6 +29,8 @@ import {
   accounts,
   externalEvents,
   workOrderDrafts,
+  contentPromotionPages,
+  contentPromotionPageViews,
 } from '@shared/schema';
 import { z } from 'zod';
 import { isFeatureEnabled } from '../feature-flags';
@@ -2345,6 +2347,79 @@ router.get('/:id/queue-intelligence/live-stats', async (req: Request, res: Respo
   } catch (error: any) {
     console.error('[CLIENT QI] Live stats error:', error);
     res.status(500).json({ message: error.message || 'Failed to get live stats' });
+  }
+});
+
+// ==================== PROMO SUBMISSIONS ====================
+
+/**
+ * GET /:id/promo-submissions - Get form submissions for promo pages linked to a campaign
+ */
+router.get('/:id/promo-submissions', async (req: Request, res: Response) => {
+  try {
+    const campaignId = req.params.id;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const offset = parseInt(req.query.offset as string) || 0;
+
+    // Find all content promotion pages linked to this campaign
+    const pages = await db
+      .select({ id: contentPromotionPages.id, title: contentPromotionPages.title, slug: contentPromotionPages.slug })
+      .from(contentPromotionPages)
+      .where(eq(contentPromotionPages.campaignId, campaignId));
+
+    if (pages.length === 0) {
+      return res.json({ submissions: [], total: 0 });
+    }
+
+    const pageIds = pages.map((p) => p.id);
+    const pageMap = Object.fromEntries(pages.map((p) => [p.id, p]));
+
+    // Get form_submit events for these pages
+    const submissions = await db
+      .select()
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          inArray(contentPromotionPageViews.pageId, pageIds),
+          eq(contentPromotionPageViews.eventType, 'form_submit')
+        )
+      )
+      .orderBy(desc(contentPromotionPageViews.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const [countResult] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(contentPromotionPageViews)
+      .where(
+        and(
+          inArray(contentPromotionPageViews.pageId, pageIds),
+          eq(contentPromotionPageViews.eventType, 'form_submit')
+        )
+      );
+
+    const mapped = submissions.map((s) => {
+      const formData = s.formData as Record<string, any> | null;
+      const page = pageMap[s.pageId];
+      return {
+        id: s.id,
+        visitorFirstName: s.visitorFirstName,
+        visitorLastName: s.visitorLastName,
+        visitorEmail: s.visitorEmail,
+        visitorCompany: s.visitorCompany,
+        jobTitle: formData?.jobTitle || null,
+        formData,
+        createdAt: s.createdAt,
+        pageTitle: page?.title || null,
+        pageSlug: page?.slug || null,
+      };
+    });
+
+    res.json({ submissions: mapped, total: countResult?.count || 0 });
+  } catch (error: any) {
+    console.error('[CLIENT CAMPAIGNS] Promo submissions error:', error);
+    res.status(500).json({ message: error.message || 'Failed to fetch submissions' });
   }
 });
 
