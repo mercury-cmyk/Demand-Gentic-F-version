@@ -71,7 +71,7 @@ router.post('/api/contacts-csv-import', requireAuth, upload.single('file'), asyn
 
     // Upload file to S3
     const timestamp = Date.now();
-    const s3Key = `csv-imports/contacts/${jobData.userId}/${timestamp}-${req.file.originalname}`;
+    const s3Key = `csv-imports/contacts/${req.user.userId}/${timestamp}-${req.file.originalname}`;
     
     const s3Result = await uploadToS3(s3Key, req.file.buffer, req.file.mimetype);
     

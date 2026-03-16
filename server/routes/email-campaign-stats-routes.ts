@@ -5,8 +5,11 @@ import {
   campaigns,
   emailSends,
   emailEvents,
+  senderProfiles,
 } from '@shared/schema';
 import { eq, sql } from 'drizzle-orm';
+import { readCampaignEmailRouting } from '../lib/campaign-email-routing';
+import { campaignEmailProviderService } from '../services/campaign-email-provider-service';
 
 const router = Router();
 
@@ -20,6 +23,76 @@ function parseLimit(value: unknown, fallback = 100, max = 500): number {
   const parsed = Number.parseInt(String(value ?? fallback), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.min(parsed, max);
+}
+
+function formatProviderLabel(providerKey?: string | null, providerName?: string | null): string {
+  if (providerName) return providerName;
+  if (providerKey === 'brevo') return 'Brevo';
+  if (providerKey === 'mailgun') return 'Mailgun';
+  if (providerKey === 'brainpool') return 'Brainpool';
+  if (providerKey === 'custom') return 'Custom SMTP';
+  if (!providerKey) return 'Default routing';
+  return providerKey;
+}
+
+async function resolveDeliveryRoute(campaignId: string, campaign: any) {
+  const routing = readCampaignEmailRouting(campaign);
+  let senderProfile: any = null;
+
+  if (routing.senderProfileId) {
+    const [profile] = await db
+      .select()
+      .from(senderProfiles)
+      .where(eq(senderProfiles.id, routing.senderProfileId))
+      .limit(1);
+    senderProfile = profile || null;
+  }
+
+  const providerRows = await db
+    .select({
+      provider: emailSends.provider,
+      count: sql<number>`COUNT(*)::int`,
+    })
+    .from(emailSends)
+    .where(eq(emailSends.campaignId, campaignId))
+    .groupBy(emailSends.provider);
+
+  const providerBreakdown = providerRows
+    .map((row) => ({
+      providerKey: typeof row.provider === 'string' && row.provider.trim() ? row.provider.trim().toLowerCase() : 'unknown',
+      count: toInt(row.count),
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const resolvedProvider = senderProfile
+    ? await campaignEmailProviderService.resolveCampaignEmailProviderForSenderProfile(senderProfile)
+    : null;
+  const providerKey =
+    providerBreakdown[0]?.providerKey ||
+    resolvedProvider?.providerKey ||
+    routing.campaignProviderKey ||
+    senderProfile?.espProvider ||
+    senderProfile?.espAdapter ||
+    null;
+
+  return {
+    senderProfileId: routing.senderProfileId || senderProfile?.id || null,
+    senderName: routing.senderName || senderProfile?.fromName || senderProfile?.name || null,
+    fromEmail: routing.fromEmail || senderProfile?.fromEmail || null,
+    replyToEmail:
+      routing.replyToEmail ||
+      senderProfile?.replyToEmail ||
+      senderProfile?.replyTo ||
+      senderProfile?.fromEmail ||
+      null,
+    providerKey,
+    providerName: resolvedProvider?.name || routing.campaignProviderName || null,
+    providerLabel: formatProviderLabel(providerKey, resolvedProvider?.name || routing.campaignProviderName || null),
+    providerHealthStatus: resolvedProvider?.healthStatus || routing.campaignProviderHealthStatus || null,
+    source: providerBreakdown.length > 0 ? 'send-history' : resolvedProvider || routing.campaignProviderKey ? 'campaign-routing' : 'fallback',
+    isBrevo: providerKey === 'brevo',
+    providerBreakdown,
+  };
 }
 
 async function getCampaignEmailStats(campaignId: string) {
@@ -80,6 +153,7 @@ router.get('/:campaignId/email-stats', requireAuth, async (req, res) => {
     }
 
     const stats = await getCampaignEmailStats(campaignId);
+    const deliveryRoute = await resolveDeliveryRoute(campaignId, campaign);
 
     const deliveryRate = stats.totalSent > 0 ? stats.delivered / stats.totalSent : 0;
     const openRate = stats.delivered > 0 ? stats.uniqueOpens / stats.delivered : 0;
@@ -111,6 +185,7 @@ router.get('/:campaignId/email-stats', requireAuth, async (req, res) => {
       clickToOpenRate,
       bounceRate,
       unsubscribeRate,
+      deliveryRoute,
     });
   } catch (error: any) {
     console.error('[EMAIL-STATS] Error:', error);

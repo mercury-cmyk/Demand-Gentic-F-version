@@ -40,6 +40,14 @@ interface CSVFieldMapperProps {
   onCancel: () => void;
 }
 
+interface AiMappingSuggestion {
+  csvColumn: string;
+  targetField: string | null;
+  targetEntity: "contact" | "account" | null;
+  confidence: number;
+  rationale: string;
+}
+
 // Define base/standard fields for Contact and Account (Pivotal B2B Standard Template Compatible)
 const BASE_CONTACT_FIELDS = [
   { value: "researchDate", label: CONTACT_FIELD_LABELS.researchDate },
@@ -126,6 +134,8 @@ export function CSVFieldMapper({
   const [showSaveTemplateDialog, setShowSaveTemplateDialog] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [autoMatchedTemplate, setAutoMatchedTemplate] = useState<CsvMappingTemplate | null>(null);
+  const [hasInitializedMappings, setHasInitializedMappings] = useState(false);
+  const [aiAutoApplied, setAiAutoApplied] = useState(false);
   const { toast } = useToast();
 
   // Fetch custom fields
@@ -149,6 +159,19 @@ export function CSVFieldMapper({
       return res.json();
     },
     enabled: csvHeaders.length > 0,
+  });
+
+  const { data: aiMappingData, isLoading: aiSuggestionsLoading } = useQuery<{ suggestions: AiMappingSuggestion[] }>({
+    queryKey: ['/api/csv-ai-mapping/suggest', csvHeaders, sampleData.slice(0, 20)],
+    queryFn: async () => {
+      const res = await apiRequest('POST', '/api/csv-ai-mapping/suggest', {
+        csvHeaders,
+        csvData: sampleData.slice(0, 20),
+      });
+      return res.json();
+    },
+    enabled: csvHeaders.length > 0 && sampleData.length > 0,
+    retry: false,
   });
 
   // Save template mutation
@@ -222,6 +245,10 @@ export function CSVFieldMapper({
       label: `${f.displayLabel} (Custom)`,
     })) || []),
   ];
+
+  const aiSuggestionLookup = Object.fromEntries(
+    (aiMappingData?.suggestions || []).map((suggestion) => [suggestion.csvColumn, suggestion])
+  ) as Record<string, AiMappingSuggestion>;
 
   // Auto-mapping logic based on column name similarity
   const autoMapColumn = (csvColumn: string): FieldMapping => {
@@ -351,8 +378,12 @@ export function CSVFieldMapper({
   };
 
   useEffect(() => {
+    if (customFields === undefined || hasInitializedMappings || bestMatch === undefined || aiSuggestionsLoading) {
+      return;
+    }
+
     // Auto-apply best matched template if available
-    if (bestMatch && bestMatch.template && customFields !== undefined && !autoMapped) {
+    if (bestMatch.template) {
       const template = bestMatch.template;
       setAutoMatchedTemplate(template);
       
@@ -376,6 +407,8 @@ export function CSVFieldMapper({
       
       setMappings(templateMappings);
       setAutoMapped(true);
+      setAiAutoApplied(false);
+      setHasInitializedMappings(true);
       
       // Record usage
       recordTemplateMutation.mutate(template.id);
@@ -384,16 +417,45 @@ export function CSVFieldMapper({
         title: "Template applied",
         description: `Auto-applied mapping template "${template.name}" (${bestMatch.matchScore}% match)`,
       });
-    } else if (customFields !== undefined && !autoMapped) {
-      // Auto-map on initial load - only when custom fields are loaded
-      const initialMappings = csvHeaders.map(autoMapColumn);
-      setMappings(initialMappings);
-
-      // Check if any were auto-mapped
-      const hasAutoMapped = initialMappings.some(m => m.targetField !== null);
-      setAutoMapped(hasAutoMapped);
+      return;
     }
-  }, [csvHeaders, customFields, bestMatch, autoMapped]);
+
+    const initialMappings = csvHeaders.map(csvColumn => {
+      const autoMapping = autoMapColumn(csvColumn);
+      const aiSuggestion = aiSuggestionLookup[csvColumn];
+
+      if (
+        autoMapping.targetField === null &&
+        aiSuggestion?.targetField &&
+        aiSuggestion.targetEntity &&
+        aiSuggestion.confidence >= 0.75
+      ) {
+        return {
+          csvColumn,
+          targetField: aiSuggestion.targetField,
+          targetEntity: aiSuggestion.targetEntity,
+        };
+      }
+
+      return autoMapping;
+    });
+
+    const appliedAi = initialMappings.some(mapping => {
+      const autoMapping = autoMapColumn(mapping.csvColumn);
+      const aiSuggestion = aiSuggestionLookup[mapping.csvColumn];
+      return (
+        autoMapping.targetField === null &&
+        aiSuggestion?.targetField === mapping.targetField &&
+        aiSuggestion.targetEntity === mapping.targetEntity &&
+        aiSuggestion.confidence >= 0.75
+      );
+    });
+
+    setMappings(initialMappings);
+    setAutoMapped(initialMappings.some(m => m.targetField !== null));
+    setAiAutoApplied(appliedAi);
+    setHasInitializedMappings(true);
+  }, [aiSuggestionLookup, aiSuggestionsLoading, bestMatch, csvHeaders, customFields, hasInitializedMappings]);
 
   // Show loading state while custom fields are being fetched
   if (customFieldsLoading) {
@@ -508,14 +570,45 @@ export function CSVFieldMapper({
   const mappedCount = mappings.filter(m => m.targetField !== null).length;
   const unmappedCount = mappings.length - mappedCount;
   const unmappedColumns = mappings.filter(m => m.targetField === null).map(m => m.csvColumn);
+  const hasAnyAiSuggestions = (aiMappingData?.suggestions?.length || 0) > 0;
+  const getAiConfidenceAppearance = (confidence: number) => {
+    if (confidence >= 0.9) {
+      return "bg-emerald-100 text-emerald-800";
+    }
+    if (confidence >= 0.75) {
+      return "bg-sky-100 text-sky-800";
+    }
+    if (confidence >= 0.5) {
+      return "bg-amber-100 text-amber-800";
+    }
+    return "bg-slate-100 text-slate-700";
+  };
 
   return (
     <div className="space-y-4">
+      {aiSuggestionsLoading && (
+        <Alert>
+          <Sparkles className="h-4 w-4" />
+          <AlertDescription>
+            AI is analyzing your sample rows to improve field matching.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {autoMatchedTemplate && (
         <Alert>
           <BookmarkCheck className="h-4 w-4" />
           <AlertDescription>
             Applied saved mapping template "{autoMatchedTemplate.name}" ({bestMatch?.matchScore}% match). Review and adjust as needed.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {aiAutoApplied && !autoMatchedTemplate && (
+        <Alert>
+          <Sparkles className="h-4 w-4" />
+          <AlertDescription>
+            AI reasoning filled in low-confidence or previously unmapped columns. Review the confidence badges before importing.
           </AlertDescription>
         </Alert>
       )}
@@ -525,6 +618,15 @@ export function CSVFieldMapper({
           <Sparkles className="h-4 w-4" />
           <AlertDescription>
             We automatically mapped {mappedCount} field(s) based on column names. Please review and adjust as needed.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {hasAnyAiSuggestions && !aiAutoApplied && !autoMatchedTemplate && !aiSuggestionsLoading && (
+        <Alert>
+          <Sparkles className="h-4 w-4" />
+          <AlertDescription>
+            AI suggestions are available on individual columns as confidence badges and rationale.
           </AlertDescription>
         </Alert>
       )}
@@ -594,19 +696,36 @@ export function CSVFieldMapper({
 
       <ScrollArea className="h-[400px] border rounded-lg p-4">
         <div className="space-y-3">
-          {mappings.map((mapping, idx) => (
+          {mappings.map((mapping, idx) => {
+            const aiSuggestion = aiSuggestionLookup[mapping.csvColumn];
+
+            return (
             <div key={mapping.csvColumn} className="flex items-start gap-3 p-3 border rounded-md hover-elevate">
               <div className="flex-1 space-y-2">
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="font-mono text-xs">
                     {mapping.csvColumn}
                   </Badge>
+                  {aiSuggestion?.targetField && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${getAiConfidenceAppearance(aiSuggestion.confidence)}`}
+                      title={aiSuggestion.rationale}
+                    >
+                      AI {Math.round(aiSuggestion.confidence * 100)}%
+                    </span>
+                  )}
                   {sampleData[0] && (
                     <span className="text-xs text-muted-foreground truncate max-w-[200px]">
                       e.g., "{sampleData[0][idx]}"
                     </span>
                   )}
                 </div>
+
+                {aiSuggestion?.rationale && (
+                  <p className="text-xs text-muted-foreground italic">
+                    AI: {aiSuggestion.rationale}
+                  </p>
+                )}
 
                 <div className="flex items-center gap-2">
                   <ArrowRight className="h-4 w-4 text-muted-foreground" />
@@ -668,7 +787,7 @@ export function CSVFieldMapper({
                 <CheckCircle2 className="h-4 w-4 text-green-500 mt-2" />
               )}
             </div>
-          ))}
+          )})}
         </div>
       </ScrollArea>
 

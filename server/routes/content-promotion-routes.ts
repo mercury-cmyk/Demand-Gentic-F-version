@@ -10,6 +10,7 @@ import {
   campaigns,
   clientProjects,
   clientAccounts,
+  campaignOrganizations,
   contentAssets,
 } from "@shared/schema";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
@@ -17,6 +18,111 @@ import { requireAuth } from "../auth";
 import { generateContentPromotionPage } from "../services/ai-content-promotion";
 
 const router = Router();
+
+type ContentPromotionContextSnapshot = {
+  clientName?: string | null;
+  projectName?: string | null;
+  campaignName?: string | null;
+  organizationName?: string | null;
+  campaignObjective?: string | null;
+  productServiceInfo?: string | null;
+  targetAudienceDescription?: string | null;
+  successCriteria?: string | null;
+  campaignContextBrief?: string | null;
+};
+
+function cleanStringId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function badRequest(message: string) {
+  const error = new Error(message) as Error & { statusCode?: number };
+  error.statusCode = 400;
+  return error;
+}
+
+async function resolveContentPromotionContextLinkage(params: {
+  campaignId?: unknown;
+  projectId?: unknown;
+  clientAccountId?: unknown;
+  organizationId?: unknown;
+}) {
+  let campaignId = cleanStringId(params.campaignId);
+  let projectId = cleanStringId(params.projectId);
+  let clientAccountId = cleanStringId(params.clientAccountId);
+  let organizationId = cleanStringId(params.organizationId);
+
+  let campaignRecord: typeof campaigns.$inferSelect | null = null;
+  let projectRecord: typeof clientProjects.$inferSelect | null = null;
+  let clientRecord: typeof clientAccounts.$inferSelect | null = null;
+  let organizationRecord: typeof campaignOrganizations.$inferSelect | null = null;
+
+  if (campaignId) {
+    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+    if (!campaign) {
+      throw badRequest(`Campaign not found for content promotion linkage: ${campaignId}`);
+    }
+    campaignRecord = campaign;
+    projectId = projectId || campaign.projectId || null;
+    clientAccountId = clientAccountId || campaign.clientAccountId || null;
+    organizationId = organizationId || campaign.problemIntelligenceOrgId || null;
+  }
+
+  if (projectId) {
+    const [project] = await db.select().from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
+    if (!project) {
+      throw badRequest(`Project not found for content promotion linkage: ${projectId}`);
+    }
+    projectRecord = project;
+    clientAccountId = clientAccountId || project.clientAccountId || null;
+  }
+
+  if (clientAccountId) {
+    const [client] = await db.select().from(clientAccounts).where(eq(clientAccounts.id, clientAccountId)).limit(1);
+    if (!client) {
+      throw badRequest(`Client not found for content promotion linkage: ${clientAccountId}`);
+    }
+    clientRecord = client;
+  }
+
+  if (organizationId) {
+    const [organization] = await db
+      .select()
+      .from(campaignOrganizations)
+      .where(eq(campaignOrganizations.id, organizationId))
+      .limit(1);
+
+    if (!organization) {
+      throw badRequest(`Organization not found for content promotion linkage: ${organizationId}`);
+    }
+    organizationRecord = organization;
+  }
+
+  const contextSnapshot: ContentPromotionContextSnapshot | null =
+    campaignRecord || projectRecord || clientRecord || organizationRecord
+      ? {
+          clientName: clientRecord?.companyName || clientRecord?.name || null,
+          projectName: projectRecord?.name || null,
+          campaignName: campaignRecord?.name || null,
+          organizationName: organizationRecord?.name || null,
+          campaignObjective: campaignRecord?.campaignObjective || null,
+          productServiceInfo: campaignRecord?.productServiceInfo || null,
+          targetAudienceDescription: campaignRecord?.targetAudienceDescription || null,
+          successCriteria: campaignRecord?.successCriteria || null,
+          campaignContextBrief: campaignRecord?.campaignContextBrief || null,
+        }
+      : null;
+
+  return {
+    campaignId,
+    projectId,
+    clientAccountId,
+    organizationId,
+    contextSnapshot,
+  };
+}
 
 // ==================== Admin Endpoints (requireAuth) ====================
 
@@ -29,14 +135,43 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
     (req as any).user?.clientUserId;
   const { status } = req.query;
   const requestedStatus = typeof status === "string" ? status : undefined;
+  const requestedCampaignId = cleanStringId(req.query.campaignId);
+  const requestedProjectId = cleanStringId(req.query.projectId);
+  const requestedClientId = cleanStringId(req.query.clientId);
+  const requestedOrganizationId = cleanStringId(req.query.organizationId);
 
   try {
     // Fetch content-promotion pages from both scopes (tenant + creator) and merge.
     const sourceErrors: Array<{ source: string; message: string }> = [];
+    const addContextFilters = (conditions: any[]) => {
+      if (requestedCampaignId) {
+        conditions.push(eq(contentPromotionPages.campaignId, requestedCampaignId));
+      }
+      if (requestedProjectId) {
+        conditions.push(eq(contentPromotionPages.projectId, requestedProjectId));
+      }
+      if (requestedClientId) {
+        conditions.push(eq(contentPromotionPages.clientAccountId, requestedClientId));
+      }
+      if (requestedOrganizationId) {
+        conditions.push(eq(contentPromotionPages.organizationId, requestedOrganizationId));
+      }
+      return conditions;
+    };
+
+    const studioContextMatches = (sourceProjectId: string | null | undefined) => {
+      if ((requestedCampaignId || requestedClientId || requestedOrganizationId) && !requestedProjectId) {
+        return false;
+      }
+      if (requestedProjectId && sourceProjectId !== requestedProjectId) {
+        return false;
+      }
+      return true;
+    };
 
     let tenantScopedPages: any[] = [];
     if (tenantId && tenantId !== "default-tenant") {
-      const tenantConditions: any[] = [eq(contentPromotionPages.tenantId, tenantId)];
+      const tenantConditions: any[] = addContextFilters([eq(contentPromotionPages.tenantId, tenantId)]);
       if (requestedStatus) {
         tenantConditions.push(eq(contentPromotionPages.status, requestedStatus as any));
       }
@@ -53,7 +188,7 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
 
     let userScopedPages: any[] = [];
     if (userId) {
-      const userConditions: any[] = [eq(contentPromotionPages.createdBy, userId)];
+      const userConditions: any[] = addContextFilters([eq(contentPromotionPages.createdBy, userId)]);
       if (requestedStatus) {
         userConditions.push(eq(contentPromotionPages.status, requestedStatus as any));
       }
@@ -72,7 +207,11 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
     for (const page of [...tenantScopedPages, ...userScopedPages]) {
       if (page?.id) pagesById.set(page.id, page);
     }
-    const pages = Array.from(pagesById.values());
+    const pages = Array.from(pagesById.values()).map((page) => ({
+      ...page,
+      sourceType: "content_promotion",
+      previewPath: `/promo/${page.slug}`,
+    }));
 
     // Also surface published Content Studio landing pages so both modules
     // follow the same listing route in Content Promotion manager.
@@ -183,7 +322,9 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
         .filter((v) => typeof v === "string" && v.length > 0)
     );
 
-    const mappedStudioPages = studioPages.map((page) => ({
+    const mappedStudioPages = studioPages
+      .filter((page) => studioContextMatches(page.projectId))
+      .map((page) => ({
       id: `studio:${page.id}`,
       tenantId: page.tenantId || tenantId,
       title: page.title,
@@ -231,6 +372,7 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
     const mappedStudioProjects = studioProjects
       .filter((project) => !publishedProjectIds.has(project.id))
       .filter((project) => project.status !== "failed")
+      .filter((project) => studioContextMatches(project.id))
       .map((project) => ({
         id: `studio-project:${project.id}`,
         tenantId: project.tenantId || tenantId,
@@ -287,12 +429,21 @@ router.get("/api/content-promotion/pages", requireAuth, async (req, res) => {
     console.error("[Content Promotion] Error listing pages:", error);
     // Last-resort fallback: do not break page load entirely.
     try {
+      const fallbackConditions: any[] = [eq(contentPromotionPages.tenantId, tenantId)];
+      if (requestedCampaignId) fallbackConditions.push(eq(contentPromotionPages.campaignId, requestedCampaignId));
+      if (requestedProjectId) fallbackConditions.push(eq(contentPromotionPages.projectId, requestedProjectId));
+      if (requestedClientId) fallbackConditions.push(eq(contentPromotionPages.clientAccountId, requestedClientId));
+      if (requestedOrganizationId) fallbackConditions.push(eq(contentPromotionPages.organizationId, requestedOrganizationId));
       const fallback = await db
         .select()
         .from(contentPromotionPages)
-        .where(eq(contentPromotionPages.tenantId, tenantId))
+        .where(and(...fallbackConditions))
         .orderBy(desc(contentPromotionPages.createdAt));
-      return res.json(fallback);
+      return res.json(fallback.map((page) => ({
+        ...page,
+        sourceType: "content_promotion",
+        previewPath: `/promo/${page.slug}`,
+      })));
     } catch (fallbackError: any) {
       console.error("[Content Promotion] Fallback list failed:", fallbackError);
       return res.json([]);
@@ -325,16 +476,26 @@ router.get("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
 router.post("/api/content-promotion/pages/generate", requireAuth, async (req, res) => {
   try {
     const { campaignId, projectId, organizationId, clientId } = req.body;
+    const resolvedContext = await resolveContentPromotionContextLinkage({
+      campaignId,
+      projectId,
+      clientAccountId: clientId,
+      organizationId,
+    });
+    const effectiveCampaignId = resolvedContext.campaignId;
+    const effectiveProjectId = resolvedContext.projectId;
+    const effectiveOrganizationId = resolvedContext.organizationId;
+    const effectiveClientAccountId = resolvedContext.clientAccountId;
 
     // Enforce organizationId — OI is mandatory for AI generation
-    if (!organizationId || typeof organizationId !== 'string' || !organizationId.trim()) {
+    if (!effectiveOrganizationId) {
       return res.status(400).json({
         error: 'Organization is required for AI generation. All landing page generation must be derived from Organizational Intelligence.',
         code: 'ORG_REQUIRED',
       });
     }
 
-    if (!campaignId && !projectId) {
+    if (!effectiveCampaignId && !effectiveProjectId) {
       return res.status(400).json({ error: "Campaign or Project ID is required for AI generation" });
     }
 
@@ -344,30 +505,25 @@ router.post("/api/content-promotion/pages/generate", requireAuth, async (req, re
     let clientData: any = null;
     let assetData: any[] = [];
 
-    if (campaignId) {
-      const [c] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+    if (effectiveCampaignId) {
+      const [c] = await db.select().from(campaigns).where(eq(campaigns.id, effectiveCampaignId)).limit(1);
       campaignData = c || null;
-      // If campaign has a project, fetch it
-      if (c?.projectId && !projectId) {
-        const [p] = await db.select().from(clientProjects).where(eq(clientProjects.id, c.projectId)).limit(1);
-        projectData = p || null;
-      }
       // Fetch linked content assets (PDFs, docs)
       const assets = await db.execute(sql`
         SELECT id, asset_type, title, description, content, target_audience, cta_goal, tags, file_url
         FROM content_assets
-        WHERE ${campaignId} = ANY(linked_campaigns)
+        WHERE ${effectiveCampaignId} = ANY(linked_campaigns)
         LIMIT 5
       `);
       assetData = (assets.rows as any[]) || [];
     }
 
-    if (projectId && !projectData) {
-      const [p] = await db.select().from(clientProjects).where(eq(clientProjects.id, projectId)).limit(1);
+    if (effectiveProjectId && !projectData) {
+      const [p] = await db.select().from(clientProjects).where(eq(clientProjects.id, effectiveProjectId)).limit(1);
       projectData = p || null;
     }
 
-    const clientAccountId = clientId || campaignData?.clientAccountId || projectData?.clientAccountId;
+    const clientAccountId = effectiveClientAccountId || campaignData?.clientAccountId || projectData?.clientAccountId;
     if (clientAccountId && !clientData) {
       const [ca] = await db.select().from(clientAccounts).where(eq(clientAccounts.id, clientAccountId)).limit(1);
       clientData = ca || null;
@@ -397,11 +553,17 @@ router.post("/api/content-promotion/pages/generate", requireAuth, async (req, re
       })),
     };
 
-    const result = await generateContentPromotionPage(context, organizationId);
+    const result = await generateContentPromotionPage(context, effectiveOrganizationId);
 
     res.json(result);
   } catch (error: any) {
     // Handle OI assertion errors gracefully
+    if (error?.statusCode === 400) {
+      return res.status(400).json({
+        error: error.message,
+        code: 'INVALID_CONTEXT_LINKAGE',
+      });
+    }
     if (error?.code === 'ORG_INTELLIGENCE_REQUIRED') {
       return res.status(422).json({
         error: error.message,
@@ -425,6 +587,12 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
     const tenantId = (req as any).user?.tenantId || "default-tenant";
     const createdBy = (req as any).user?.userId || (req as any).user?.id;
     const body = req.body;
+    const resolvedContext = await resolveContentPromotionContextLinkage({
+      campaignId: body.campaignId,
+      projectId: body.projectId,
+      clientAccountId: body.clientAccountId ?? body.clientId,
+      organizationId: body.organizationId,
+    });
 
     // Auto-generate slug from title if not provided
     let slug = body.slug;
@@ -464,12 +632,20 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
         slug,
         tenantId,
         createdBy,
+        clientAccountId: resolvedContext.clientAccountId,
+        projectId: resolvedContext.projectId,
+        campaignId: resolvedContext.campaignId,
+        organizationId: resolvedContext.organizationId,
+        contextSnapshot: resolvedContext.contextSnapshot,
       } as any)
       .returning();
 
     res.json(page);
   } catch (error: any) {
     console.error("[Content Promotion] Error creating page:", error);
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     const detail = error?.message || error?.detail || "Unknown database error";
     // Surface actionable info: missing table, enum, constraint violations
     if (detail.includes("does not exist") || detail.includes("relation")) {
@@ -486,6 +662,12 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
 router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => {
   try {
     const { id, createdAt, updatedAt, tenantId, createdBy, ...updateData } = req.body;
+    const resolvedContext = await resolveContentPromotionContextLinkage({
+      campaignId: updateData.campaignId,
+      projectId: updateData.projectId,
+      clientAccountId: updateData.clientAccountId ?? updateData.clientId,
+      organizationId: updateData.organizationId,
+    });
 
     // If slug is being changed, validate uniqueness
     if (updateData.slug) {
@@ -514,7 +696,15 @@ router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
 
     const [page] = await db
       .update(contentPromotionPages)
-      .set({ ...updateData, updatedAt: new Date() })
+      .set({
+        ...updateData,
+        clientAccountId: resolvedContext.clientAccountId,
+        projectId: resolvedContext.projectId,
+        campaignId: resolvedContext.campaignId,
+        organizationId: resolvedContext.organizationId,
+        contextSnapshot: resolvedContext.contextSnapshot,
+        updatedAt: new Date(),
+      })
       .where(eq(contentPromotionPages.id, req.params.id))
       .returning();
 
@@ -525,6 +715,9 @@ router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
     res.json(page);
   } catch (error: any) {
     console.error("[Content Promotion] Error updating page:", error);
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     res.status(500).json({ error: "Failed to update content promotion page" });
   }
 });
@@ -713,6 +906,10 @@ router.post("/api/content-promotion/pages/:id/duplicate", requireAuth, async (re
       .insert(contentPromotionPages)
       .values({
         tenantId,
+        clientAccountId: original.clientAccountId,
+        projectId: original.projectId,
+        campaignId: original.campaignId,
+        organizationId: original.organizationId,
         title: `Copy of ${original.title}`,
         slug: newSlug,
         pageType: original.pageType,
@@ -728,6 +925,7 @@ router.post("/api/content-promotion/pages/:id/duplicate", requireAuth, async (re
         thankYouConfig: original.thankYouConfig,
         seoConfig: original.seoConfig,
         linkedLeadFormId: original.linkedLeadFormId,
+        contextSnapshot: original.contextSnapshot,
         viewCount: 0,
         uniqueViewCount: 0,
         submissionCount: 0,

@@ -1,17 +1,5 @@
-/**
- * Simple Email Campaign Create Page
- * 
- * New streamlined 3-page campaign creation flow
- * Following the "Collect intent first → design message second → execute immediately" principle
- */
-
-import { SimpleCampaignBuilder } from "@/components/simple-campaign";
+import { SimpleEmailCampaignEditPage } from "@/pages/simple-email-campaign-edit";
 
 export default function SimpleEmailCampaignCreatePage() {
-  return (
-    <SimpleCampaignBuilder
-      organizationName="Pivotal B2B"
-      organizationAddress="123 Innovation Way, San Francisco, CA 94105"
-    />
-  );
+  return <SimpleEmailCampaignEditPage mode="create" />;
 }

@@ -4,6 +4,7 @@ import { requireAuth } from "../auth";
 import { storage } from "../storage";
 import { db } from "../db";
 import { dialerCallAttempts } from "@shared/schema";
+import { normalizeTranscriptTurns } from "../services/transcript-structuring";
 import aiCallsRouter from "./ai-calls";
 import agentCallControlRouter from "./agent-call-control";
 import callIntelligenceRouter from "./call-intelligence-routes";
@@ -233,7 +234,11 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
           structuredTranscript: data?.structuredTranscript || undefined,
         });
         try {
-          const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+          const rawTurns = normalizeTranscriptTurns(
+            Array.isArray(data?.structuredTranscript?.turns)
+              ? data.structuredTranscript.turns
+              : data?.transcript || ''
+          );
           await processSIPPostCallAnalysis({
             callAttemptId,
             leadId: dispositionResult?.leadId,
@@ -242,8 +247,9 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
             disposition: data.disposition,
             turnTranscript: rawTurns
               .map((turn: any) => ({
-                speaker: turn?.role === "agent" ? "agent" : "contact",
-                text: String(turn?.text || "").trim(),
+                speaker: turn.role === "agent" ? "agent" : "contact",
+                text: String(turn.text || "").trim(),
+                timestamp: turn.timestamp ? Date.parse(turn.timestamp) : undefined,
               }))
               .filter((turn: { text: string }) => turn.text),
             callDurationSeconds: durationToSet || 0,
@@ -273,7 +279,11 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
         structuredTranscript: data?.structuredTranscript || undefined,
       });
       try {
-        const rawTurns = Array.isArray(data?.structuredTranscript?.turns) ? data.structuredTranscript.turns : [];
+        const rawTurns = normalizeTranscriptTurns(
+          Array.isArray(data?.structuredTranscript?.turns)
+            ? data.structuredTranscript.turns
+            : data?.transcript || ''
+        );
         await processSIPPostCallAnalysis({
           callAttemptId,
           leadId: dispositionResult?.leadId,
@@ -281,9 +291,10 @@ async function handleMediaBridgeCallback(req: Request, res: Response) {
           contactName: data?.context?.contactName || data?.context?.contactFirstName,
           disposition: data?.disposition || "no_answer",
           turnTranscript: rawTurns
-            .map((turn: any) => ({
-              speaker: turn?.role === "agent" ? "agent" : "contact",
-              text: String(turn?.text || "").trim(),
+            .map((turn) => ({
+              speaker: turn.role === "agent" ? "agent" : "contact",
+              text: String(turn.text || "").trim(),
+              timestamp: turn.timestamp ? Date.parse(turn.timestamp) : undefined,
             }))
             .filter((turn: { text: string }) => turn.text),
           callDurationSeconds: durationToSet || 0,

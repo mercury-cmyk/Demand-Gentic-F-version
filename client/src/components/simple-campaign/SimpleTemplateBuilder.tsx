@@ -129,6 +129,7 @@ interface CampaignIntent {
   projectId?: string;
   projectName?: string;
   projectDescription?: string;
+  projectLandingPageUrl?: string;
   campaignOrganizationId?: string;
 }
 
@@ -137,6 +138,7 @@ interface TemplateData {
   preheader: string;
   bodyContent: string;
   htmlContent: string;
+  ctaUrl?: string;
 }
 
 interface SimpleTemplateBuilderProps {
@@ -154,6 +156,22 @@ interface SmartNudge {
   type: "warning" | "info" | "success" | "error";
   message: string;
   field?: "subject" | "body" | "cta" | "links";
+}
+
+type AdminTemplateTone = "professional" | "friendly" | "direct";
+type AdminTemplateDesign = "plain" | "branded";
+
+interface GeneratedAdminTemplateResponse {
+  success: boolean;
+  template?: {
+    subject?: string;
+    preheader?: string;
+    bodyText?: string;
+    bodyHtml?: string;
+    promptSource?: string;
+    promptKeyUsed?: string | null;
+    usedFallback?: boolean;
+  };
 }
 
 // Spam trigger words
@@ -248,6 +266,42 @@ const normalizePlainTextToHtml = (value: string) => {
 
 const ensureHtmlBody = (value: string) =>
   looksLikeHtmlFragment(value) ? value : normalizePlainTextToHtml(value);
+
+const normalizeGeneratorTone = (value: string): AdminTemplateTone => {
+  if (value === "friendly") return "friendly";
+  if (value === "direct") return "direct";
+  return "professional";
+};
+
+const normalizeGeneratorDesign = (useBrandedTemplate: boolean): AdminTemplateDesign =>
+  useBrandedTemplate ? "branded" : "plain";
+
+const normalizeCtaUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("{{")) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+};
+
+const buildSimpleTemplateFragment = (bodyText: string, ctaLabel?: string, rawCtaUrl?: string) => {
+  const safeBody = ensureHtmlBody(bodyText);
+  const safeCtaUrl = normalizeCtaUrl(rawCtaUrl || "");
+  if (!safeCtaUrl) return safeBody;
+  const safeHref = safeCtaUrl.replace(/"/g, "&quot;");
+
+  return `${safeBody}
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+  <tr>
+    <td style="background-color: #2563eb; border-radius: 6px;">
+      <a href="${safeHref}" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px;">
+        ${ctaLabel || "View Brief"}
+      </a>
+    </td>
+  </tr>
+</table>`;
+};
 
 // Generate email-safe HTML with inline CSS
 const generateCleanHtml = (bodyContent: string, organizationName: string, organizationAddress: string): string => {
@@ -565,6 +619,7 @@ export function SimpleTemplateBuilder({
   // Organization state overrides
   const [orgName, setOrgName] = useState(organizationName);
   const [orgAddress, setOrgAddress] = useState(organizationAddress);
+  const [organizationIntelligence, setOrganizationIntelligence] = useState<Record<string, unknown> | null>(null);
 
   // Organization branding colors (loaded from campaign org)
   const [orgBrandColors, setOrgBrandColors] = useState<{
@@ -611,13 +666,17 @@ export function SimpleTemplateBuilder({
   // Pre-populate context with project details when available
   const [aiContext, setAiContext] = useState(() => {
     const parts: string[] = [];
+    parts.push(`Campaign: ${campaignIntent.campaignName}`);
     if (campaignIntent.projectName) parts.push(`Project: ${campaignIntent.projectName}`);
     if (campaignIntent.projectDescription) parts.push(campaignIntent.projectDescription);
     if (campaignIntent.clientName) parts.push(`Client: ${campaignIntent.clientName}`);
+    if (campaignIntent.projectLandingPageUrl) parts.push(`Landing Page: ${campaignIntent.projectLandingPageUrl}`);
     return parts.join("\n\n");
   });
   const [aiGenerating, setAiGenerating] = useState(false);
-  const [ctaUrl, setCtaUrl] = useState("https://example.com");
+  const [ctaUrl, setCtaUrl] = useState(
+    initialTemplate?.ctaUrl || campaignIntent.projectLandingPageUrl || "https://example.com"
+  );
   const [brandPalette, setBrandPalette] = useState<BrandPaletteKey>("indigo");
   const [useCustomBrandColors, setUseCustomBrandColors] = useState(false);
   const [brandColors, setBrandColors] = useState(BRAND_COLOR_PRESETS.indigo);
@@ -668,7 +727,9 @@ export function SimpleTemplateBuilder({
         if (!res.ok) throw new Error("Failed to load org");
         const org = await res.json();
         if (!active) return;
-        const branding = org.branding || {};
+        const organization = org.organization || org;
+        const branding = organization.branding || {};
+        setOrganizationIntelligence(organization);
         if (branding.primaryColor) {
           const colors = {
             primary: branding.primaryColor,
@@ -688,8 +749,8 @@ export function SimpleTemplateBuilder({
           setUseOrgBrand(true);
         }
         // Also update org name from intelligence if available
-        if (org.name && org.name !== organizationName) {
-          setOrgName(org.name);
+        if (organization.name && organization.name !== organizationName) {
+          setOrgName(organization.name);
         }
         // Update tone from branding if available
         if (branding.tone) {
@@ -1119,37 +1180,98 @@ export function SimpleTemplateBuilder({
       }
     };
 
+    const applySimpleTemplate = (nextSubject: string, nextPreheader: string, nextBodyText: string, nextCtaLabel?: string) => {
+      const fragment = buildSimpleTemplateFragment(
+        nextBodyText,
+        nextCtaLabel,
+        ctaUrl?.trim() ? ctaUrl.trim() : campaignIntent.projectLandingPageUrl || ""
+      );
+      const nextBlocks = parseHtmlToBlocks(fragment);
+      setUseBrandedTemplate(false);
+      setEditorMode("visual");
+      setBlocks(nextBlocks);
+      setBodyContent(blocksToHtml(nextBlocks));
+      setSubject(nextSubject);
+      setPreheader(nextPreheader);
+    };
+
     try {
-      const res = await apiRequest("POST", "/api/ai/generate-email", {
+      const design = normalizeGeneratorDesign(useBrandedTemplate);
+      const res = await apiRequest("POST", "/api/admin/email-campaign-templates/generate", {
+        projectId: campaignIntent.projectId,
+        clientAccountId: campaignIntent.clientAccountId,
+        campaignType: outreachType,
+        channel: "email",
+        tone: normalizeGeneratorTone(tone),
+        design,
         campaignName: campaignIntent.campaignName,
-        outreachType,
-        tone,
-        context: aiContext,
-        senderName: campaignIntent.senderName,
-        companyName: orgName,
-        ctaUrl: ctaUrl?.trim() ? ctaUrl.trim() : undefined,
-        brandPalette,
-        // Project & org context for intelligent email generation
-        organizationId: campaignIntent.campaignOrganizationId,
-        projectName: campaignIntent.projectName,
-        projectDescription: campaignIntent.projectDescription,
-        clientName: campaignIntent.clientName,
+        objective: campaignIntent.projectDescription || campaignIntent.projectName || campaignIntent.campaignName,
+        description: aiContext,
+        targetAudience: campaignIntent.clientName
+          ? `Contacts relevant to ${campaignIntent.clientName}${campaignIntent.projectName ? ` and ${campaignIntent.projectName}` : ""}`
+          : campaignIntent.projectName || campaignIntent.campaignName,
+        successCriteria: `Generate qualified engagement for ${campaignIntent.projectName || campaignIntent.campaignName}.`,
+        landingPageUrl: ctaUrl?.trim() || campaignIntent.projectLandingPageUrl || "",
+        organizationName: orgName,
+        organizationIntelligence,
+        recipient: {
+          firstName: "Alex",
+          company: campaignIntent.clientName || orgName,
+          jobTitle: "",
+          industry: "",
+        },
       });
-      const data = await res.json();
-      const copy = buildCopy(data?.rawContent || data?.content || {});
-      applyBrandedTemplate(copy);
+      if (!res.ok) {
+        throw new Error("Template generation failed");
+      }
+
+      const data = (await res.json()) as GeneratedAdminTemplateResponse;
+      const generated = data.template;
+      if (!generated) {
+        throw new Error("Template generator returned no template");
+      }
+
+      const nextSubject = generated.subject || subject || `Quick question about ${campaignIntent.campaignName}`;
+      const nextPreheader = generated.preheader || preheader || `A quick note about ${campaignIntent.campaignName}`;
+      const nextBodyText = generated.bodyText || aiContext || campaignIntent.campaignName;
+
+      if (design === "plain") {
+        applySimpleTemplate(nextSubject, nextPreheader, nextBodyText, "View Brief");
+      } else if (generated.bodyHtml) {
+        setBodyContent(generated.bodyHtml);
+        setUseBrandedTemplate(true);
+        setEditorMode("code");
+        setSubject(nextSubject);
+        setPreheader(nextPreheader);
+      } else {
+        const copy = buildCopy({
+          subject: nextSubject,
+          preheader: nextPreheader,
+          intro: nextBodyText,
+          ctaUrl: ctaUrl?.trim() || campaignIntent.projectLandingPageUrl || undefined,
+        });
+        applyBrandedTemplate(copy);
+      }
+
       toast({
-        title: data?.usedAi ? "Email generated" : "Template generated",
-        description: data?.usedAi
-          ? "Review and customize the AI-generated template"
-          : "AI unavailable - using branded template"
+        title: "Email generated",
+        description: "Template and campaign context were generated from the selected client project."
       });
     } catch (error) {
       const copy = buildCopy();
-      applyBrandedTemplate(copy);
+      if (normalizeGeneratorDesign(useBrandedTemplate) === "plain") {
+        applySimpleTemplate(
+          copy.subject,
+          copy.preheader || "",
+          `${copy.intro}\n\n${copy.valueBullets.map((bullet) => `- ${bullet}`).join("\n")}\n\n${copy.closingLine}`,
+          copy.ctaLabel
+        );
+      } else {
+        applyBrandedTemplate(copy);
+      }
       toast({
         title: "Template generated",
-        description: "AI unavailable - using branded template"
+        description: "AI unavailable - using the simple campaign template fallback"
       });
     } finally {
       setAiGenerating(false);
@@ -1171,7 +1293,8 @@ export function SimpleTemplateBuilder({
       subject,
       preheader,
       bodyContent,
-      htmlContent: fullHtml
+      htmlContent: fullHtml,
+      ctaUrl: ctaUrl?.trim() || campaignIntent.projectLandingPageUrl || "",
     });
   };
   
@@ -1211,7 +1334,8 @@ export function SimpleTemplateBuilder({
         subject,
         preheader,
         bodyContent,
-        htmlContent: fullHtml
+        htmlContent: fullHtml,
+        ctaUrl: ctaUrl?.trim() || campaignIntent.projectLandingPageUrl || "",
       });
       toast({
         title: "Test email sent",

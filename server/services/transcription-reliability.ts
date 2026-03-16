@@ -16,8 +16,10 @@
 import { db } from '../db';
 import { dialerCallAttempts, callSessions, activityLog, leads } from '@shared/schema';
 import { eq, and, or, isNull, isNotNull, gt, lt, sql, inArray } from 'drizzle-orm';
-import { transcribeFromRecording } from './deepgram-postcall-transcription';
+import { submitStructuredTranscription } from './deepgram-postcall-transcription';
 import { transcribeBatchParallel, resetAllCircuitBreakers, BatchTranscriptionItem } from './transcription-pool';
+import { buildPostCallTranscriptWithSummaryAsync } from './post-call-transcript-summary';
+import { formatTranscriptTurns, normalizeTranscriptTurns } from './transcript-structuring';
 
 const LOG_PREFIX = '[Transcription-Reliability]';
 
@@ -33,7 +35,7 @@ const LONG_CALL_UPLOAD_POLL_MS = 5_000; // Poll every 5s during upload wait
 
 interface TranscriptionStatus {
   hasTranscript: boolean;
-  transcriptSource: 'gemini_live' | 'fallback_stt' | 'none';
+  transcriptSource: 'gemini_live' | 'fallback_stt' | 'provisional_live' | 'none';
   transcriptLength: number;
   verificationStatus: 'pending' | 'verified' | 'discrepancy' | 'failed';
   fallbackAttempted: boolean;
@@ -47,6 +49,22 @@ interface TranscriptionResult {
   wordCount?: number;
   durationMs?: number;
   error?: string;
+}
+
+function extractTranscriptLifecycle(aiAnalysis: unknown): { needsRecordingTranscription: boolean; status?: string } {
+  if (!aiAnalysis || typeof aiAnalysis !== 'object') {
+    return { needsRecordingTranscription: false };
+  }
+
+  const lifecycle = (aiAnalysis as Record<string, any>).transcriptLifecycle;
+  if (!lifecycle || typeof lifecycle !== 'object') {
+    return { needsRecordingTranscription: false };
+  }
+
+  return {
+    needsRecordingTranscription: lifecycle.needsRecordingTranscription === true,
+    status: typeof lifecycle.status === 'string' ? lifecycle.status : undefined,
+  };
 }
 
 async function triggerAnalysisAfterTranscript(
@@ -103,7 +121,7 @@ async function triggerAnalysisAfterTranscript(
       return;
     }
 
-    if (!lead.transcript && transcript) {
+    if (transcript && transcript !== lead.transcript) {
       await db.update(leads)
         .set({
           transcript,
@@ -138,6 +156,7 @@ export async function checkTranscriptStatus(callAttemptId: string): Promise<Tran
         recordingUrl: dialerCallAttempts.recordingUrl,
         startedAt: dialerCallAttempts.callStartedAt,
         endedAt: dialerCallAttempts.callEndedAt,
+        callSessionId: dialerCallAttempts.callSessionId,
       })
       .from(dialerCallAttempts)
       .where(eq(dialerCallAttempts.id, callAttemptId))
@@ -155,13 +174,29 @@ export async function checkTranscriptStatus(callAttemptId: string): Promise<Tran
     }
 
     const transcript = attempt.fullTranscript || attempt.aiTranscript;
+    let provisionalTranscript = false;
+
+    if (attempt.callSessionId) {
+      const [session] = await db
+        .select({ aiAnalysis: callSessions.aiAnalysis })
+        .from(callSessions)
+        .where(eq(callSessions.id, attempt.callSessionId))
+        .limit(1);
+
+      provisionalTranscript = extractTranscriptLifecycle(session?.aiAnalysis).needsRecordingTranscription;
+    }
+
     const hasValidTranscript = transcript && transcript.length >= TRANSCRIPT_MIN_LENGTH;
 
     return {
-      hasTranscript: hasValidTranscript,
-      transcriptSource: hasValidTranscript ? 'gemini_live' : 'none',
+      hasTranscript: !!hasValidTranscript && !provisionalTranscript,
+      transcriptSource: provisionalTranscript
+        ? 'provisional_live'
+        : hasValidTranscript
+          ? 'gemini_live'
+          : 'none',
       transcriptLength: transcript?.length || 0,
-      verificationStatus: hasValidTranscript ? 'verified' : 'pending',
+      verificationStatus: provisionalTranscript ? 'pending' : hasValidTranscript ? 'verified' : 'pending',
       fallbackAttempted: false,
       fallbackSuccessful: false,
     };
@@ -291,35 +326,104 @@ export async function attemptFallbackTranscription(
     }
 
     // Use Deepgram post-call transcription for fallback
-    const result = await transcribeFromRecording(urlToUse, { telnyxCallId, recordingS3Key });
+    const structuredResult = await submitStructuredTranscription(urlToUse, { telnyxCallId, recordingS3Key });
 
-    if (result && result.transcript && result.transcript.length > TRANSCRIPT_MIN_LENGTH) {
-      // Save the fallback transcript
-      await db.update(dialerCallAttempts)
-        .set({
-          fullTranscript: result.transcript,
-          updatedAt: new Date(),
-        })
-        .where(eq(dialerCallAttempts.id, callAttemptId));
+    if (structuredResult?.utterances?.length) {
+      const normalizedTurns = normalizeTranscriptTurns(
+        structuredResult.utterances.map((utterance) => ({
+          role: utterance.speaker,
+          speaker: utterance.speaker,
+          channelTag: utterance.channelTag,
+          text: utterance.text,
+          startSec: utterance.start,
+          endSec: utterance.end,
+          timeOffsetSec: utterance.start,
+        }))
+      );
+      const plainTranscript = formatTranscriptTurns(normalizedTurns);
+      const transcriptWithSummary = await buildPostCallTranscriptWithSummaryAsync(
+        plainTranscript,
+        normalizedTurns.map((turn) => ({
+          role: turn.role,
+          text: turn.text,
+          timeOffset: turn.startSec ?? turn.timeOffsetSec,
+        }))
+      );
 
-      console.log(`${LOG_PREFIX} ✅ Fallback transcription successful: ${result.transcript.length} chars`);
+      if (transcriptWithSummary.length > TRANSCRIPT_MIN_LENGTH) {
+        const [attemptForSession] = await db
+          .select({ callSessionId: dialerCallAttempts.callSessionId })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, callAttemptId))
+          .limit(1);
 
-      // Log activity
-      await logTranscriptionActivity(callAttemptId, 'fallback_completed', {
-        source: 'deepgram',
-        transcriptLength: result.transcript.length,
-        wordCount: result.transcript.split(/\s+/).length,
-        refreshedVia: telnyxCallId ? 'telnyx_possible' : 'none',
-      });
+        await db.update(dialerCallAttempts)
+          .set({
+            fullTranscript: transcriptWithSummary,
+            updatedAt: new Date(),
+          })
+          .where(eq(dialerCallAttempts.id, callAttemptId));
 
-      await triggerAnalysisAfterTranscript(callAttemptId, result.transcript);
+        if (attemptForSession?.callSessionId) {
+          const [session] = await db
+            .select({ aiAnalysis: callSessions.aiAnalysis })
+            .from(callSessions)
+            .where(eq(callSessions.id, attemptForSession.callSessionId))
+            .limit(1);
 
-      return {
-        success: true,
-        transcript: result.transcript,
-        source: 'fallback_stt',
-        wordCount: result.transcript.split(/\s+/).length,
-      };
+          const existingAiAnalysis = (session?.aiAnalysis as Record<string, any> | null) || {};
+          const existingPostCall = (existingAiAnalysis.postCallAnalysis as Record<string, any> | null) || {};
+
+          await db.update(callSessions)
+            .set({
+              aiTranscript: transcriptWithSummary,
+              aiAnalysis: {
+                ...existingAiAnalysis,
+                transcriptLifecycle: {
+                  ...(existingAiAnalysis.transcriptLifecycle || {}),
+                  status: 'completed',
+                  source: 'deepgram_postcall',
+                  needsRecordingTranscription: false,
+                  structuredTurnCount: normalizedTurns.length,
+                  finalizedAt: new Date().toISOString(),
+                },
+                provisionalTranscript: {
+                  ...(existingAiAnalysis.provisionalTranscript || {}),
+                  supersededBy: 'deepgram_postcall',
+                  supersededAt: new Date().toISOString(),
+                },
+                postCallAnalysis: {
+                  ...existingPostCall,
+                  turns: normalizedTurns.map((turn, index) => ({
+                    turn: index + 1,
+                    speaker: turn.role,
+                    text: turn.text,
+                    startSec: turn.startSec ?? turn.timeOffsetSec ?? 0,
+                    endSec: turn.endSec ?? turn.startSec ?? turn.timeOffsetSec ?? 0,
+                  })),
+                },
+              } as any,
+            })
+            .where(eq(callSessions.id, attemptForSession.callSessionId));
+        }
+
+        await logTranscriptionActivity(callAttemptId, 'fallback_completed', {
+          source: 'deepgram',
+          transcriptLength: transcriptWithSummary.length,
+          structuredTurnCount: normalizedTurns.length,
+          wordCount: transcriptWithSummary.split(/\s+/).length,
+          refreshedVia: telnyxCallId ? 'telnyx_possible' : 'none',
+        });
+
+        await triggerAnalysisAfterTranscript(callAttemptId, transcriptWithSummary);
+
+        return {
+          success: true,
+          transcript: transcriptWithSummary,
+          source: 'fallback_stt',
+          wordCount: transcriptWithSummary.split(/\s+/).length,
+        };
+      }
     }
 
     console.warn(`${LOG_PREFIX} Fallback transcription returned empty or too short`);

@@ -14845,6 +14845,10 @@ export const contentPromoTemplateThemeEnum = pgEnum('content_promo_template_them
 export const contentPromotionPages = pgTable("content_promotion_pages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   tenantId: varchar("tenant_id"),
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'set null' }),
+  projectId: varchar("project_id").references(() => clientProjects.id, { onDelete: 'set null' }),
+  campaignId: varchar("campaign_id").references(() => campaigns.id, { onDelete: 'set null' }),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'set null' }),
   title: text("title").notNull(),
   slug: text("slug").notNull().unique(),
   pageType: contentPromoPageTypeEnum("page_type").notNull(),
@@ -14945,6 +14949,17 @@ export const contentPromotionPages = pgTable("content_promotion_pages", {
   }>(),
 
   linkedLeadFormId: varchar("linked_lead_form_id"),
+  contextSnapshot: jsonb("context_snapshot").$type<{
+    clientName?: string | null;
+    projectName?: string | null;
+    campaignName?: string | null;
+    organizationName?: string | null;
+    campaignObjective?: string | null;
+    productServiceInfo?: string | null;
+    targetAudienceDescription?: string | null;
+    successCriteria?: string | null;
+    campaignContextBrief?: string | null;
+  }>(),
   viewCount: integer("view_count").notNull().default(0),
   uniqueViewCount: integer("unique_view_count").notNull().default(0),
   submissionCount: integer("submission_count").notNull().default(0),
@@ -14959,6 +14974,10 @@ export const contentPromotionPages = pgTable("content_promotion_pages", {
   statusIdx: index("content_promo_pages_status_idx").on(table.status),
   pageTypeIdx: index("content_promo_pages_type_idx").on(table.pageType),
   tenantIdx: index("content_promo_pages_tenant_idx").on(table.tenantId),
+  clientIdx: index("content_promo_pages_client_idx").on(table.clientAccountId),
+  projectIdx: index("content_promo_pages_project_idx").on(table.projectId),
+  campaignIdx: index("content_promo_pages_campaign_idx").on(table.campaignId),
+  organizationIdx: index("content_promo_pages_organization_idx").on(table.organizationId),
   createdAtIdx: index("content_promo_pages_created_idx").on(table.createdAt),
 }));
 

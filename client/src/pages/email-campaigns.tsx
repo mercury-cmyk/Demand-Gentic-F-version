@@ -40,12 +40,20 @@ type EmailStatsResponse = {
   spamComplaints: number;
 };
 
+type EmailCampaignListItem = Campaign & {
+  senderName?: string | null;
+  fromEmail?: string | null;
+  replyToEmail?: string | null;
+  campaignProviderName?: string | null;
+  campaignProviderKey?: string | null;
+};
+
 export default function EmailCampaignsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
-  const { data: campaigns, isLoading: campaignsLoading } = useQuery<Campaign[]>({
+  const { data: campaigns, isLoading: campaignsLoading } = useQuery<EmailCampaignListItem[]>({
     queryKey: ['/api/campaigns'],
   });
 
@@ -209,6 +217,14 @@ export default function EmailCampaignsPage() {
     return <Badge variant={variant} className={className} data-testid={`badge-status-${status}`}>{status}</Badge>;
   };
 
+  const getProviderLabel = (campaign: EmailCampaignListItem) => {
+    if (campaign.campaignProviderName) return campaign.campaignProviderName;
+    if (campaign.campaignProviderKey === "brevo") return "Brevo";
+    if (campaign.campaignProviderKey === "mailgun") return "Mailgun";
+    if (!campaign.campaignProviderKey) return null;
+    return campaign.campaignProviderKey;
+  };
+
   const filteredCampaigns = emailCampaigns.filter(campaign =>
     campaign.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -267,6 +283,24 @@ export default function EmailCampaignsPage() {
                       <p className="text-sm text-muted-foreground" data-testid={`text-campaign-subject-${campaign.id}`}>
                         Subject: {campaign.emailSubject}
                       </p>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {getProviderLabel(campaign) && (
+                        <Badge variant="outline" className={campaign.campaignProviderKey === "brevo" ? "border-blue-200 bg-blue-50 text-blue-700" : undefined}>
+                          {campaign.campaignProviderKey === "brevo" ? "Brevo connected" : getProviderLabel(campaign)}
+                        </Badge>
+                      )}
+                    </div>
+                    {(campaign.fromEmail || campaign.replyToEmail) && (
+                      <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                        {campaign.fromEmail && (
+                          <p>
+                            Sender: {campaign.senderName ? `${campaign.senderName} ` : ""}
+                            &lt;{campaign.fromEmail}&gt;
+                          </p>
+                        )}
+                        {campaign.replyToEmail && <p>Reply-To: {campaign.replyToEmail}</p>}
+                      </div>
                     )}
                   </div>
                   <div className="flex gap-2 flex-wrap">

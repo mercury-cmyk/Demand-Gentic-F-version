@@ -583,6 +583,7 @@ export default function CallIntelligenceDashboard() {
                       </h3>
                       <TranscriptDisplay
                         transcript={selectedCall.transcript.text}
+                        turns={selectedCall.transcript.turns}
                         maxHeight="300px"
                       />
                     </div>
@@ -606,6 +607,7 @@ export default function CallIntelligenceDashboard() {
                   <TabsContent value="transcript" className="flex-1 overflow-auto p-4">
                     <TranscriptDisplay
                       transcript={selectedCall.transcript.text}
+                      turns={selectedCall.transcript.turns}
                       maxHeight="100%"
                     />
                   </TabsContent>

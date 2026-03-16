@@ -113,6 +113,44 @@ function isDialerDisposition(value: unknown): value is DialerDisposition {
   return typeof value === "string" && (DIALER_DISPOSITIONS as readonly string[]).includes(value);
 }
 
+function extractTranscriptTurns(aiAnalysis: unknown): Array<{ role: 'agent' | 'contact'; text: string; timestamp?: string }> {
+  if (!aiAnalysis || typeof aiAnalysis !== "object") {
+    return [];
+  }
+
+  const payload = aiAnalysis as Record<string, any>;
+  const rawTurns = Array.isArray(payload?.postCallAnalysis?.turns)
+    ? payload.postCallAnalysis.turns
+    : Array.isArray(payload?.provisionalTranscript?.turns)
+      ? payload.provisionalTranscript.turns
+      : [];
+
+  return rawTurns
+    .map((turn: any) => {
+      const role = turn?.speaker === 'agent' || turn?.role === 'agent' ? 'agent' : 'contact';
+      const text = typeof turn?.text === 'string' ? turn.text.trim() : '';
+      if (!text) {
+        return null;
+      }
+
+      let timestamp: string | undefined;
+      if (typeof turn?.timestamp === 'string' && turn.timestamp.trim()) {
+        timestamp = turn.timestamp;
+      } else if (typeof turn?.startSec === 'number' && Number.isFinite(turn.startSec)) {
+        const minutes = Math.floor(turn.startSec / 60);
+        const seconds = Math.floor(turn.startSec % 60);
+        timestamp = `${minutes}:${String(seconds).padStart(2, '0')}`;
+      }
+
+      return {
+        role,
+        text,
+        ...(timestamp ? { timestamp } : {}),
+      };
+    })
+    .filter((turn): turn is { role: 'agent' | 'contact'; text: string; timestamp?: string } => !!turn);
+}
+
 /**
  * GET /api/call-intelligence/records/:callSessionId
  * Retrieve complete call quality and intelligence record for a specific call
@@ -548,6 +586,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         fullTranscript: dialerCallAttempts.fullTranscript,
         aiTranscript: dialerCallAttempts.aiTranscript,
         notes: dialerCallAttempts.notes,
+        sessionAiAnalysis: callSessions.aiAnalysis,
         contactId: contacts.id,
         contactFirstName: contacts.firstName,
         contactLastName: contacts.lastName,
@@ -594,6 +633,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
       .leftJoin(contacts, eq(dialerCallAttempts.contactId, contacts.id))
       .leftJoin(accounts, eq(contacts.accountId, accounts.id))
       .leftJoin(campaigns, eq(dialerCallAttempts.campaignId, campaigns.id))
+      .leftJoin(callSessions, eq(dialerCallAttempts.callSessionId, callSessions.id))
       .leftJoin(callQualityRecords, eq(callQualityRecords.dialerCallAttemptId, dialerCallAttempts.id))
       .where(dialerWhereClause)
       .orderBy(desc(dialerCallAttempts.callStartedAt))
@@ -704,6 +744,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         recordingDurationSec: callSessions.recordingDurationSec,
         recordingFileSizeBytes: callSessions.recordingFileSizeBytes,
         transcript: callSessions.aiTranscript,
+        aiAnalysis: callSessions.aiAnalysis,
         contactId: contacts.id,
         contactFirstName: contacts.firstName,
         contactLastName: contacts.lastName,
@@ -767,6 +808,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         recordingUrl: row.recordingUrl,
       });
       const hasRecording = !!(playableUrl || row.recordingUrl);
+      const transcriptTurns = extractTranscriptTurns(row.sessionAiAnalysis);
       return {
       id: row.id,
       source: 'dialer' as const,
@@ -802,8 +844,9 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         s3Key: undefined,
       },
       transcript: {
-        available: !!(row.fullTranscript || row.aiTranscript),
+        available: !!(row.fullTranscript || row.aiTranscript || transcriptTurns.length),
         text: row.fullTranscript || row.aiTranscript,
+        turns: transcriptTurns,
         length: (row.fullTranscript || row.aiTranscript)?.length || 0,
       },
       quality: {
@@ -857,6 +900,7 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         recordingUrl: row.recordingUrl,
       });
       const hasRecording = !!(playableUrl || row.recordingS3Key);
+      const transcriptTurns = extractTranscriptTurns(row.aiAnalysis);
       return {
       id: row.id,
       source: 'session' as const,
@@ -892,8 +936,9 @@ router.get("/unified", requireAuth, requireRole('admin', 'manager', 'qa_analyst'
         s3Key: row.recordingS3Key,
       },
       transcript: {
-        available: !!row.transcript,
+        available: !!(row.transcript || transcriptTurns.length),
         text: row.transcript,
+        turns: transcriptTurns,
         length: row.transcript?.length || 0,
       },
       quality: {

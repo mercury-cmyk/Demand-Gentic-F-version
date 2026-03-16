@@ -76,7 +76,11 @@ interface ClientProject {
   name: string;
   status: string;
   description?: string;
+  landingPageUrl?: string;
   campaignOrganizationId?: string;
+  projectType?: string;
+  externalEventId?: string | null;
+  clientAccountId?: string;
 }
 
 export interface CampaignIntent {
@@ -97,6 +101,7 @@ export interface CampaignIntent {
   projectId: string;
   projectName: string;
   projectDescription?: string;
+  projectLandingPageUrl?: string;
   campaignOrganizationId?: string;
 }
 
@@ -384,6 +389,7 @@ export function CampaignIntentForm({ initialData, onNext, onCancel }: CampaignIn
       projectId: selectedProjectId,
       projectName: selectedProject?.name || "",
       projectDescription: selectedProject?.description,
+      projectLandingPageUrl: selectedProject?.landingPageUrl || "",
       campaignOrganizationId: selectedProject?.campaignOrganizationId,
     });
   };

@@ -917,8 +917,52 @@ export async function runPostCallAnalysis(
       }
     }
 
-    // ⚡ COST GUARD: Reuse existing transcript from DB if available (avoid re-transcription)
-    if (!structuredTranscript && session.aiTranscript && typeof session.aiTranscript === 'string' && session.aiTranscript.length >= 30) {
+    const transcriptLifecycle = ((session.aiAnalysis as Record<string, any> | null)?.transcriptLifecycle || {}) as Record<string, any>;
+    const hasProvisionalTranscript =
+      transcriptLifecycle.needsRecordingTranscription === true ||
+      transcriptLifecycle.status === 'provisional';
+    const existingStructuredTurns = Array.isArray((session.aiAnalysis as Record<string, any> | null)?.postCallAnalysis?.turns)
+      ? (session.aiAnalysis as Record<string, any>).postCallAnalysis.turns
+      : [];
+
+    if (!structuredTranscript && existingStructuredTurns.length > 0 && !hasProvisionalTranscript) {
+      const reconstructedUtterances = existingStructuredTurns
+        .map((turn: any) => {
+          const speaker = turn?.speaker === 'agent' ? 'agent' : turn?.speaker === 'contact' ? 'contact' : null;
+          const text = typeof turn?.text === 'string' ? turn.text.trim() : '';
+          if (!speaker || !text) {
+            return null;
+          }
+
+          const start = typeof turn?.startSec === 'number' && Number.isFinite(turn.startSec) ? turn.startSec : 0;
+          const end = typeof turn?.endSec === 'number' && Number.isFinite(turn.endSec) ? turn.endSec : start;
+
+          return {
+            speaker,
+            text,
+            start,
+            end,
+          };
+        })
+        .filter(Boolean) as Array<{ speaker: string; text: string; start: number; end: number }>;
+
+      if (reconstructedUtterances.length > 0) {
+        structuredTranscript = {
+          text: session.aiTranscript || reconstructedUtterances.map((turn) => turn.text).join(' '),
+          utterances: reconstructedUtterances,
+        };
+        transcriptionMetricSource = 'fallback';
+      }
+    }
+
+    // ⚡ COST GUARD: Reuse existing transcript from DB only when it is already finalized.
+    if (
+      !structuredTranscript &&
+      !hasProvisionalTranscript &&
+      session.aiTranscript &&
+      typeof session.aiTranscript === 'string' &&
+      session.aiTranscript.length >= 30
+    ) {
       console.log(`${LOG_PREFIX} ♻️ Reusing existing transcript from DB (${session.aiTranscript.length} chars) — skipping transcription API calls`);
       // Parse the stored transcript into structured format for analysis
       const lines = session.aiTranscript.split('\n').filter((l: string) => l.trim().length > 0);
@@ -1231,6 +1275,14 @@ export async function runPostCallAnalysis(
 
     // 9. Persist full analysis to call session (enhanced payload with deep analysis data)
     const analysisPayload: Record<string, unknown> = {
+      transcriptLifecycle: {
+        ...(transcriptLifecycle || {}),
+        status: 'completed',
+        source: transcriptionMetricSource === 'realtime_native' ? 'live_fallback' : 'recording_postcall',
+        needsRecordingTranscription: false,
+        structuredTurnCount: result.turns.length,
+        finalizedAt: new Date().toISOString(),
+      },
       postCallAnalysis: {
         analyzedAt: new Date().toISOString(),
         analysisDurationMs: Date.now() - startTime,
