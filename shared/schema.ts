@@ -2182,6 +2182,10 @@ export const campaigns = pgTable("campaigns", {
   lastStallReason: text("last_stall_reason"),
   lastStallReasonAt: timestamp("last_stall_reason_at"),
 
+  // ==================== UNIFIED PIPELINE LINKAGE ====================
+  // Links campaign to a unified account-based pipeline (full-funnel operations)
+  unifiedPipelineId: varchar("unified_pipeline_id"),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   launchedAt: timestamp("launched_at"),
@@ -15844,6 +15848,9 @@ export const clientCampaignPlans = pgTable("client_campaign_plans", {
   thinkingContent: text("thinking_content"),
   generationDurationMs: integer("generation_duration_ms"),
 
+  // Unified Pipeline linkage (when plan is converted to a pipeline)
+  unifiedPipelineId: varchar("unified_pipeline_id"),
+
   // Timestamps
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -16512,4 +16519,239 @@ export const gcpMigrationChecklist = pgTable("gcp_migration_checklist", {
 
 export type GcpMigrationChecklistItem = typeof gcpMigrationChecklist.$inferSelect;
 export type InsertGcpMigrationChecklistItem = typeof gcpMigrationChecklist.$inferInsert;
+
+// ============================================
+// UNIFIED ACCOUNT-BASED PIPELINE
+// ============================================
+// Full-funnel pipeline product: OI → Strategy → Campaigns → Execution → Account Pipeline → Close
+// Accounts are the primary entity; contacts are tracked as participants within each account.
+
+export const unifiedPipelineStatusEnum = pgEnum('unified_pipeline_status', [
+  'planning',
+  'active',
+  'paused',
+  'completed',
+  'archived',
+]);
+
+export const unifiedPipelineFunnelStageEnum = pgEnum('unified_pipeline_funnel_stage', [
+  'target',          // Identified account, not yet touched
+  'outreach',        // Active outreach in progress
+  'engaged',         // Account has responded positively
+  'qualifying',      // In active qualification conversations
+  'qualified',       // Qualified, appointment-ready
+  'appointment_set', // Meeting/demo booked
+  'closed_won',      // Deal closed
+  'closed_lost',     // Disqualified or lost
+  'on_hold',         // Paused
+]);
+
+export const unifiedPipelineContactRoleEnum = pgEnum('unified_pipeline_contact_role', [
+  'primary_contact',
+  'decision_maker',
+  'influencer',
+  'gatekeeper',
+  'end_user',
+]);
+
+/**
+ * Unified Pipelines — Strategic umbrella grouping campaigns under one goal.
+ * Linked to Organization Intelligence for OI-driven strategy.
+ * Visible in both admin and client portal.
+ */
+export const unifiedPipelines = pgTable("unified_pipelines", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  organizationId: varchar("organization_id").references(() => campaignOrganizations.id, { onDelete: 'cascade' }),
+  clientAccountId: varchar("client_account_id").references(() => clientAccounts.id, { onDelete: 'set null' }),
+
+  name: text("name").notNull(),
+  description: text("description"),
+  status: unifiedPipelineStatusEnum("status").notNull().default('planning'),
+
+  // Strategy (AI-generated from OI)
+  objective: text("objective"), // e.g. "Book 50 qualified meetings with CISOs"
+  targetAccountCriteria: jsonb("target_account_criteria"), // ICP filters derived from OI
+  channelStrategy: jsonb("channel_strategy"), // { voice: {...}, email: {...}, content: {...} }
+  funnelStrategy: jsonb("funnel_strategy"), // AI-generated stage advancement criteria
+
+  // Source plan reference
+  campaignPlanId: varchar("campaign_plan_id").references(() => clientCampaignPlans.id, { onDelete: 'set null' }),
+
+  // Denormalized metrics
+  totalAccounts: integer("total_accounts").notNull().default(0),
+  totalCampaigns: integer("total_campaigns").notNull().default(0),
+  appointmentsSet: integer("appointments_set").notNull().default(0),
+
+  // AI tracking
+  aiModel: text("ai_model"),
+  generationDurationMs: integer("generation_duration_ms"),
+
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  orgIdx: index("up_org_idx").on(table.organizationId),
+  clientAccountIdx: index("up_client_account_idx").on(table.clientAccountId),
+  statusIdx: index("up_status_idx").on(table.status),
+}));
+
+export const insertUnifiedPipelineSchema = createInsertSchema(unifiedPipelines);
+export type UnifiedPipeline = typeof unifiedPipelines.$inferSelect;
+export type InsertUnifiedPipeline = typeof unifiedPipelines.$inferInsert;
+
+/**
+ * Unified Pipeline Accounts — Account-level funnel tracking.
+ * Each account moves through funnel stages within a pipeline.
+ * Contacts are tracked separately in unifiedPipelineContacts.
+ */
+export const unifiedPipelineAccounts = pgTable("unified_pipeline_accounts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  pipelineId: varchar("pipeline_id", { length: 36 }).notNull()
+    .references(() => unifiedPipelines.id, { onDelete: 'cascade' }),
+  accountId: varchar("account_id", { length: 36 }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+
+  // Funnel stage
+  funnelStage: unifiedPipelineFunnelStageEnum("funnel_stage").notNull().default('target'),
+  stageChangedAt: timestamp("stage_changed_at", { withTimezone: true }),
+  previousStage: text("previous_stage"),
+
+  // AE ownership
+  assignedAeId: varchar("assigned_ae_id", { length: 36 })
+    .references(() => users.id, { onDelete: 'set null' }),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }),
+
+  // AI scoring
+  priorityScore: integer("priority_score").default(0), // 0-100
+  readinessScore: integer("readiness_score").default(0), // 0-100
+  engagementScore: integer("engagement_score").default(0), // 0-100, aggregated from contacts
+  aiRecommendation: text("ai_recommendation"),
+
+  // Activity tracking
+  lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+  totalTouchpoints: integer("total_touchpoints").default(0),
+
+  // Next action
+  nextActionType: text("next_action_type"),
+  nextActionAt: timestamp("next_action_at", { withTimezone: true }),
+
+  // Conversion
+  convertedOpportunityId: varchar("converted_opportunity_id", { length: 36 })
+    .references(() => pipelineOpportunities.id, { onDelete: 'set null' }),
+  convertedAt: timestamp("converted_at", { withTimezone: true }),
+  lostReason: text("lost_reason"),
+
+  // Enrollment
+  enrollmentSource: text("enrollment_source"), // 'import', 'campaign_signal', 'ai'
+  metadata: jsonb("metadata"),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pipelineAccountUniq: uniqueIndex("upa_pipeline_account_idx").on(table.pipelineId, table.accountId),
+  pipelineIdx: index("upa_pipeline_idx").on(table.pipelineId),
+  accountIdx: index("upa_account_idx").on(table.accountId),
+  stageIdx: index("upa_stage_idx").on(table.funnelStage),
+  aeIdx: index("upa_ae_idx").on(table.assignedAeId),
+  priorityIdx: index("upa_priority_idx").on(table.priorityScore.desc()),
+  nextActionIdx: index("upa_next_action_idx").on(table.nextActionAt),
+}));
+
+export const insertUnifiedPipelineAccountSchema = createInsertSchema(unifiedPipelineAccounts);
+export type UnifiedPipelineAccount = typeof unifiedPipelineAccounts.$inferSelect;
+export type InsertUnifiedPipelineAccount = typeof unifiedPipelineAccounts.$inferInsert;
+
+/**
+ * Unified Pipeline Contacts — Contact-level engagement within an account.
+ * Multiple contacts per account, each with their own engagement tracking.
+ */
+export const unifiedPipelineContacts = pgTable("unified_pipeline_contacts", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  pipelineAccountId: varchar("pipeline_account_id", { length: 36 }).notNull()
+    .references(() => unifiedPipelineAccounts.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id", { length: 36 }).notNull()
+    .references(() => contacts.id, { onDelete: 'cascade' }),
+
+  role: unifiedPipelineContactRoleEnum("role"),
+  engagementLevel: text("engagement_level").default('none'), // 'none','aware','engaged','champion'
+
+  // Source tracking
+  sourceCampaignId: varchar("source_campaign_id", { length: 36 }),
+  sourceCallSessionId: varchar("source_call_session_id", { length: 36 }),
+  sourceDisposition: text("source_disposition"),
+  sourceCallSummary: text("source_call_summary"),
+  sourceAiAnalysis: jsonb("source_ai_analysis"),
+
+  // Activity
+  lastContactedAt: timestamp("last_contacted_at", { withTimezone: true }),
+  totalAttempts: integer("total_attempts").default(0),
+  lastDisposition: text("last_disposition"),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pipelineAccountContactUniq: uniqueIndex("upc_account_contact_idx").on(table.pipelineAccountId, table.contactId),
+  pipelineAccountIdx: index("upc_pipeline_account_idx").on(table.pipelineAccountId),
+  contactIdx: index("upc_contact_idx").on(table.contactId),
+}));
+
+export const insertUnifiedPipelineContactSchema = createInsertSchema(unifiedPipelineContacts);
+export type UnifiedPipelineContact = typeof unifiedPipelineContacts.$inferSelect;
+export type InsertUnifiedPipelineContact = typeof unifiedPipelineContacts.$inferInsert;
+
+/**
+ * Unified Pipeline Actions — Account-level actions for follow-up.
+ * Can be account-wide or targeted to a specific contact.
+ */
+export const unifiedPipelineActions = pgTable("unified_pipeline_actions", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  pipelineAccountId: varchar("pipeline_account_id", { length: 36 }).notNull()
+    .references(() => unifiedPipelineAccounts.id, { onDelete: 'cascade' }),
+  pipelineId: varchar("pipeline_id", { length: 36 }).notNull()
+    .references(() => unifiedPipelines.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id", { length: 36 })
+    .references(() => contacts.id, { onDelete: 'set null' }),
+
+  actionType: clientJourneyActionTypeEnum("action_type").notNull(),
+  status: clientJourneyActionStatusEnum("status").notNull().default('scheduled'),
+
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+  executedAt: timestamp("executed_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+
+  title: text("title"),
+  description: text("description"),
+
+  // AI context
+  aiGeneratedContext: jsonb("ai_generated_context"),
+  previousActivitySummary: text("previous_activity_summary"),
+
+  // Outcome
+  outcome: text("outcome"),
+  outcomeDetails: jsonb("outcome_details"),
+  resultDisposition: text("result_disposition"),
+
+  // Accountability
+  executionMethod: text("execution_method"), // 'automated', 'manual', 'linked_call', 'linked_email'
+  linkedEntityType: text("linked_entity_type"),
+  linkedEntityId: varchar("linked_entity_id", { length: 36 }),
+
+  // Source campaign
+  sourceCampaignId: varchar("source_campaign_id", { length: 36 }),
+
+  createdBy: varchar("created_by", { length: 36 }),
+  completedBy: varchar("completed_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pipelineAccountIdx: index("upact_pipeline_account_idx").on(table.pipelineAccountId),
+  pipelineIdx: index("upact_pipeline_idx").on(table.pipelineId),
+  statusIdx: index("upact_status_idx").on(table.status),
+  scheduledAtIdx: index("upact_scheduled_at_idx").on(table.scheduledAt),
+  actionTypeIdx: index("upact_action_type_idx").on(table.actionType),
+}));
+
+export const insertUnifiedPipelineActionSchema = createInsertSchema(unifiedPipelineActions);
+export type UnifiedPipelineAction = typeof unifiedPipelineActions.$inferSelect;
+export type InsertUnifiedPipelineAction = typeof unifiedPipelineActions.$inferInsert;
 

@@ -203,7 +203,13 @@ function SectionCard({
 export function UnifiedIntelligenceDashboard() {
   const [selectedTab, setSelectedTab] = useState("overview");
 
-  const { data: intelligenceData, isLoading } = useQuery<UnifiedIntelligenceStats>({
+  const {
+    data: intelligenceData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery<UnifiedIntelligenceStats, Error>({
     queryKey: ["/api/intelligence/unified-stats"],
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -220,6 +226,28 @@ export function UnifiedIntelligenceDashboard() {
             ))}
         </div>
       </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Card className="border-destructive/20 bg-destructive/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <AlertCircle className="h-5 w-5" />
+            Unified Intelligence Unavailable
+          </CardTitle>
+          <CardDescription>
+            {error?.message || "Failed to load unified intelligence statistics."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => void refetch()}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 

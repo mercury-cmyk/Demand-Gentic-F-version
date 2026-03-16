@@ -61,6 +61,7 @@ import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
 import { JourneyPipelineTab } from '@/components/client-journey-pipeline';
+import { UnifiedPipelineTab } from '@/components/unified-pipeline';
 import { CampaignPipelineTab } from '@/components/campaign-pipeline';
 
 interface ClientUser {
@@ -3013,6 +3014,16 @@ export default function ClientPortalDashboard() {
           </div>
         )}
 
+
+        {/* ==================== UNIFIED PIPELINES TAB ==================== */}
+        {activeTab === 'unified-pipelines' && user?.clientAccountId && (
+          <div className="space-y-6">
+            <UnifiedPipelineTab
+              authHeaders={authHeaders}
+              clientAccountId={user.clientAccountId}
+            />
+          </div>
+        )}
 
         {/* ==================== LEAD JOURNEY PIPELINE TAB ==================== */}
         {activeTab === 'journey-pipeline' && journeyPipelineEnabled && (

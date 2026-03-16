@@ -4,6 +4,7 @@ import CloudRunDeploymentManager from '../services/gcp/cloud-run-deployment.js';
 import DomainMapper from '../services/gcp/domain-mapper.js';
 import CostTracker from '../services/gcp/cost-tracker.js';
 import CloudWorkstationsManager from '../services/gcp/cloud-workstations.js';
+import { multiCloudDeploymentService } from '../services/multi-cloud-deployment-service.js';
 import type { Request, Response } from 'express';
 import { requireAuth, requireRole } from '../auth';
 import {
@@ -240,6 +241,29 @@ router.get('/deployments/status', async (_req: Request, res: Response) => {
   }
 });
 
+router.get('/deployments/providers', async (_req: Request, res: Response) => {
+  try {
+    res.json({
+      success: true,
+      providers: multiCloudDeploymentService.listProviders(),
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to load deployment providers');
+  }
+});
+
+router.post('/deployments/plan', async (req: Request, res: Response) => {
+  try {
+    const plan = multiCloudDeploymentService.planDeployment(req.body);
+    res.json({
+      success: true,
+      plan,
+    });
+  } catch (error) {
+    handleOpsError(res, error, 'Failed to generate multi-cloud deployment plan');
+  }
+});
+
 // ===== CLOUD BUILD ENDPOINTS =====
 
 /**
@@ -380,6 +404,30 @@ router.post('/deployments/build/:buildId/cancel', async (req: Request, res: Resp
  */
 router.post('/deployments/deploy', async (req: Request, res: Response) => {
   try {
+    const providerId = req.body?.providerId as string | undefined;
+    if (providerId === 'self-hosted-vm') {
+      const job = await runDeployment({
+        rebuildMediaBridge: req.body?.rebuildMediaBridge,
+      });
+
+      return res.status(202).json({
+        success: true,
+        job,
+        message: 'VM deploy queued successfully',
+      });
+    }
+
+    if (providerId === 'google-cloud-run') {
+      req.body.target = 'cloud-run';
+    }
+
+    if (providerId === 'aws-fargate' || providerId === 'digitalocean-app-platform') {
+      return res.status(501).json({
+        success: false,
+        error: `${providerId} is blueprint-ready in Ops Hub, but direct execution is not wired yet. Use the generated blueprint in the planner.`,
+      });
+    }
+
     const explicitTarget = req.body?.target as string | undefined;
     const overview = await getOpsOverview();
     const useVM = explicitTarget !== 'cloud-run' && overview.deploymentTarget === 'vm';

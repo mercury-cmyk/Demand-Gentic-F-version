@@ -142,6 +142,7 @@ import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
 import campaignPipelineRouter from './routes/campaign-pipeline-routes';
+import unifiedPipelineRouter from './routes/unified-pipeline-routes';
 import precisionLeadsRouter from './routes/precision-leads-routes';
 import financeProgramRouter from './routes/finance-program-routes';
 import googleCloudAccountsRouter from './routes/google-cloud-accounts-routes';
@@ -16502,6 +16503,7 @@ Provide JSON response with:
 
   // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
   app.use('/api/campaign-pipeline', requireAuth, campaignPipelineRouter);
+  app.use('/api/unified-pipelines', requireAuth, unifiedPipelineRouter);
 
   // ==================== PRECISION LEADS (Kimi + DeepSeek dual-model) ====================
   app.use(precisionLeadsRouter);

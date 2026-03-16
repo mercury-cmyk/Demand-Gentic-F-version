@@ -28,12 +28,6 @@ function getSentimentFromAiAnalysis(aiAnalysis: unknown): string {
  */
 router.get("/unified-stats", async (req: Request, res: Response) => {
   try {
-    const orgId = (req.user as any)?.orgId;
-
-    if (!orgId) {
-      return res.status(403).json({ error: "Organization not found" });
-    }
-
     // Get date range (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);

@@ -751,6 +751,229 @@ export const PUBLIC_PAGES_MESSAGING = {
   },
 } as const;
 
+// ==================== HOMEPAGE GOVERNANCE MODEL ====================
+
+export const HOMEPAGE_GOVERNANCE = {
+  version: '2026.03',
+  releaseLabel: 'Governed platform narrative',
+  managedThrough: [
+    'Product feature registry',
+    'Content governance',
+    'Design governance',
+    'AI governance',
+    'Version history',
+  ],
+  navigation: [
+    { label: 'Platform Story', href: '#story' },
+    { label: 'Platform', href: '#platform' },
+    { label: 'Governance', href: '#governance' },
+    { label: 'About', href: '#about' },
+  ],
+  hero: {
+    badge: 'Platform release narrative',
+    eyebrow: 'One governed system for demand generation execution',
+    headline: 'From signal to conversation to pipeline.',
+    subHeadline: 'Research. Generate. Simulate. Launch. Govern. Learn.',
+    summary:
+      'DemandGentic replaces the disconnected dialer, email, ABM, content, and QA stack with one reasoning-first platform for B2B revenue teams. Every message is grounded in organization intelligence, every launch is reviewable, and every outcome feeds the next move.',
+    bullets: [
+      'Organization Intelligence and Problem Intelligence shape every touchpoint before outreach begins.',
+      'Voice, email, landing pages, and workflow execution run inside one shared operating layer.',
+      'Preview Studio, QA, content governance, and AI governance keep execution controlled before and after launch.',
+    ],
+    primaryCta: 'Book a Live Strategy Session',
+    secondaryCta: 'See How The Platform Works',
+    supportingLabel: 'Managed through content governance',
+  },
+  proofBar: [
+    { value: STATS.yearsExperience, label: 'years of front-line demand generation experience' },
+    { value: String(AGENTS.length), label: 'purpose-built agent roles in the council' },
+    { value: STATS.contentEngines, label: 'Generative Studio engines in one workflow' },
+    { value: STATS.verifiedContacts, label: 'verified contacts available for enrichment' },
+  ],
+  stackFrictions: [
+    {
+      title: 'Fragmented execution',
+      stat: '3-5 disconnected tools',
+      description:
+        'Most teams still stitch together a dialer, email platform, ABM system, content tools, and QA spreadsheets. Context breaks between every handoff.',
+      iconName: 'Layers',
+    },
+    {
+      title: 'Generic outreach',
+      stat: '0 shared memory',
+      description:
+        'Without organization context, problem mapping, and account-level memory, campaigns repeat the same story to every account and call that scale.',
+      iconName: 'MessageSquare',
+    },
+    {
+      title: 'Ungoverned AI',
+      stat: 'High brand risk',
+      description:
+        'If teams cannot see which content is current, which model is active, or which approvals were applied, automation becomes a liability instead of an advantage.',
+      iconName: 'ShieldCheck',
+    },
+  ],
+  orchestrationFlow: [
+    {
+      step: '01',
+      title: 'Build the intelligence layer',
+      description:
+        'Organization Intelligence and account research assemble the ICP, positioning, offer, market context, and buying-committee reality before execution starts.',
+    },
+    {
+      step: '02',
+      title: 'Generate campaign assets',
+      description:
+        'Generative Studio turns the intelligence layer into landing pages, emails, scripts, briefs, and supporting assets aligned to your brand and offer.',
+    },
+    {
+      step: '03',
+      title: 'Simulate before launch',
+      description:
+        'Preview Studio tests voice and email behavior before real execution so teams can refine the story, prompts, and objections without burning accounts.',
+    },
+    {
+      step: '04',
+      title: 'Execute across channels',
+      description:
+        'Voice, email, pages, and workflow triggers run from one operating layer with queue intelligence, routing controls, and shared memory.',
+    },
+    {
+      step: '05',
+      title: 'Govern every release',
+      description:
+        'Feature coverage, page health, approvals, version history, and AI model policy keep the platform auditable as the product story evolves.',
+    },
+    {
+      step: '06',
+      title: 'Learn and optimize',
+      description:
+        'Quality scoring, dispositions, simulations, and campaign analytics flow back into prompts, targeting, and content so execution compounds.',
+    },
+  ],
+  platformModules: [
+    {
+      name: 'Organization Intelligence',
+      category: 'Research layer',
+      tone: 'cyan',
+      iconName: 'BrainCircuit',
+      description:
+        'Multi-model context assembly for identity, ICP, positioning, offer architecture, and account-level messaging.',
+      highlights: ['Company and ICP context', 'Competitive positioning', 'Account-aware message direction'],
+    },
+    {
+      name: 'AI Voice Runtime',
+      category: 'Conversation layer',
+      tone: 'amber',
+      iconName: 'Phone',
+      description:
+        'Live conversational calling with structured actions, dispositions, compliance controls, and real-time guidance.',
+      highlights: ['Real-time calls', 'Disposition capture', 'Governed provider routing'],
+    },
+    {
+      name: 'Mercury Email System',
+      category: 'Inbox layer',
+      tone: 'blue',
+      iconName: 'Mail',
+      description:
+        'Persona-specific sequences, deliverability controls, routing, and campaign email generation in one governed system.',
+      highlights: ['Sequence orchestration', 'Deliverability intelligence', 'Unified email routing'],
+    },
+    {
+      name: 'Generative Studio',
+      category: 'Creation layer',
+      tone: 'emerald',
+      iconName: 'Wand2',
+      description:
+        'Landing pages, email assets, blogs, eBooks, solution briefs, images, and refinement workflows generated from shared context.',
+      highlights: ['Brand-aligned content', 'One-click publishing', 'Seven content engines'],
+    },
+    {
+      name: 'Preview Studio',
+      category: 'Simulation layer',
+      tone: 'rose',
+      iconName: 'Play',
+      description:
+        'Run simulations before launch to test messaging, prospect responses, and agent behavior without touching production outreach.',
+      highlights: ['Voice simulations', 'Prompt previews', 'Pre-launch validation'],
+    },
+    {
+      name: 'Queue Intelligence',
+      category: 'Prioritization layer',
+      tone: 'teal',
+      iconName: 'LayoutDashboard',
+      description:
+        'Score accounts and contacts using timing, fit, data quality, and engagement signals so execution follows the best next opportunity.',
+      highlights: ['Priority scoring', 'Next-best-action sequencing', 'Human + agent queue visibility'],
+    },
+    {
+      name: 'Content + AI Governance',
+      category: 'Control layer',
+      tone: 'slate',
+      iconName: 'ClipboardCheck',
+      description:
+        'Track feature coverage, page health, design improvements, approvals, rollback history, and model policies from one control surface.',
+      highlights: ['Feature registry', 'Version history', 'Model governance'],
+    },
+    {
+      name: 'QA + Learning Loop',
+      category: 'Optimization layer',
+      tone: 'indigo',
+      iconName: 'RefreshCw',
+      description:
+        'Conversation quality, reanalysis, simulation feedback, and campaign outcomes continuously refine prompts, content, and targeting.',
+      highlights: ['Quality scoring', 'Disposition intelligence', 'Continuous optimization'],
+    },
+  ],
+  governanceStory: {
+    badge: 'Managed through governance',
+    title: 'The homepage story follows the platform governance model.',
+    description:
+      'This narrative is intentionally tied to the feature registry, content governance workflow, AI governance policies, and version history so the public story stays aligned with the real product.',
+    pillars: [
+      {
+        title: 'Feature coverage',
+        description: 'Homepage sections are mapped to current product capabilities instead of free-floating marketing claims.',
+        iconName: 'ClipboardCheck',
+      },
+      {
+        title: 'Preview before publish',
+        description: 'Simulation and review come before launch so the message can be tested before it reaches live prospects.',
+        iconName: 'Play',
+      },
+      {
+        title: 'Policy-aware execution',
+        description: 'Voice and email run under centralized governance for models, compliance constraints, and approvals.',
+        iconName: 'ShieldCheck',
+      },
+      {
+        title: 'Versioned evolution',
+        description: 'As the platform changes, copy and design can be refreshed with traceable version history instead of ad hoc edits.',
+        iconName: 'RefreshCw',
+      },
+    ],
+  },
+  audiences: [
+    'VP Marketing and demand generation leaders',
+    'Revenue operations teams replacing a fragmented GTM stack',
+    'Sales development leaders scaling outreach without scaling noise',
+    'Agency operators managing multiple clients, approvals, and reporting paths',
+  ],
+  story: {
+    title: 'Why this platform exists',
+    body:
+      'DemandGentic was built after years of seeing revenue teams buy more automation while losing more context. The goal was never to build louder outbound. The goal was to build a system that reasons before it acts, remembers what happened, and keeps human judgment in control.',
+  },
+  cta: {
+    title: 'See how governed execution changes pipeline quality.',
+    description:
+      'Walk through the intelligence layer, the campaign operating flow, and the governance controls with the team that designed the platform.',
+    primary: 'Book a Live Strategy Session',
+    secondary: 'Request a Proposal',
+  },
+} as const;
+
 // ==================== FOUNDER QUOTES ====================
 
 export const FOUNDER_QUOTES = {

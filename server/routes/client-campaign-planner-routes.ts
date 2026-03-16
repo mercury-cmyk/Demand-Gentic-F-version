@@ -205,4 +205,70 @@ router.patch('/plans/:id/approve', async (req: Request, res: Response) => {
   }
 });
 
+// ─── POST /:id/convert-to-pipeline — Convert approved plan to unified pipeline ───
+
+router.post('/:id/convert-to-pipeline', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = req.clientUser?.clientAccountId;
+    if (!clientAccountId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    // Verify plan exists and belongs to client
+    const [plan] = await db
+      .select()
+      .from(clientCampaignPlans)
+      .where(and(
+        eq(clientCampaignPlans.id, req.params.id),
+        eq(clientCampaignPlans.clientAccountId, clientAccountId),
+      ))
+      .limit(1);
+
+    if (!plan) {
+      return res.status(404).json({ message: 'Plan not found' });
+    }
+
+    if (plan.unifiedPipelineId) {
+      return res.status(400).json({ message: 'Plan already converted to pipeline', pipelineId: plan.unifiedPipelineId });
+    }
+
+    // Get the organization ID from client organization link
+    const { clientOrganizationLinks } = await import('@shared/schema');
+    const [orgLink] = await db
+      .select({ organizationId: clientOrganizationLinks.campaignOrganizationId })
+      .from(clientOrganizationLinks)
+      .where(eq(clientOrganizationLinks.clientAccountId, clientAccountId))
+      .limit(1);
+
+    if (!orgLink) {
+      return res.status(400).json({ message: 'No organization linked to this client account' });
+    }
+
+    // Convert plan to pipeline
+    const { convertPlanToPipeline } = await import('../services/ai-unified-pipeline-planner');
+    const result = await convertPlanToPipeline(
+      plan.id,
+      orgLink.organizationId,
+      clientAccountId,
+      req.clientUser?.userId
+    );
+
+    // Update the plan with the pipeline ID
+    await db
+      .update(clientCampaignPlans)
+      .set({ unifiedPipelineId: result.pipelineId, updatedAt: new Date() })
+      .where(eq(clientCampaignPlans.id, plan.id));
+
+    res.json({
+      success: true,
+      pipelineId: result.pipelineId,
+      campaignIds: result.campaignIds,
+      accountsEnrolled: result.accountsEnrolled,
+    });
+  } catch (error: any) {
+    console.error('[CampaignPlanner] Failed to convert plan to pipeline:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to convert plan to pipeline' });
+  }
+});
+
 export default router;

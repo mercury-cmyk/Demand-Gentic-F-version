@@ -164,6 +164,7 @@ const baseNavigationGroups: NavGroup[] = [
     items: [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
+      { name: 'Pipelines', href: '/client-portal/dashboard?tab=unified-pipelines', icon: Workflow, highlighted: true },
       // Legacy qualified-leads entry removed in favor of Lead Pipeline.
       { name: 'Lead Pipeline', href: '/client-portal/dashboard?tab=journey-pipeline', icon: GitBranch },
       { name: 'Campaign Pipeline', href: '/client-portal/dashboard?tab=campaign-pipeline', icon: Workflow },
@@ -478,6 +479,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         campaigns: 'All Campaigns',
         leads: 'Lead Pipeline',
         'journey-pipeline': 'Lead Pipeline',
+        'unified-pipelines': 'Pipelines',
         'campaign-pipeline': 'Campaign Pipeline',
         'work-orders': 'Work Orders',
         bookings: 'Bookings',

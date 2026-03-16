@@ -273,22 +273,18 @@ if (isMainModule) {
       console.error('[STARTUP] Database initialization failed (non-blocking):', err);
     }
 
-    // Load secrets from Ops Hub secret store into process.env
-    // For local/dev: secrets from DB replace .env (overwriteEnv=true so .env is not needed)
-    // For production (Cloud Run): disabled — GCP Secret Manager provides env vars directly
+    // Load secrets from DB Secret Manager as primary source of API keys.
+    // Only bootstrap vars (DATABASE_URL, SECRET_MANAGER_MASTER_KEY, JWT_SECRET,
+    // SESSION_SECRET, NODE_ENV, PORT) are needed in .env or GCP Secret Manager.
+    // All other secrets are loaded from the encrypted DB secret store.
     {
-      const isCloudRun = Boolean(process.env.K_SERVICE || process.env.CLOUD_RUN_JOB);
-      if (!isCloudRun) {
-        try {
-          const { initializeSecrets } = await import("./services/secret-loader");
-          await initializeSecrets({ overwriteEnv: true });
-          console.log('[STARTUP] Ops Hub secrets loaded into env (local/dev mode)');
-        } catch (err) {
-          console.error('[STARTUP] Secret loader initialization failed (non-blocking):', err);
-          console.log('[STARTUP] Continuing with .env values as fallback...');
-        }
-      } else {
-        console.log('[STARTUP] Cloud Run detected — using GCP Secret Manager env vars directly');
+      try {
+        const { initializeSecrets } = await import("./services/secret-loader");
+        await initializeSecrets({ overwriteEnv: true });
+        console.log('[STARTUP] DB Secret Manager loaded — primary source for all API keys');
+      } catch (err) {
+        console.error('[STARTUP] DB Secret Manager initialization failed (non-blocking):', err);
+        console.log('[STARTUP] Falling back to env vars / .env for secrets');
       }
     }
 

@@ -29,6 +29,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { apiJsonRequest } from '@/lib/queryClient';
 import type { Project } from '@/pages/ops-hub';
+import MultiCloudPlanner from '@/components/ops/multi-cloud-planner';
 
 /* ── Shared types ── */
 
@@ -824,6 +825,8 @@ export default function DeploymentsTab({ project }: DeploymentsTabProps) {
 
   return (
     <div className="space-y-4">
+      <MultiCloudPlanner project={project} />
+
       {/* Target indicator */}
       <div className="flex items-center gap-3">
         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${

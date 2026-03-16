@@ -151,6 +151,8 @@ export default function InboxPage() {
   // Attachment state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [showAiAnalysis, setShowAiAnalysis] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState<any>(null);
 
   // Gmail OAuth popup connect handler
   const handleConnectGmail = useCallback(async () => {

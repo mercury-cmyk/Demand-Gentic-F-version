@@ -1,1199 +1,602 @@
 import { useLocation } from "wouter";
+import { motion } from "framer-motion";
+import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  BrainCircuit,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
+  Database,
+  Layers,
+  LayoutDashboard,
+  Mail,
+  MessageSquare,
+  Phone,
+  Play,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  Wand2,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { motion } from "framer-motion";
 import {
-  Brain,
-  Target,
-  Users,
-  Phone,
-  Mail,
-  ArrowRight,
-  CheckCircle2,
-  Zap,
-  Search,
-  Lightbulb,
-  Play,
-  ChevronRight,
-  Sparkles,
-  Globe,
-  Database,
-  Shield,
-  TrendingUp,
-  FileText,
-  Calendar,
-  UserCheck,
-  PenTool,
-  Bot,
-  Layers,
-  AlertTriangle,
-  XCircle,
-  Volume2,
-  RefreshCw,
-  CircleDot,
-  Quote,
-  Wand2,
-  BookOpen,
-  LayoutDashboard,
-  Eye,
-  ClipboardCheck,
-  MessageSquare,
-  Crown,
-  Flame,
-  Star,
-  BrainCircuit,
-  ShieldCheck,
-  Code,
-} from "lucide-react";
-import {
-  BRAND, TAGLINE, STATS,
-  DATA_SECTION,
-  CONTENT_STUDIO,
-  PRINCIPLES,
-  FOUNDER_QUOTES,
+  BRAND,
   FOOTER,
-  PUBLIC_PAGES_MESSAGING,
+  FOUNDER_QUOTES,
+  HOMEPAGE_GOVERNANCE,
+  STATS,
+  TAGLINE,
 } from "@shared/brand-messaging";
+
+const iconMap: Record<string, LucideIcon> = {
+  BrainCircuit,
+  ClipboardCheck,
+  Layers,
+  LayoutDashboard,
+  Mail,
+  MessageSquare,
+  Phone,
+  Play,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Wand2,
+};
+
+const toneStyles = {
+  amber: "border-amber-200/60 bg-amber-50 text-amber-950",
+  blue: "border-sky-200/60 bg-sky-50 text-sky-950",
+  cyan: "border-cyan-200/60 bg-cyan-50 text-cyan-950",
+  emerald: "border-emerald-200/60 bg-emerald-50 text-emerald-950",
+  indigo: "border-indigo-200/60 bg-indigo-50 text-indigo-950",
+  rose: "border-rose-200/60 bg-rose-50 text-rose-950",
+  slate: "border-slate-200/60 bg-slate-100 text-slate-950",
+  teal: "border-teal-200/60 bg-teal-50 text-teal-950",
+} as const;
+
+function getIcon(iconName: string): LucideIcon {
+  return iconMap[iconName] || Sparkles;
+}
+
+function SectionBadge({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <Badge className={`rounded-full border px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] ${className}`}>
+      {children}
+    </Badge>
+  );
+}
+
+function RuntimeVisual() {
+  const orbitStates = [
+    {
+      id: "research",
+      eyebrow: "State 01",
+      title: "Research",
+      detail: "Account context.",
+      iconName: "BrainCircuit",
+      positionClass: "left-[6px] top-[56px] sm:left-[24px] sm:top-[112px]",
+      animation: { x: [0, -4, 0, -2, 0], y: [0, -8, 0, 5, 0] },
+    },
+    {
+      id: "generate",
+      eyebrow: "State 02",
+      title: "Generate",
+      detail: "Assets in flow.",
+      iconName: "Wand2",
+      positionClass: "right-[6px] top-[56px] sm:right-[24px] sm:top-[120px]",
+      animation: { x: [0, 5, 0, 3, 0], y: [0, 6, 0, -7, 0] },
+    },
+    {
+      id: "preview",
+      eyebrow: "State 03",
+      title: "Preview",
+      detail: "Safe simulation.",
+      iconName: "Play",
+      positionClass: "right-[6px] bottom-[18px] sm:right-[22px] sm:bottom-[54px]",
+      animation: { x: [0, 5, 0, 3, 0], y: [0, 7, 0, -5, 0] },
+    },
+    {
+      id: "govern",
+      eyebrow: "State 04",
+      title: "Govern",
+      detail: "QA attached.",
+      iconName: "ClipboardCheck",
+      positionClass: "left-[6px] bottom-[18px] sm:left-[22px] sm:bottom-[62px]",
+      animation: { x: [0, -5, 0, -3, 0], y: [0, -6, 0, 8, 0] },
+    },
+  ];
+
+  return (
+    <div className="relative mx-auto h-[560px] w-full max-w-[640px] overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(45,212,191,0.18),transparent_34%),linear-gradient(160deg,#06171d_0%,#0a2730_45%,#071118_100%)] shadow-[0_32px_120px_-48px_rgba(6,182,212,0.65)]">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:58px_58px] opacity-20" />
+      <div className="absolute left-8 right-8 top-8 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-md">
+        <p className="m-0 font-mono text-[11px] uppercase tracking-[0.28em] text-cyan-200/80">
+          {HOMEPAGE_GOVERNANCE.releaseLabel} - v{HOMEPAGE_GOVERNANCE.version}
+        </p>
+        <p className="m-0 mt-2 text-sm font-semibold text-white">Shared context before execution</p>
+      </div>
+
+      <div className="absolute left-1/2 top-[52%] h-[344px] w-[344px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-200/10 sm:h-[420px] sm:w-[420px]" />
+      <motion.div
+        animate={{ rotate: 360 }}
+        transition={{ duration: 34, repeat: Infinity, ease: "linear" }}
+        className="absolute left-1/2 top-[52%] h-[292px] w-[292px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-cyan-200/15 sm:h-[360px] sm:w-[360px]"
+      />
+      <div className="absolute left-1/2 top-[52%] h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-white/10 sm:h-[268px] sm:w-[268px]" />
+
+      <div className="absolute left-1/2 top-[52%] z-20 w-[160px] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-white/15 bg-white/[0.08] px-4 py-4 text-center backdrop-blur-xl sm:w-[212px] sm:px-5 sm:py-5">
+        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-300/10 text-cyan-100 sm:h-11 sm:w-11">
+          <BrainCircuit className="h-5 w-5" />
+        </div>
+        <p className="m-0 mt-3 font-mono text-[9px] uppercase tracking-[0.22em] text-slate-300 sm:mt-4 sm:text-[10px]">Shared reasoning</p>
+        <h3 className="m-0 mt-2 text-base font-semibold leading-tight text-white sm:text-[1.35rem]">Launch state</h3>
+        <p className="m-0 mt-2 text-[10px] leading-4 text-slate-200/76 sm:mt-3 sm:text-[11px] sm:leading-5">
+          Context, policy, and preview stay attached.
+        </p>
+        <div className="mt-3 rounded-full border border-white/10 bg-black/10 px-3 py-1.5 sm:mt-4">
+          <p className="m-0 font-mono text-[9px] uppercase tracking-[0.18em] text-slate-300 sm:text-[10px]">Previewed + governed</p>
+        </div>
+      </div>
+
+      {orbitStates.map((state) => {
+        const Icon = getIcon(state.iconName);
+
+        return (
+          <motion.div
+            key={state.id}
+            animate={state.animation}
+            transition={{ duration: 7.5, repeat: Infinity, ease: "easeInOut", repeatType: "mirror" }}
+            className={`absolute z-10 ${state.positionClass}`}
+          >
+            <div className="w-[96px] rounded-[24px] border border-white/10 bg-white/[0.06] px-3 py-3 shadow-[0_18px_60px_-30px_rgba(15,23,42,0.8)] backdrop-blur-xl sm:w-[138px] sm:px-4 sm:py-4">
+              <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-2xl bg-white/10 text-white sm:mb-3 sm:h-9 sm:w-9">
+                <Icon className="h-4 w-4" />
+              </div>
+              <p className="m-0 font-mono text-[9px] uppercase tracking-[0.2em] text-cyan-100/60 sm:text-[10px]">{state.eyebrow}</p>
+              <p className="m-0 mt-1.5 text-xs font-semibold leading-4 text-white sm:mt-2 sm:text-sm sm:leading-5">{state.title}</p>
+              <p className="m-0 mt-1 text-[10px] leading-4 text-slate-200/72 sm:mt-1.5 sm:text-[11px]">{state.detail}</p>
+            </div>
+          </motion.div>
+        );
+      })}
+
+      <div className="absolute inset-x-0 bottom-6 px-6 sm:bottom-8 sm:px-8">
+        <div className="rounded-2xl border border-white/10 bg-black/15 px-4 py-3 backdrop-blur-md">
+          <p className="m-0 font-mono text-[10px] uppercase tracking-[0.24em] text-cyan-100/60">Managed through content governance</p>
+          <p className="m-0 mt-1 text-xs text-slate-200/72 sm:text-sm">Four states stay in sync around one launch decision instead of colliding into a dashboard pile.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function LandingPage() {
   const [, setLocation] = useLocation();
 
+  const scrollToSection = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
-    <div className="min-h-screen bg-background" itemScope itemType="https://schema.org/WebPage">
-      {/* Navigation — semantic <nav> with aria-label for accessibility & SEO */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b" aria-label="Main navigation" itemScope itemType="https://schema.org/SiteNavigationElement">
-        <div className="max-w-[1600px] mx-auto px-6 h-16 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2" aria-label="Pivotal B2B - DemandGentic: Agentic Demand Generation & ABM Platform" title="Pivotal B2B - DemandGentic Home">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/5 border border-violet-500/10 shrink-0">
-              <div className="relative flex items-center justify-center">
-                <span className="font-bold text-sm text-violet-700 tracking-tighter">PB</span>
-                <Sparkles className="h-2 w-2 text-blue-500 absolute -top-1 -right-1.5" />
-              </div>
+    <div className="min-h-screen bg-[#f5fbfb] text-slate-950" itemScope itemType="https://schema.org/WebPage">
+      <nav className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-[#04131a]/80 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+          <a href="/" className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-200/20 bg-cyan-300/10 text-white">
+              <span className="font-display text-sm font-bold tracking-tight">{BRAND.company.logoInitials}</span>
             </div>
-            <div className="flex flex-col">
-              <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
-              <span className="text-[10px] text-muted-foreground font-medium">Agentic Demand Generation & ABM for B2B</span>
+            <div className="hidden sm:block">
+              <p className="font-display text-lg font-semibold text-white">{BRAND.company.parentBrand}</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-cyan-100/70">{BRAND.company.productName}</p>
             </div>
           </a>
-          <div className="hidden md:flex items-center gap-8" role="menubar">
-            <a href="#our-solutions" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Our Solutions</a>
-            <a href="#platform" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Platform</a>
-            <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Features</a>
-            <a href="/resources-centre" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">Resources</a>
-            <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors" role="menuitem">About Us</a>
+
+          <div className="hidden items-center gap-7 lg:flex">
+            {HOMEPAGE_GOVERNANCE.navigation.map((item) => (
+              <button
+                key={item.href}
+                type="button"
+                onClick={() => scrollToSection(item.href.replace("#", ""))}
+                className="text-sm font-medium text-slate-300 transition-colors hover:text-white"
+              >
+                {item.label}
+              </button>
+            ))}
+            <a href="/resources-centre" className="text-sm font-medium text-slate-300 transition-colors hover:text-white">
+              Resources
+            </a>
           </div>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")}>
+
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" onClick={() => setLocation("/client-portal/login")} className="hidden text-slate-200 hover:bg-white/10 hover:text-white sm:inline-flex">
               Client Login
             </Button>
-            <Button onClick={() => setLocation("/book/admin/demo")} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
-              Book a Live Strategy Session
-              <ArrowRight className="ml-2 h-4 w-4" />
+            <Button onClick={() => setLocation("/book/admin/demo")} className="bg-cyan-400 text-slate-950 hover:bg-cyan-300">
+              {HOMEPAGE_GOVERNANCE.hero.primaryCta}
+              <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
       </nav>
 
-      <header className="pt-32 pb-24 relative overflow-hidden perspective-1000" role="banner">
-        <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-background to-blue-50" />
-        <div className="absolute top-20 right-0 w-[800px] h-[800px] bg-gradient-to-br from-violet-500/10 to-indigo-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-gradient-to-tr from-blue-500/10 to-cyan-500/10 rounded-full blur-3xl" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#8882_1px,transparent_1px),linear-gradient(to_bottom,#8882_1px,transparent_1px)] bg-[size:14px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
-
-        <div className="max-w-[1600px] mx-auto px-6 relative grid lg:grid-cols-2 gap-12 items-center">
-          <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            className="text-left max-w-3xl"
-          >
-            <Badge className="mb-6 px-4 py-2 bg-gradient-to-r from-violet-500/10 to-indigo-500/10 text-violet-700 border-violet-200/50 hover:bg-violet-500/10">
-              <Sparkles className="h-3.5 w-3.5 mr-2" />
-              {PUBLIC_PAGES_MESSAGING.category}
-            </Badge>
-
-            <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 leading-[1.1]" data-speakable="true">
-              <span className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 bg-clip-text text-transparent">
-                {PUBLIC_PAGES_MESSAGING.headline}
-              </span>
-              <br />
-              <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 bg-clip-text text-transparent">
-                {PUBLIC_PAGES_MESSAGING.subHeadline}
-              </span>
-            </h1>
-
-            <p className="text-lg md:text-xl text-muted-foreground mb-4 leading-relaxed font-medium" data-speakable="true">
-              {PUBLIC_PAGES_MESSAGING.tagline}
-            </p>
-
-            <p className="text-base md:text-lg text-muted-foreground mb-8 leading-relaxed" data-speakable="true">
-              {PUBLIC_PAGES_MESSAGING.valueProposition}
-            </p>
-
-            {/* SEO: keyword-rich descriptor hidden visually but readable by crawlers and AI */}
-            <p className="sr-only">
-              Pivotal B2B - DemandGentic is the leading agentic demand generation and agentic account-based marketing (ABM) platform for B2B marketing and sales pipeline acceleration. Our AI-powered platform combines voice AI agents, intelligent email orchestration, and generative content creation to deliver qualified pipeline from target accounts.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/25 transition-all hover:scale-105">
-                Book a Live Strategy Session
-                <ArrowRight className="ml-2 h-5 w-5" />
-              </Button>
-              <Button size="lg" variant="outline" className="text-base h-14 px-8 border-2 transition-all hover:scale-105" onClick={() => {
-                document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
-              }}>
-                <Play className="mr-2 h-5 w-5" />
-                See Platform Walkthrough
-              </Button>
-            </div>
-
-            <div className="mt-8 flex flex-wrap gap-3">
-              {[
-                "Enterprise-ready governance",
-                "Voice + email + workflow orchestration",
-                "Reasoning-first AI with full audit trail",
-              ].map((pill, i) => (
-                <Badge key={i} variant="outline" className="bg-white/60 backdrop-blur-sm border-violet-200 text-violet-800">
-                  {pill}
-                </Badge>
-              ))}
-            </div>
-          </motion.div>
-
-          {/* 3D Animated Visualization */}
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.8, rotateY: 20 }}
-            animate={{ opacity: 1, scale: 1, rotateY: 0 }}
-            transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
-            className="relative h-[600px] hidden lg:block perspective-1000"
-          >
-            <div className="absolute inset-0 flex items-center justify-center transform-style-3d">
-              {/* Central Core */}
-              <motion.div 
-                animate={{ 
-                  rotateY: [0, 360],
-                  rotateX: [10, -10, 10]
-                }}
-                transition={{ 
-                  rotateY: { duration: 20, repeat: Infinity, ease: "linear" },
-                  rotateX: { duration: 5, repeat: Infinity, ease: "easeInOut" }
-                }}
-                className="relative w-64 h-64 transform-style-3d"
-              >
-                {/* Core Sphere/Glow */}
-                <div className="absolute inset-0 bg-gradient-to-tr from-violet-600 to-indigo-500 rounded-full blur-2xl opacity-40 animate-pulse" />
-                
-                {/* Floating Cards */}
-                {[
-                  { icon: Brain, title: "Intelligence", color: "violet", delay: 0, z: 100, x: -80, y: -80 },
-                  { icon: Phone, title: "Voice AI", color: "amber", delay: 0.2, z: 150, x: 80, y: -40 },
-                  { icon: Wand2, title: "Content", color: "emerald", delay: 0.4, z: 80, x: -60, y: 80 },
-                  { icon: Target, title: "Orchestration", color: "blue", delay: 0.6, z: 120, x: 60, y: 60 },
-                ].map((card, i) => (
-                  <motion.div
-                    key={i}
-                    animate={{ 
-                      y: [card.y, card.y - 20, card.y],
-                      rotateZ: [-2, 2, -2]
-                    }}
-                    transition={{ 
-                      duration: 4, 
-                      repeat: Infinity, 
-                      ease: "easeInOut",
-                      delay: card.delay 
-                    }}
-                    className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 bg-white/90 backdrop-blur-xl border border-white/50 rounded-2xl p-4 shadow-2xl shadow-${card.color}-500/20`}
-                    style={{
-                      transform: `translate3d(${card.x}px, ${card.y}px, ${card.z}px)`,
-                    }}
-                  >
-                    <div className={`h-10 w-10 rounded-xl bg-${card.color}-100 flex items-center justify-center mb-3`}>
-                      <card.icon className={`h-5 w-5 text-${card.color}-600`} />
-                    </div>
-                    <div className="font-bold text-sm text-slate-800">{card.title}</div>
-                    <div className="h-1.5 w-1/2 bg-slate-200 rounded-full mt-2" />
-                    <div className="h-1.5 w-3/4 bg-slate-200 rounded-full mt-1.5" />
-                  </motion.div>
-                ))}
-
-                {/* Connecting Lines (SVG) */}
-                <svg className="absolute inset-0 w-full h-full overflow-visible pointer-events-none" style={{ transform: 'translateZ(50px)' }}>
-                  <motion.circle 
-                    cx="128" cy="128" r="100" 
-                    fill="none" stroke="url(#grad1)" strokeWidth="2" strokeDasharray="4 4"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-                    style={{ transformOrigin: 'center' }}
-                  />
-                  <motion.circle 
-                    cx="128" cy="128" r="140" 
-                    fill="none" stroke="url(#grad2)" strokeWidth="1" strokeDasharray="8 8"
-                    animate={{ rotate: -360 }}
-                    transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
-                    style={{ transformOrigin: 'center' }}
-                  />
-                  <defs>
-                    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.5" />
-                      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.5" />
-                    </linearGradient>
-                    <linearGradient id="grad2" x1="100%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity="0.3" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </motion.div>
-            </div>
-          </motion.div>
-        </div>
-      </header>
-
       <main>
-      {/* ─── FEATURED INTELLIGENCE SYSTEMS ─────────────────────────── */}
-      <section className="py-24 px-6 bg-white" id="features" aria-labelledby="features-heading">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-14">
-            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              <CircleDot className="h-3.5 w-3.5 mr-2" />
-              Agentic Demand Generation Features
-            </Badge>
-            <h2 id="features-heading" className="text-4xl md:text-5xl font-bold mb-5">
-              The AI Systems That Power
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent"> B2B Sales Pipeline</span>
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-              Our agentic demand generation platform features purpose-built intelligence systems for ABM execution — including AI voice agents, queue scoring, and organization-exclusive content generation.
-            </p>
+        <section id="story" className="relative overflow-hidden bg-[#04131a] pb-24 pt-40 text-white md:pt-44">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_34%),radial-gradient(circle_at_85%_15%,rgba(45,212,191,0.16),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.12),transparent_24%)]" />
+          <div className="relative mx-auto grid max-w-7xl gap-14 px-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+            <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: "easeOut" }} className="max-w-3xl">
+              <SectionBadge className="border-cyan-300/30 bg-cyan-300/10 text-cyan-100">
+                {HOMEPAGE_GOVERNANCE.hero.badge} - v{HOMEPAGE_GOVERNANCE.version}
+              </SectionBadge>
+              <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.28em] text-cyan-100/75">{HOMEPAGE_GOVERNANCE.hero.eyebrow}</p>
+              <h1 className="mt-6 font-display text-5xl font-semibold leading-[1.02] tracking-[-0.04em] text-white md:text-6xl lg:text-[5.5rem]">
+                {HOMEPAGE_GOVERNANCE.hero.headline}
+              </h1>
+              <p className="mt-5 font-display text-2xl font-medium tracking-[-0.03em] text-cyan-100 md:text-3xl">
+                {HOMEPAGE_GOVERNANCE.hero.subHeadline}
+              </p>
+              <p className="mt-8 text-lg leading-8 text-slate-200/88">{HOMEPAGE_GOVERNANCE.hero.summary}</p>
+              <div className="mt-8 grid gap-3">
+                {HOMEPAGE_GOVERNANCE.hero.bullets.map((bullet) => (
+                  <div key={bullet} className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 backdrop-blur-md">
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-300" />
+                    <span className="text-sm leading-6 text-slate-100/88">{bullet}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+                <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="h-14 bg-cyan-400 px-8 text-base text-slate-950 hover:bg-cyan-300">
+                  {HOMEPAGE_GOVERNANCE.hero.primaryCta}
+                  <ArrowRight className="h-5 w-5" />
+                </Button>
+                <Button size="lg" variant="outline" onClick={() => scrollToSection("platform")} className="h-14 border-white/15 bg-white/5 px-8 text-base text-white hover:bg-white/10">
+                  <Play className="h-5 w-5" />
+                  {HOMEPAGE_GOVERNANCE.hero.secondaryCta}
+                </Button>
+              </div>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Badge className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-200">
+                  {TAGLINE.primary}
+                </Badge>
+                <Badge className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1.5 text-xs font-medium text-cyan-100">
+                  {HOMEPAGE_GOVERNANCE.hero.supportingLabel}
+                </Badge>
+              </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 36 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.12, ease: "easeOut" }} className="pt-4 lg:pt-0">
+              <RuntimeVisual />
+            </motion.div>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[
-              {
-                icon: Brain,
-                title: "Problem Intelligence Layer",
-                description: "Maps account-level context and buying-committee signals before outreach begins.",
-                proof: "Show account context changing messaging direction before first touchpoint.",
-                color: "violet",
-              },
-              {
-                icon: Phone,
-                title: "Real-Time AI Voice System",
-                description: "Runs live conversational calls with function-driven actions and structured disposition capture.",
-                proof: "Show one call lifecycle from initiation to disposition logged.",
-                color: "amber",
-              },
-              {
-                icon: LayoutDashboard,
-                title: "Queue Scoring with AI",
-                description: "Prioritizes queue items using account, contact, and intent-quality signals for smarter call and outreach sequencing.",
-                proof: "Show queue rank changes based on scoring signals and campaign rules.",
-                scoringFactors: [
-                  { label: "ICP fit", weight: "35%" },
-                  { label: "Intent/engagement", weight: "25%" },
-                  { label: "Data quality", weight: "20%" },
-                  { label: "Timing/readiness", weight: "20%" },
-                ],
-                color: "indigo",
-              },
-              {
-                icon: Shield,
-                title: "Compliance & Suppression Intelligence",
-                description: "Applies policy-aware gating for calls and emails to reduce legal and brand risk.",
-                proof: "Show a suppressed target blocked automatically.",
-                color: "emerald",
-              },
-              {
-                icon: TrendingUp,
-                title: "QA + Revenue Intelligence Loop",
-                description: "Combines quality scoring, disposition quality, and pipeline signals for continuous optimization.",
-                proof: "Show quality signal to optimization feedback in one campaign cycle.",
-                color: "blue",
-              },
-              {
-                icon: Wand2,
-                title: "Organization-Exclusive AI Studio",
-                description: "Generates and refines campaign assets on an organization-specific intelligence layer with brand constraints and approval-aware workflows.",
-                proof: "Show org-specific draft → refine → publish-ready output in one pass.",
-                color: "rose",
-              },
-            ].map((item, i) => (
-              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
-                <CardContent className="p-6">
-                  <div className={`h-12 w-12 rounded-xl bg-${item.color}-100 flex items-center justify-center mb-4`}>
-                    <item.icon className={`h-6 w-6 text-${item.color}-600`} />
-                  </div>
-                  <h3 className="text-lg font-bold mb-2">{item.title}</h3>
-                  <p className="text-sm text-muted-foreground mb-4">{item.description}</p>
-                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <p className="text-xs font-medium text-slate-700">Demo proof: {item.proof}</p>
-                  </div>
-                  {item.title === "Queue Scoring with AI" && (
-                    <div className="mt-3 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
-                      <p className="text-xs font-semibold text-indigo-700 mb-2 uppercase tracking-wide">Example scoring factors</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(item as any).scoringFactors?.map((factor: { label: string; weight: string }, idx: number) => (
-                          <div key={idx} className="flex items-center justify-between text-xs bg-white border border-indigo-100 rounded px-2 py-1.5">
-                            <span className="text-slate-700">{factor.label}</span>
-                            <span className="font-semibold text-indigo-700">{factor.weight}</span>
-                          </div>
-                        ))}
+          <div className="border-t border-white/10 bg-black/15">
+            <div className="mx-auto grid max-w-7xl gap-4 px-6 py-6 md:grid-cols-2 xl:grid-cols-4">
+              {HOMEPAGE_GOVERNANCE.proofBar.map((item) => (
+                <div key={item.label} className="rounded-[24px] border border-white/10 bg-white/5 px-5 py-4 backdrop-blur-md">
+                  <p className="font-display text-3xl font-semibold tracking-[-0.03em] text-white">{item.value}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">{item.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="px-6 py-24">
+          <div className="mx-auto max-w-7xl">
+            <SectionBadge className="border-slate-200 bg-white text-slate-700">Platform Story</SectionBadge>
+            <h2 className="mt-5 max-w-4xl font-display text-4xl font-semibold tracking-[-0.04em] text-slate-950 md:text-5xl">
+              The old stack creates activity. It does not create shared judgment.
+            </h2>
+            <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-600">
+              The newest version of the platform is built to replace fragmented execution, generic outreach,
+              and unguided AI with one reasoning-first, auditable operating model.
+            </p>
+
+            <div className="mt-12 grid gap-6 lg:grid-cols-3">
+              {HOMEPAGE_GOVERNANCE.stackFrictions.map((item) => {
+                const Icon = getIcon(item.iconName);
+
+                return (
+                  <Card key={item.title} className="h-full border-slate-200 bg-white shadow-[0_24px_80px_-48px_rgba(15,23,42,0.25)]">
+                    <CardContent className="p-7">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-600">
+                          {item.stat}
+                        </div>
+                      </div>
+                      <h3 className="mt-6 font-display text-2xl font-semibold tracking-[-0.03em] text-slate-950">{item.title}</h3>
+                      <p className="mt-4 text-base leading-7 text-slate-600">{item.description}</p>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section id="platform" className="bg-white px-6 py-24">
+          <div className="mx-auto max-w-7xl">
+            <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+              <div>
+                <SectionBadge className="border-cyan-200 bg-cyan-50 text-cyan-900">Orchestration Flow</SectionBadge>
+                <h2 className="mt-5 font-display text-4xl font-semibold tracking-[-0.04em] text-slate-950 md:text-5xl">
+                  The platform behaves like an operating system, not a tool bundle.
+                </h2>
+                <p className="mt-5 text-lg leading-8 text-slate-600">
+                  Intelligence comes first, creation follows context, simulation happens before launch, and governance stays visible the entire way through.
+                </p>
+
+                <div className="mt-10 space-y-4">
+                  {HOMEPAGE_GOVERNANCE.orchestrationFlow.map((item) => (
+                    <div key={item.step} className="rounded-[24px] border border-slate-200 bg-slate-50 px-5 py-5">
+                      <div className="flex items-start gap-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-950 font-mono text-xs font-semibold tracking-[0.22em] text-white">
+                          {item.step}
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-slate-950">{item.title}</h3>
+                          <p className="mt-2 text-sm leading-6 text-slate-600">{item.description}</p>
+                        </div>
                       </div>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── MARKET REALITY / REFRAME ─────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden" id="the-problem" aria-labelledby="problems-heading">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
-
-        <div className="max-w-7xl mx-auto relative">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/10">
-              <AlertTriangle className="h-3.5 w-3.5 mr-2" />
-              Why Agentic ABM
-            </Badge>
-            <h2 id="problems-heading" className="text-4xl md:text-5xl font-bold mb-6">
-              Traditional B2B marketing optimizes for{" "}
-              <span className="text-red-400">volume.</span>
-              <br />
-              Agentic account-based marketing wins with{" "}
-              <span className="text-emerald-400">precision.</span>
-            </h2>
-            <p className="text-xl text-slate-400 max-w-3xl mx-auto">
-              DemandGentic is the agentic demand generation platform built for modern B2B buying: buying committees, long sales cycles,
-              strict compliance, and brand risk.
-            </p>
-          </div>
-
-          {/* Outcomes */}
-          <div className="grid md:grid-cols-3 gap-8 mb-16">
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="h-14 w-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center mb-6">
-                  <Calendar className="h-7 w-7 text-emerald-400" />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-white">More Qualified Meetings</h3>
-                <p className="text-slate-400">
-                  Create more qualified meetings in target accounts with coordinated,
-                  reasoning-first outreach across voice, email, and contextual follow-up.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="h-14 w-14 rounded-2xl bg-blue-500/10 flex items-center justify-center mb-6">
-                  <Users className="h-7 w-7 text-blue-400" />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-white">Multi-Thread Buying Committees</h3>
-                <p className="text-slate-400">
-                  Engage buying committees with role-aware messaging, stakeholder-level memory,
-                  and orchestration across every key contact in the account.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-white/5 border-white/10 backdrop-blur">
-              <CardContent className="p-8">
-                <div className="h-14 w-14 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-6">
-                  <Shield className="h-7 w-7 text-violet-400" />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-white">Scale with Governance</h3>
-                <p className="text-slate-400">
-                  Scale execution with compliance controls, approvals, suppression safeguards,
-                  and full traceability at every step of the process.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── PIPELINE PROTECTION ──────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-900 text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
-
-        <div className="max-w-5xl mx-auto relative">
-          <div className="text-center mb-12">
-            <Badge className="mb-4 bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/10">
-              <Shield className="h-3.5 w-3.5 mr-2" />
-              Pipeline Protection
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-2">
-              {PUBLIC_PAGES_MESSAGING.pipelineProtection.headline}
-            </h2>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              <span className="text-emerald-400">{PUBLIC_PAGES_MESSAGING.pipelineProtection.subHeadline}</span>
-            </h2>
-            <p className="text-xl text-slate-400 max-w-3xl mx-auto mb-8">
-              {PUBLIC_PAGES_MESSAGING.pipelineProtection.description}
-            </p>
-            <p className="text-lg text-slate-300 max-w-3xl mx-auto">
-              {PUBLIC_PAGES_MESSAGING.pipelineProtection.resolution}
-            </p>
-          </div>
-
-          {/* Precision Statement */}
-          <div className="p-8 rounded-2xl bg-white/5 border border-white/10 backdrop-blur text-center">
-            <p className="text-2xl md:text-3xl font-bold">
-              <span className="text-slate-400">{PUBLIC_PAGES_MESSAGING.precisionStatement.contrast}</span>{" "}
-              <span className="bg-gradient-to-r from-violet-400 to-emerald-400 bg-clip-text text-transparent">
-                {PUBLIC_PAGES_MESSAGING.precisionStatement.assertion}
-              </span>
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── WHAT DEMANDGENTIC IS ─────────────────────────────────────── */}
-      <section className="py-24 px-6 relative overflow-hidden" id="platform" aria-labelledby="platform-heading">
-        <div className="absolute inset-0 bg-gradient-to-b from-slate-50 to-white" />
-
-        <div className="max-w-5xl mx-auto relative text-center">
-          <Badge className="mb-4 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
-            <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
-            Agentic Demand Generation Platform
-          </Badge>
-          <h2 id="platform-heading" className="text-4xl md:text-5xl font-bold mb-6">
-            A Reasoning-First{" "}
-            <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              Agentic ABM Platform
-            </span>
-          </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8" data-speakable="true">
-            DemandGentic.ai is a reasoning-first agentic demand generation system that plans and executes account-based marketing plays — guided by your
-            team's strategy and constrained by your brand, rules, and approvals. Every B2B marketing interaction is reasoned before execution.
-          </p>
-
-          {/* One-liner definition */}
-          <div className="inline-block p-6 rounded-2xl bg-violet-50 border border-violet-200">
-            <div className="flex items-center gap-3 justify-center mb-2">
-              <Lightbulb className="h-5 w-5 text-violet-600" />
-              <span className="text-sm font-bold uppercase tracking-wider text-violet-600">Reasoning-First Defined</span>
-            </div>
-            <p className="text-lg text-violet-900 font-medium max-w-2xl">
-              Every action is justified before it runs—and can be reviewed after it happens.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* --- PLATFORM OVERVIEW (STRATEGIC, INTELLIGENCE, EXECUTION) --- */}
-      <section className="py-24 px-6 bg-slate-50" id="platform">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              The Platform
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Three Distinct Layers of{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">B2B Demand</span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-              Our architecture combines human strategic expertise, organization-specific intelligence, and 
-              AI-powered execution to deliver cohesive, reasoning-first campaigns.
-            </p>
-          </div>
-
-          <div className="space-y-12">
-            {/* Layer 1: The Strategic Layer */}
-            <div className="grid lg:grid-cols-2 gap-12 items-center bg-white p-8 md:p-12 rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50">
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-12 w-12 rounded-xl bg-violet-100 flex items-center justify-center">
-                    <Users className="h-6 w-6 text-violet-600" />
-                  </div>
-                  <Badge className="bg-violet-50 text-violet-700 border-violet-200">The Strategic Layer</Badge>
-                </div>
-                <h3 className="text-3xl font-bold mb-4">Human-Led Strategy</h3>
-                <p className="text-lg text-slate-600 mb-6">
-                  Before any automation executes, we define the roadmap. Built on 11+ years of pure B2B demand generation experience, our human experts orchestrate the foundational plays. 
-                </p>
-                <ul className="space-y-3">
-                  {[
-                    "Deep problem-solution mapping tailored to your ICP",
-                    "Precise targeting informed by human intelligence and precision data",
-                    "Brand and message positioning that respects your market authority",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <CheckCircle2 className="h-5 w-5 text-violet-500 mt-0.5 shrink-0" />
-                      <span className="text-slate-700">{item}</span>
-                    </li>
                   ))}
-                </ul>
-              </div>
-              <div className="relative h-full min-h-[300px] rounded-2xl overflow-hidden bg-gradient-to-br from-violet-50 to-indigo-50 border border-violet-100 flex items-center justify-center p-8">
-                <div className="w-full max-w-sm space-y-4 relative z-10">
-                  <div className="h-4 w-1/3 bg-violet-200/50 rounded-full" />
-                  <div className="h-12 w-full bg-white/80 backdrop-blur-sm rounded-xl shadow-sm border border-slate-100 flex items-center px-4 gap-3">
-                    <Target className="h-5 w-5 text-violet-500" />
-                    <div className="h-2 w-1/2 bg-slate-200 rounded-full" />
-                  </div>
-                  <div className="h-12 w-5/6 bg-white/80 backdrop-blur-sm rounded-xl shadow-sm border border-slate-100 flex items-center px-4 gap-3">
-                    <Search className="h-5 w-5 text-indigo-500" />
-                    <div className="h-2 w-2/3 bg-slate-200 rounded-full" />
-                  </div>
                 </div>
-                {/* Decorative background elements */}
-                <div className="absolute top-0 right-0 w-32 h-32 bg-violet-500/10 rounded-full blur-2xl" />
-                <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl" />
               </div>
-            </div>
 
-            {/* Layer 2: The Intelligence Layer */}
-            <div className="grid lg:grid-cols-2 gap-12 items-center bg-slate-900 text-white p-8 md:p-12 rounded-3xl border border-slate-800 shadow-xl shadow-slate-900/50 group">
-              <div className="order-2 lg:order-1 relative h-full min-h-[300px] rounded-2xl overflow-hidden bg-gradient-to-br from-slate-800 to-slate-950 border border-slate-700 flex items-center justify-center p-8">
-                 <div className="w-full max-w-sm space-y-4 relative z-10">
-                  <div className="flex gap-4">
-                    <div className="h-16 w-16 rounded-xl border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center">
-                      <Database className="h-6 w-6 text-emerald-400" />
-                    </div>
-                    <div className="flex-1 space-y-2 py-2">
-                       <div className="h-3 w-3/4 bg-slate-700 rounded-full" />
-                       <div className="h-2 w-1/2 bg-slate-700 rounded-full" />
-                    </div>
-                  </div>
-                  <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-4 border border-slate-700 transform transition-transform group-hover:scale-[1.02]">
-                    <div className="flex items-center gap-2 mb-3">
-                       <Wand2 className="h-4 w-4 text-emerald-400" />
-                       <span className="text-xs font-medium text-slate-300">Organization-Exclusive Studio</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-700 rounded-full mb-2" />
-                    <div className="h-2 w-5/6 bg-slate-700 rounded-full" />
-                  </div>
-                 </div>
-                 <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl" />
-              </div>
-              <div className="order-1 lg:order-2">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-12 w-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-                    <Brain className="h-6 w-6 text-emerald-400" />
-                  </div>
-                  <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">The Intelligence Layer</Badge>
-                </div>
-                <h3 className="text-3xl font-bold mb-4">Data, Insight & Content</h3>
-                <p className="text-lg text-slate-300 mb-6">
-                  We bridge your strategic objectives with an organization-exclusive intelligence system that ensures every action is aligned with your truth.
-                </p>
-                <ul className="space-y-3">
-                  {[
-                    "Continuous intelligence gathering at the account and contact level",
-                    "Precision data enrichment for accurate targeting",
-                    "An organization-exclusive content studio guided by the client�s brand",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <CheckCircle2 className="h-5 w-5 text-emerald-400 mt-0.5 shrink-0" />
-                      <span className="text-slate-300">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+              <div className="grid gap-5 md:grid-cols-2">
+                {HOMEPAGE_GOVERNANCE.platformModules.map((module) => {
+                  const Icon = getIcon(module.iconName);
+                  const tone = toneStyles[module.tone as keyof typeof toneStyles];
 
-            {/* Layer 3: The Execution Layer */}
-            <div className="grid lg:grid-cols-2 gap-12 items-center bg-white p-8 md:p-12 rounded-3xl border border-slate-200 shadow-xl shadow-slate-200/50">
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-12 w-12 rounded-xl bg-blue-100 flex items-center justify-center">
-                    <Zap className="h-6 w-6 text-blue-600" />
-                  </div>
-                  <Badge className="bg-blue-50 text-blue-700 border-blue-200">The Execution Layer</Badge>
-                </div>
-                <h3 className="text-3xl font-bold mb-4">AI Agents & Orchestration</h3>
-                <p className="text-lg text-slate-600 mb-6">
-                  Our unified execution engine transforms strategy and intelligence into massive-scale, highly personalized outreach.
-                </p>
-                <ul className="space-y-3">
-                  {[
-                    "Core Capabilities: AI-powered calls, email execution, and workflow orchestration",
-                    "AI agents trained on 11+ years of B2B demand experience",
-                    "Full lifecycle coordination � from initial touches to verified handoffs",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <CheckCircle2 className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
-                      <span className="text-slate-700">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="relative h-full min-h-[300px] rounded-2xl overflow-hidden bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center p-8 group">
-                 <div className="w-full max-w-sm grid grid-cols-2 gap-4 relative z-10 transition-transform group-hover:scale-[1.02]">
-                   <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl shadow-sm border border-slate-200 text-center flex flex-col items-center">
-                     <Phone className="h-8 w-8 text-blue-500 mb-3" />
-                     <span className="text-sm font-bold text-slate-700">AI Voice</span>
-                   </div>
-                   <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl shadow-sm border border-slate-200 text-center flex flex-col items-center">
-                     <Mail className="h-8 w-8 text-indigo-500 mb-3" />
-                     <span className="text-sm font-bold text-slate-700">Email Gen</span>
-                   </div>
-                   <div className="bg-white/90 backdrop-blur-sm p-5 rounded-xl shadow-sm border border-slate-200 text-center flex flex-col items-center col-span-2">
-                     <Layers className="h-8 w-8 text-violet-500 mb-3" />
-                     <span className="text-sm font-bold text-slate-700">Campaign Orchestration</span>
-                   </div>
-                 </div>
-                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
+                  return (
+                    <Card key={module.name} className="h-full border-slate-200 bg-white shadow-[0_28px_80px_-56px_rgba(14,116,144,0.32)]">
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${tone}`}>
+                            <Icon className="h-5 w-5" />
+                          </div>
+                          <Badge className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
+                            {module.category}
+                          </Badge>
+                        </div>
+                        <h3 className="mt-6 font-display text-2xl font-semibold tracking-[-0.03em] text-slate-950">{module.name}</h3>
+                        <p className="mt-3 text-sm leading-7 text-slate-600">{module.description}</p>
+                        <div className="mt-6 space-y-2">
+                          {module.highlights.map((highlight) => (
+                            <div key={highlight} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                              <ChevronRight className="mt-0.5 h-4 w-4 text-cyan-700" />
+                              <span className="text-sm text-slate-700">{highlight}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ─── DATA & INTELLIGENCE ─────────────────────────────────────── */}
-      <section className="py-24 px-6 relative overflow-hidden" id="data">
-        <div className="absolute inset-0 bg-gradient-to-b from-slate-50 to-white" />
-
-        <div className="max-w-7xl mx-auto relative">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-50">
-              <Database className="h-3.5 w-3.5 mr-2" />
-              Data & Intelligence
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">{DATA_SECTION.headline}</h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto">{DATA_SECTION.subheadline}</p>
-          </div>
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-16">
-            {[
-              { icon: Users, number: STATS.verifiedContacts, label: "Verified B2B Contacts", sublabel: "Decision-makers across every industry", color: "violet" },
-              { icon: Globe, number: STATS.countriesCovered, label: "Countries Covered", sublabel: "True global reach for campaigns", color: "blue" },
-              { icon: Target, number: STATS.emailAccuracy, label: "Email Accuracy", sublabel: "Real-time verification before send", color: "emerald" },
-              { icon: RefreshCw, number: STATS.dataRefresh, label: "Data Refresh", sublabel: "Continuous hygiene eliminates decay", color: "amber" },
-            ].map((stat, i) => (
-              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white text-center">
-                <CardContent className="p-6">
-                  <div className={`h-14 w-14 rounded-2xl bg-${stat.color}-100 flex items-center justify-center mx-auto mb-4`}>
-                    <stat.icon className={`h-7 w-7 text-${stat.color}-600`} />
-                  </div>
-                  <div className="text-3xl font-bold mb-1">{stat.number}</div>
-                  <div className="font-semibold text-sm mb-1">{stat.label}</div>
-                  <div className="text-xs text-muted-foreground">{stat.sublabel}</div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Data Capabilities */}
-          <div className="grid md:grid-cols-3 gap-8 mb-12">
-            {[
-              { icon: CheckCircle2, title: "Verification Engine", description: "Every contact verified against multiple sources before entering your campaign. Real-time bounce prediction ensures deliverability.", color: "emerald" },
-              { icon: Database, title: "Enrichment & Hygiene", description: "Continuous data enrichment adds firmographics, technographics, and intent signals. Weekly refresh eliminates decay before it impacts results.", color: "blue" },
-              { icon: Search, title: "Intelligence Layer", description: "AI-driven research briefs, buying signals, and competitive intelligence layered on top of verified contact data for precision targeting.", color: "violet" },
-            ].map((cap, i) => (
-              <Card key={i} className="border hover:shadow-lg transition-all bg-white">
-                <CardContent className="p-8">
-                  <div className={`h-12 w-12 rounded-xl bg-${cap.color}-100 flex items-center justify-center mb-4`}>
-                    <cap.icon className={`h-6 w-6 text-${cap.color}-600`} />
-                  </div>
-                  <h3 className="text-lg font-bold mb-2">{cap.title}</h3>
-                  <p className="text-sm text-muted-foreground">{cap.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Data Promise */}
-          <div className="p-8 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-center">
-            <div className="flex items-center gap-2 justify-center mb-2">
-              <Shield className="h-5 w-5 text-blue-600" />
-              <span className="text-sm font-bold uppercase tracking-wider text-blue-600">Our Data Promise</span>
-            </div>
-            <h3 className="text-2xl font-bold mb-2">{DATA_SECTION.promise.headline}</h3>
-            <p className="text-muted-foreground max-w-2xl mx-auto">{DATA_SECTION.promise.description}</p>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── SERVICES GRID ────────────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-50" id="our-solutions" aria-labelledby="solutions-heading">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              <Layers className="h-3.5 w-3.5 mr-2" />
-              B2B Marketing Solutions
-            </Badge>
-            <h2 id="solutions-heading" className="text-4xl md:text-5xl font-bold mb-6">
-              Full-Stack{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                Agentic Demand Generation Services
-              </span>
-            </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto" data-speakable="true">
-              Complete B2B marketing and sales pipeline services — from ABM and AI voice agents to content creation and data enrichment — all powered by reasoning-first AI and governed by your brand.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[
-              { icon: Target, badge: "ABM", title: "AI-Led Account-Based Marketing", description: "Target, engage, and convert high-value accounts with intelligence-driven orchestration across email, voice, and content.", features: ["Buying committee mapping", "Cross-channel orchestration", "Account-level reasoning"], color: "violet" },
-              { icon: Phone, badge: "Voice AI", title: "Autonomous Voice AI", description: "AI systems that make and receive real phone calls with natural conversation, live objection handling, and seamless meeting booking.", features: ["Live phone conversations", "Real-time qualification", "Gatekeeper navigation"], color: "amber" },
-              { icon: Mail, badge: "Email Marketing", title: "Intelligent Email Marketing", description: "AI-crafted email campaigns with persona-specific sequences, smart send-time optimization, and reply sentiment analysis.", features: ["Persona-specific sequences", "Send-time optimization", "Reply sentiment analysis"], color: "sky" },
-              { icon: Wand2, badge: "Content Studio", title: "Generative Content Creation", description: "A full AI-powered content studio that generates landing pages, email campaigns, blog posts, eBooks, solution briefs, and images — all in your brand voice.", features: ["7 content generation engines", "One-click publishing", "AI-powered refinement"], color: "emerald" },
-              { icon: Bot, badge: "AI SDR", title: "AI SDR-as-a-Service", description: "Autonomous AI systems conduct first-touch outreach, qualification, follow-ups, and meeting booking across voice and email.", features: ["24/7 autonomous engagement", "Human-in-the-loop escalation", "Campaign-level guardrails"], color: "blue" },
-              { icon: LayoutDashboard, badge: "Pipeline", title: "Intelligent Pipeline Management", description: "Manage your entire top-of-funnel with AI-driven account staging, buyer journey tracking, and actionable revenue intelligence.", features: ["AI account scoring", "Buyer journey stages", "Revenue intelligence signals"], color: "indigo" },
-              { icon: Calendar, badge: "Appointments", title: "Qualified Appointment Generation", description: "We deliver BANT-qualified sales appointments directly to your team's calendar through multi-channel outreach.", features: ["Full top-of-funnel management", "Multi-channel outreach", "No-show follow-up"], color: "rose" },
-              { icon: Search, badge: "Intelligence", title: "Market & Account Intelligence", description: "Deep research, enrichment, and analysis of accounts and industries to power better GTM decisions.", features: ["ICP refinement", "Competitive landscape", "Buying signal detection"], color: "cyan" },
-              { icon: Database, badge: "Data", title: "B2B Data & Enrichment", description: "Access our 70M+ verified contact database or enrich your existing data with our verification and hygiene engine.", features: ["Custom list building", "Multi-source verification", "Continuous hygiene"], color: "slate" },
-            ].map((service, i) => (
-              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className={`h-12 w-12 rounded-xl bg-${service.color}-100 flex items-center justify-center shrink-0`}>
-                      <service.icon className={`h-6 w-6 text-${service.color}-600`} />
-                    </div>
-                    <Badge className={`bg-${service.color}-50 text-${service.color}-700 border-${service.color}-200`}>
-                      {service.badge}
-                    </Badge>
-                  </div>
-                  <h3 className="text-lg font-bold mb-2">{service.title}</h3>
-                  <p className="text-sm text-muted-foreground mb-4">{service.description}</p>
-                  <ul className="space-y-1.5">
-                    {service.features.map((feature, j) => (
-                      <li key={j} className="flex items-center gap-2 text-xs text-slate-600">
-                        <CheckCircle2 className={`h-3 w-3 text-${service.color}-500`} />
-                        {feature}
-                      </li>
+        <section id="governance" className="relative overflow-hidden bg-[#062029] px-6 py-24 text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.18),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(45,212,191,0.14),transparent_35%)]" />
+          <div className="relative mx-auto max-w-7xl">
+            <div className="grid gap-12 lg:grid-cols-[0.95fr_1.05fr]">
+              <div className="max-w-3xl">
+                <SectionBadge className="border-cyan-300/25 bg-cyan-300/10 text-cyan-100">
+                  {HOMEPAGE_GOVERNANCE.governanceStory.badge}
+                </SectionBadge>
+                <h2 className="mt-5 font-display text-4xl font-semibold tracking-[-0.04em] text-white md:text-5xl">
+                  {HOMEPAGE_GOVERNANCE.governanceStory.title}
+                </h2>
+                <p className="mt-5 text-lg leading-8 text-slate-200/82">{HOMEPAGE_GOVERNANCE.governanceStory.description}</p>
+                <div className="mt-8 rounded-[28px] border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-cyan-100/75">Governance controls</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {HOMEPAGE_GOVERNANCE.managedThrough.map((item) => (
+                      <Badge key={item} className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-slate-100">
+                        {item}
+                      </Badge>
                     ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ─── MID-PAGE CTA ───────────────────────────────────────────── */}
-      <section className="py-16 px-6 bg-white border-y">
-        <div className="max-w-5xl mx-auto text-center">
-          <h3 className="text-3xl md:text-4xl font-bold mb-3">
-            Ready to accelerate your B2B sales pipeline with agentic ABM?
-          </h3>
-          <p className="text-muted-foreground text-lg max-w-3xl mx-auto mb-8">
-            See how Pivotal B2B - DemandGentic fits your B2B marketing workflow, governance model, and sales pipeline goals.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-12 px-7 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700">
-              Book a Live Strategy Session
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-            <Button size="lg" variant="outline" className="text-base h-12 px-7" onClick={() => setLocation("/proposal-request")}>
-              Request a Proposal
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── ENTERPRISE READINESS / PROOF ───────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-50" id="enterprise-proof" aria-labelledby="enterprise-heading">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-14">
-            <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
-              <ClipboardCheck className="h-3.5 w-3.5 mr-2" />
-              Enterprise B2B Marketing
-            </Badge>
-            <h2 id="enterprise-heading" className="text-4xl md:text-5xl font-bold mb-5">
-              Enterprise-Grade ABM for Complex B2B Sales Pipeline
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
-              Deploy agentic account-based marketing with practical controls for multi-stakeholder teams, governed execution, and measurable sales pipeline outcomes.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card className="border-2 bg-white">
-              <CardContent className="p-7">
-                <div className="flex items-center gap-2 mb-3">
-                  <Users className="h-5 w-5 text-violet-600" />
-                  <h3 className="font-bold text-lg">Who It's For</h3>
+                  </div>
                 </div>
-                <ul className="space-y-2 text-sm text-muted-foreground">
-                  {[
-                    "B2B vendors with multi-thread buying journeys",
-                    "Demand Gen + RevOps teams managing complex funnels",
-                    "Sales organizations requiring quality-controlled pipeline",
-                    "Leaders needing enterprise governance and auditability",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-violet-500 mt-0.5" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
+              </div>
 
-            <Card className="border-2 bg-white">
-              <CardContent className="p-7">
-                <div className="flex items-center gap-2 mb-3">
-                  <Target className="h-5 w-5 text-indigo-600" />
-                  <h3 className="font-bold text-lg">High-Impact Use Cases</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-muted-foreground">
-                  {[
-                    "Launch net-new ABM programs with faster signal-to-meeting cycles",
-                    "Recover underperforming outbound through reasoning-first sequencing",
-                    "Improve pipeline quality with role-aware, account-level orchestration",
-                    "Scale top-of-funnel without sacrificing compliance or brand control",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-indigo-500 mt-0.5" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
+              <div className="grid gap-5 md:grid-cols-2">
+                {HOMEPAGE_GOVERNANCE.governanceStory.pillars.map((item) => {
+                  const Icon = getIcon(item.iconName);
 
-            <Card className="border-2 bg-white">
-              <CardContent className="p-7">
-                <div className="flex items-center gap-2 mb-3">
-                  <Shield className="h-5 w-5 text-emerald-600" />
-                  <h3 className="font-bold text-lg">Security, Compliance, Governance</h3>
-                </div>
-                <ul className="space-y-2 text-sm text-muted-foreground">
-                  {[
-                    "Suppression-aware execution and policy-aligned outreach",
-                    "Approval controls for sensitive messaging and campaigns",
-                    "Full interaction traceability with audit-ready records",
-                    "Quality scoring loops to improve campaign integrity over time",
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-
-            <Card className="border-2 bg-white">
-              <CardContent className="p-7">
-                <div className="flex items-center gap-2 mb-3">
-                  <ChevronRight className="h-5 w-5 text-blue-600" />
-                  <h3 className="font-bold text-lg">Implementation Path</h3>
-                </div>
-                <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
-                  <li>Align ICP, success criteria, and governance controls.</li>
-                  <li>Activate agentic voice/email workflows with human oversight.</li>
-                  <li>Run in-market, score quality, and tune continuously.</li>
-                  <li>Scale proven motions across teams and regions.</li>
-                </ol>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── PHILOSOPHY / PRINCIPLES ──────────────────────────────────── */}
-      <section className="py-24 px-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-white to-slate-50" />
-
-        <div className="max-w-7xl mx-auto relative">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              <Brain className="h-3.5 w-3.5 mr-2" />
-              Our Principles
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              {TAGLINE.identity}:{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                Our Philosophy
-              </span>
-            </h2>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
-            {PRINCIPLES.map((principle, i) => {
-              const icons: Record<string, any> = { Brain, Database, Shield, UserCheck };
-              const PrincipleIcon = icons[principle.iconName] || Brain;
-              const colors = ["violet", "indigo", "emerald", "blue"];
-              const color = colors[i % colors.length];
-              return (
-                <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
-                  <CardContent className="p-8 text-center">
-                    <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-4">{principle.number}</div>
-                    <div className={`h-14 w-14 rounded-2xl bg-${color}-100 flex items-center justify-center mx-auto mb-5`}>
-                      <PrincipleIcon className={`h-7 w-7 text-${color}-600`} />
-                    </div>
-                    <h3 className="text-lg font-bold mb-3">{principle.title}</h3>
-                    <p className="text-sm text-muted-foreground">{principle.description}</p>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          {/* Identity Banner */}
-          <div className="p-8 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 text-center">
-            <p className="text-2xl font-bold mb-2">
-              We are{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                {TAGLINE.identity}
-              </span>
-            </p>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">{TAGLINE.full}</p>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── FOUNDER / ABOUT ──────────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-slate-50" id="about">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-50">
-              <Quote className="h-3.5 w-3.5 mr-2" />
-              Our Story
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Built by{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                {TAGLINE.identity}
-              </span>
-            </h2>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8 items-start">
-            {/* Stats Sidebar */}
-            <div className="space-y-4">
-              {[
-                { label: "Years of Experience", value: STATS.yearsExperience },
-                { label: "B2B Leads Generated", value: STATS.leadsGenerated },
-                { label: "Enterprise Clients", value: STATS.enterpriseClients },
-                { label: "Industries Served", value: STATS.industriesServed },
-                { label: "Global Campaigns", value: STATS.globalCampaigns },
-              ].map((stat, i) => (
-                <div key={i} className="p-4 rounded-xl bg-white border hover:shadow-md transition-shadow">
-                  <div className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">{stat.value}</div>
-                  <div className="text-sm text-muted-foreground">{stat.label}</div>
-                </div>
-              ))}
+                  return (
+                    <Card key={item.title} className="h-full border-white/10 bg-white/5 text-white backdrop-blur-xl">
+                      <CardContent className="p-6">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-300/10 text-cyan-100">
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <h3 className="mt-6 font-display text-2xl font-semibold tracking-[-0.03em] text-white">{item.title}</h3>
+                        <p className="mt-3 text-sm leading-7 text-slate-200/78">{item.description}</p>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
             </div>
+          </div>
+        </section>
 
-            {/* Founder Quote & Story */}
-            <div className="md:col-span-2">
-              <Card className="border-2 bg-white shadow-xl">
-                <CardContent className="p-10">
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-                      <span className="text-2xl font-bold text-white">{BRAND.founder.initials}</span>
+        <section id="about" className="px-6 py-24">
+          <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.05fr_0.95fr]">
+            <div>
+              <SectionBadge className="border-slate-200 bg-white text-slate-700">Our Story</SectionBadge>
+              <h2 className="mt-5 font-display text-4xl font-semibold tracking-[-0.04em] text-slate-950 md:text-5xl">
+                {HOMEPAGE_GOVERNANCE.story.title}
+              </h2>
+              <p className="mt-5 text-lg leading-8 text-slate-600">{HOMEPAGE_GOVERNANCE.story.body}</p>
+
+              <Card className="mt-8 border-slate-200 bg-white shadow-[0_24px_80px_-52px_rgba(15,23,42,0.24)]">
+                <CardContent className="p-7">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-slate-950 text-2xl font-semibold text-white">
+                      {BRAND.founder.initials}
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold">{BRAND.founder.name}</h3>
-                      <p className="text-sm text-muted-foreground">{BRAND.founder.title}</p>
-                      <p className="text-xs text-muted-foreground">Founded in {BRAND.company.foundedLocation}, {BRAND.company.foundedYear}</p>
+                      <p className="font-display text-xl font-semibold text-slate-950">{BRAND.founder.name}</p>
+                      <p className="text-sm text-slate-500">{BRAND.founder.title}</p>
+                      <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                        Founded in {BRAND.company.foundedLocation}, {BRAND.company.foundedYear}
+                      </p>
                     </div>
                   </div>
-
-                  <blockquote className="relative mb-8">
-                    <Quote className="h-8 w-8 text-violet-200 absolute -top-2 -left-2" />
-                    <p className="text-lg text-muted-foreground italic pl-8 leading-relaxed">
-                      {FOUNDER_QUOTES.landing}
-                    </p>
+                  <blockquote className="mt-6 border-l-2 border-cyan-300 pl-5 text-lg leading-8 text-slate-700">
+                    {FOUNDER_QUOTES.landing}
                   </blockquote>
+                  <div className="mt-6 grid gap-4 sm:grid-cols-3">
+                    {[
+                      { label: "Years", value: STATS.yearsExperience },
+                      { label: "Enterprise clients", value: STATS.enterpriseClients },
+                      { label: "Global campaigns", value: STATS.globalCampaigns },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                        <p className="font-display text-2xl font-semibold tracking-[-0.03em] text-slate-950">{item.value}</p>
+                        <p className="mt-1 text-sm text-slate-500">{item.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-                  <div className="pt-6 border-t">
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      From {BRAND.company.foundedLocation} to {BRAND.company.location}, Pivotal B2B has grown from a bootstrapped startup
-                      into a reasoning-first demand generation platform serving enterprise B2B vendors worldwide.
-                      With {STATS.yearsExperience} years of front-line experience, {STATS.leadsGenerated} leads generated,
-                      and {STATS.enterpriseClients} enterprise clients, we've learned that every interaction counts—and
-                      every interaction should be reasoned before it runs.
-                    </p>
+            <div className="space-y-6">
+              <Card className="border-slate-200 bg-white shadow-[0_24px_80px_-52px_rgba(15,23,42,0.22)]">
+                <CardContent className="p-7">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-900">
+                      <Users className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-display text-2xl font-semibold tracking-[-0.03em] text-slate-950">Built for operators</p>
+                      <p className="text-sm text-slate-500">The teams replacing noise with governed execution.</p>
+                    </div>
+                  </div>
+                  <div className="mt-6 space-y-3">
+                    {HOMEPAGE_GOVERNANCE.audiences.map((audience) => (
+                      <div key={audience} className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 text-cyan-700" />
+                        <span className="text-sm leading-6 text-slate-700">{audience}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-200 bg-[linear-gradient(145deg,#ecfeff_0%,#f8fafc_100%)] shadow-[0_24px_80px_-52px_rgba(6,182,212,0.25)]">
+                <CardContent className="p-7">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
+                      <Database className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-display text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+                        Reasoning-first, nothing-forgotten execution
+                      </p>
+                      <p className="mt-3 text-sm leading-7 text-slate-600">{TAGLINE.corePromise}</p>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-
-
-
-      {/* ─── WHAT WE DELIVER ───────────────────────────────────────────── */}
-      <section className="py-24 px-6 relative overflow-hidden" id="built-for-you">
-        <div className="absolute inset-0 bg-gradient-to-b from-white to-slate-50" />
-
-        <div className="max-w-7xl mx-auto relative">
-          <div className="text-center mb-16">
-            <Badge className="mb-4 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-50">
-              <CheckCircle2 className="h-3.5 w-3.5 mr-2" />
-              B2B Marketing Deliverables
-            </Badge>
-            <h2 className="text-4xl md:text-5xl font-bold mb-6">
-              Everything You Need for{" "}
-              <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">Agentic Account-Based Marketing</span>
+        <section className="relative overflow-hidden bg-[linear-gradient(145deg,#06171d_0%,#0b2a34_52%,#09303b_100%)] px-6 py-24 text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.18),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(45,212,191,0.18),transparent_34%)]" />
+          <div className="relative mx-auto max-w-5xl text-center">
+            <SectionBadge className="border-cyan-300/25 bg-cyan-300/10 text-cyan-100">Final CTA</SectionBadge>
+            <h2 className="mt-6 font-display text-4xl font-semibold tracking-[-0.04em] text-white md:text-5xl">
+              {HOMEPAGE_GOVERNANCE.cta.title}
             </h2>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-            {[
-              { icon: Users, title: PUBLIC_PAGES_MESSAGING.deliverables[0], color: "violet" },
-              { icon: Brain, title: PUBLIC_PAGES_MESSAGING.deliverables[1], color: "indigo" },
-              { icon: Zap, title: PUBLIC_PAGES_MESSAGING.deliverables[2], color: "blue" },
-              { icon: Shield, title: PUBLIC_PAGES_MESSAGING.deliverables[3], color: "emerald" },
-              { icon: Eye, title: PUBLIC_PAGES_MESSAGING.deliverables[4], color: "amber" },
-              { icon: MessageSquare, title: PUBLIC_PAGES_MESSAGING.deliverables[5], color: "rose" },
-            ].map((item, i) => (
-              <Card key={i} className="border-2 hover:shadow-xl transition-all hover:-translate-y-1 bg-white">
-                <CardContent className="p-6 flex items-start gap-4">
-                  <div className={`h-12 w-12 rounded-xl bg-${item.color}-100 flex items-center justify-center shrink-0`}>
-                    <item.icon className={`h-6 w-6 text-${item.color}-600`} />
-                  </div>
-                  <p className="font-semibold text-sm pt-3">{item.title}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Built For section */}
-          <div className="p-8 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200">
-            <div className="text-center mb-6">
-              <h3 className="text-2xl font-bold mb-2">Built For Your Team</h3>
-              <p className="text-muted-foreground">Designed for the people who drive revenue.</p>
-            </div>
-            <div className="flex flex-wrap gap-3 justify-center">
-              {["CMOs & VP Marketing", "VP Sales & CROs", "Demand Gen Directors", "RevOps Leaders", "ABM Teams", "Sales Development Leaders", "Agency Owners", "Growth Leaders"].map((persona, i) => (
-                <div key={i} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white border border-violet-200 shadow-sm">
-                  <CheckCircle2 className="h-4 w-4 text-violet-500" />
-                  <span className="text-sm font-medium">{persona}</span>
-                </div>
-              ))}
+            <p className="mx-auto mt-5 max-w-3xl text-lg leading-8 text-slate-200/82">{HOMEPAGE_GOVERNANCE.cta.description}</p>
+            <div className="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
+              <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="h-14 bg-cyan-400 px-8 text-base text-slate-950 hover:bg-cyan-300">
+                {HOMEPAGE_GOVERNANCE.cta.primary}
+                <ArrowRight className="h-5 w-5" />
+              </Button>
+              <Button size="lg" variant="outline" onClick={() => setLocation("/proposal-request")} className="h-14 border-white/15 bg-white/5 px-8 text-base text-white hover:bg-white/10">
+                {HOMEPAGE_GOVERNANCE.cta.secondary}
+              </Button>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* ─── CLOSING STATEMENT ─────────────────────────────────────────── */}
-      <section className="py-20 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">
-            <span className="text-muted-foreground">{PUBLIC_PAGES_MESSAGING.closingStatement.contrast}</span>
-          </h2>
-          <h2 className="text-3xl md:text-4xl font-bold mb-8">
-            <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              {PUBLIC_PAGES_MESSAGING.closingStatement.assertion}
-            </span>
-          </h2>
-          <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            <span className="font-semibold text-foreground">Human-Led Strategy</span> +{" "}
-            <span className="font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              Agentic ABM Execution
-            </span>
-            —guided by your brand, constrained by your rules, built for what's next.
-          </p>
-        </div>
-      </section>
-
-      {/* ─── FINAL CTA ────────────────────────────────────────────────── */}
-      <section className="py-24 px-6 bg-gradient-to-br from-violet-600 via-indigo-600 to-blue-600 text-white relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmYiIGZpbGwtb3BhY2l0eT0iMC4xIj48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIyIi8+PC9nPjwvZz48L3N2Zz4=')] opacity-50" />
-
-        <div className="max-w-4xl mx-auto text-center relative">
-          <h2 className="text-4xl md:text-5xl font-bold mb-6">
-            Ready to accelerate your B2B sales pipeline with agentic demand generation?
-          </h2>
-
-          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-            <Button size="lg" onClick={() => setLocation("/book/admin/demo")} className="text-base h-14 px-8 bg-white text-violet-700 hover:bg-white/90 shadow-lg">
-              Book a Live Strategy Session
-              <ArrowRight className="ml-2 h-5 w-5" />
-            </Button>
-            <Button size="lg" variant="outline" onClick={() => setLocation("/proposal-request")} className="text-base h-14 px-8 border-white/50 text-white hover:bg-white/10">
-              Request a Proposal
-            </Button>
-          </div>
-        </div>
-      </section>
-
+        </section>
       </main>
 
-      {/* Footer */}
-      <footer className="py-16 px-6 bg-slate-900 text-white" itemScope itemType="https://schema.org/WPFooter">
-        <div className="max-w-[1600px] mx-auto">
-          <div className="grid md:grid-cols-5 gap-12 mb-12">
-            <div className="md:col-span-1">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/20 shrink-0">
-                  <div className="relative flex items-center justify-center">
-                    <span className="font-bold text-sm text-white tracking-tighter">PB</span>
-                    <Sparkles className="h-2 w-2 text-blue-400 absolute -top-1 -right-1.5" />
-                  </div>
+      <footer className="bg-[#04131a] px-6 py-16 text-white" itemScope itemType="https://schema.org/WPFooter">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-12 md:grid-cols-[1.3fr_1fr_1fr_1fr_1fr]">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+                  <span className="font-display text-sm font-bold tracking-tight">{BRAND.company.logoInitials}</span>
                 </div>
-                <div className="flex flex-col">
-                  <span className="font-bold text-lg leading-tight">{BRAND.company.parentBrand}</span>
-                  <span className="text-[10px] text-slate-400 font-medium">{TAGLINE.full}</span>
+                <div>
+                  <p className="font-display text-lg font-semibold">{BRAND.company.parentBrand}</p>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{BRAND.company.productName}</p>
                 </div>
               </div>
-              <p className="text-slate-400 text-sm mb-4">
-                {TAGLINE.footerTagline}
-              </p>
-              <div className="text-slate-500 text-xs space-y-1">
-                <p className="font-medium text-slate-400">{BRAND.company.legalName}</p>
+              <p className="mt-5 max-w-sm text-sm leading-7 text-slate-400">{TAGLINE.footerTagline}</p>
+              <div className="mt-5 space-y-1 text-sm text-slate-500">
+                <p className="font-medium text-slate-300">{BRAND.company.legalName}</p>
                 <p>{BRAND.company.location}</p>
-                <p><a href="tel:+14179003844" className="hover:text-white transition-colors">{BRAND.company.phone}</a></p>
-                <p><a href={`https://${BRAND.domains.primary}/`} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">{BRAND.domains.primary}</a></p>
+                <p>{BRAND.company.phone}</p>
+                <p>{BRAND.domains.primary}</p>
               </div>
             </div>
 
             <div>
-              <h4 className="font-semibold mb-4">Platform</h4>
-              <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="#platform" className="hover:text-white transition-colors">AI Agents</a></li>
-                <li><a href="#platform" className="hover:text-white transition-colors">Voice AI</a></li>
-                <li><a href="#platform" className="hover:text-white transition-colors">Content Studio</a></li>
-                <li><a href="#platform" className="hover:text-white transition-colors">Pipeline Intelligence</a></li>
-                <li><a href="#data" className="hover:text-white transition-colors">Data & Intelligence</a></li>
+              <h3 className="font-display text-base font-semibold text-white">Platform</h3>
+              <ul className="mt-4 space-y-3 text-sm text-slate-400">
+                {FOOTER.navSections.platform.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
 
             <div>
-              <h4 className="font-semibold mb-4">Services</h4>
-              <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="#services" className="hover:text-white transition-colors">AI-Led ABM</a></li>
-                <li><a href="#services" className="hover:text-white transition-colors">Conversational Voice AI</a></li>
-                <li><a href="#services" className="hover:text-white transition-colors">Generative Content</a></li>
-                <li><a href="#services" className="hover:text-white transition-colors">AI SDR</a></li>
-                <li><a href="#services" className="hover:text-white transition-colors">Appointments</a></li>
-                <li><a href="#services" className="hover:text-white transition-colors">Data Services</a></li>
+              <h3 className="font-display text-base font-semibold text-white">Services</h3>
+              <ul className="mt-4 space-y-3 text-sm text-slate-400">
+                {FOOTER.navSections.services.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
 
             <div>
-              <h4 className="font-semibold mb-4">Resources</h4>
-              <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="/resources-centre" className="hover:text-white transition-colors">Resources Center</a></li>
-                <li><a href="#about" className="hover:text-white transition-colors">About Us</a></li>
-                <li><a href="#about" className="hover:text-white transition-colors">Our Story</a></li>
+              <h3 className="font-display text-base font-semibold text-white">Resources</h3>
+              <ul className="mt-4 space-y-3 text-sm text-slate-400">
+                <li><a href="/resources-centre" className="transition-colors hover:text-white">Resources Center</a></li>
+                <li><button type="button" onClick={() => scrollToSection("about")} className="transition-colors hover:text-white">About Us</button></li>
+                <li><button type="button" onClick={() => scrollToSection("story")} className="transition-colors hover:text-white">Platform Story</button></li>
               </ul>
             </div>
 
             <div>
-              <h4 className="font-semibold mb-4">Get Started</h4>
-              <ul className="space-y-2 text-slate-400 text-sm">
-                <li><a href="/book/admin/demo" className="hover:text-white transition-colors">Schedule a Meeting</a></li>
-                <li><a href="/proposal-request" className="hover:text-white transition-colors">Request a Proposal</a></li>
-                <li><a href="/contact" className="hover:text-white transition-colors">Contact Us</a></li>
+              <h3 className="font-display text-base font-semibold text-white">Get Started</h3>
+              <ul className="mt-4 space-y-3 text-sm text-slate-400">
+                <li><a href="/book/admin/demo" className="transition-colors hover:text-white">Schedule a Meeting</a></li>
+                <li><a href="/proposal-request" className="transition-colors hover:text-white">Request a Proposal</a></li>
+                <li><a href="/contact" className="transition-colors hover:text-white">Contact Us</a></li>
               </ul>
             </div>
           </div>
 
-          <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
-            <p className="text-slate-500 text-sm">
-              {FOOTER.copyright}
-            </p>
-            <div className="flex gap-6 text-slate-500 text-sm">
-              <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
-              <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
-              <a href="/gdpr" className="hover:text-white transition-colors">GDPR</a>
+          <div className="mt-12 flex flex-col gap-4 border-t border-white/10 pt-8 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
+            <p>{FOOTER.copyright}</p>
+            <div className="flex gap-6">
+              <a href="/privacy" className="transition-colors hover:text-white">Privacy Policy</a>
+              <a href="/terms" className="transition-colors hover:text-white">Terms of Service</a>
+              <a href="/gdpr" className="transition-colors hover:text-white">GDPR</a>
             </div>
           </div>
         </div>
