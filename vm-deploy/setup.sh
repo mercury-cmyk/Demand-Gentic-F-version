@@ -10,7 +10,7 @@ set -euo pipefail
 
 DOMAIN="demandgentic.ai"
 EMAIL="admin@pivotal-b2b.com"  # Change to your email for certbot notifications
-APP_DIR="/home/Zahid/demandgentic"
+APP_DIR="/opt/demandgentic"
 REPO_URL="https://github.com/mohammadizahid704-blip/DemandGentic-V.01.git"
 
 echo "========================================="

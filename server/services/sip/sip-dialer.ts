@@ -218,7 +218,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
     if (mediaBridgeClient.isMediaBridgeConfigured() && sipResult.rtpPort && sipResult.remoteAddress && sipResult.remotePort) {
       const systemPrompt = buildSystemPrompt(params, sipResult.callId);
 
-      const aiProvider = params.aiProvider || 'openai'; // Default to OpenAI for new calls
+      const aiProvider = params.aiProvider || 'gemini'; // Default to Gemini Live for AI calls
       const bridgeResult = await mediaBridgeClient.createMediaBridge({
         callId: sipResult.callId,
         rtpPort: sipResult.rtpPort,

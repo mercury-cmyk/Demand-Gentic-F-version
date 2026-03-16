@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/home/Zahid/demandgentic}"
+APP_DIR="${APP_DIR:-/opt/demandgentic}"
 COMPOSE_FILE_REL="${COMPOSE_FILE_REL:-vm-deploy/docker-compose.yml}"
 COMPOSE="docker compose -f $COMPOSE_FILE_REL"
 REBUILD_MB=false
@@ -47,16 +47,19 @@ else
     echo "[3/5] Skipping media bridge rebuild (use --rebuild-media-bridge to rebuild)"
 fi
 
-# 4. Rolling restart — bring up new containers
+# 4. Restart services
 echo "[4/5] Restarting services..."
 
-# Stop old API gracefully (15s drain)
+# Stop and remove the single API container before recreate to avoid stale
+# container-name conflicts during deploy.
 echo "  Stopping API server..."
 $COMPOSE stop api 2>/dev/null || true
+echo "  Removing old API container..."
+$COMPOSE rm -f api >/dev/null 2>&1 || true
 
 # Start all services
 echo "  Starting all services..."
-$COMPOSE up -d
+$COMPOSE up -d --remove-orphans
 
 # 5. Verify health
 echo "[5/5] Verifying health..."

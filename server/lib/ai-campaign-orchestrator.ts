@@ -1764,6 +1764,7 @@ async function processCampaign(campaignId: string, options?: ProcessCampaignOpti
             campaignId,
             contactId: contactId || '',
             queueItemId: item.id,
+            aiProvider: ((campaign as any).voiceProvider === 'google' ? 'gemini' : (campaign as any).voiceProvider) || 'gemini',
             voiceName: unifiedAgent?.voice || aiSettings.persona?.voice || 'Puck',
             systemPrompt: unifiedAgent?.systemPrompt || aiSettings.scripts?.systemPrompt || (aiSettings as any).systemPrompt,
             contactName: `${item.contact_first_name || ''} ${item.contact_last_name || ''}`.trim() || 'there',

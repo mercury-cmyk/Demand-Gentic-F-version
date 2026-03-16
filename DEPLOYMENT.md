@@ -23,7 +23,7 @@ What it does:
 1. Updates system packages
 2. Installs Docker and the Docker Compose plugin if needed
 3. Installs Certbot
-4. Clones or updates the repo into `/home/Zahid/demandgentic`
+4. Clones or updates the repo into `/opt/demandgentic`
 5. Generates `vm-deploy/.env` via `vm-deploy/fetch-secrets.sh`
 6. Creates SSL certificates for `demandgentic.ai`
 7. Opens required firewall ports and applies host tuning
@@ -67,7 +67,7 @@ The authoritative runtime stack is defined in `vm-deploy/docker-compose.yml`.
 - Writes `vm-deploy/.env`
 - Pulls secrets from Google Secret Manager
 - Authenticates through the VM metadata server
-- Targets project `gen-lang-client-0789558283`
+- Targets project `demandgentic`
 
 Important:
 
