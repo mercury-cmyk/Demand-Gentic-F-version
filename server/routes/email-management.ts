@@ -13,6 +13,7 @@ import {
   listCampaignEmailProviders,
 } from '../services/campaign-email-provider-service';
 import {
+  activateBrevoAssetsForCampaigns,
   authenticateBrevoDomain,
   createBrevoDomain,
   createBrevoSender,
@@ -372,6 +373,23 @@ router.post('/providers/:id/brevo/sync-to-dashboard', async (req: Request, res: 
   } catch (error: any) {
     console.error('Error syncing Brevo assets to dashboard:', error);
     res.status(500).json({ error: error.message || 'Failed to sync Brevo assets to dashboard' });
+  }
+});
+
+router.post('/providers/:id/brevo/activate-for-campaigns', async (req: Request, res: Response) => {
+  try {
+    const data = z.object({
+      makeDefaultProvider: z.boolean().optional(),
+      makeDefaultSender: z.boolean().optional(),
+    }).parse(req.body || {});
+
+    res.json(await activateBrevoAssetsForCampaigns(req.params.id, data));
+  } catch (error: any) {
+    console.error('Error activating Brevo assets for campaigns:', error);
+    if (error.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid request data', details: error.errors });
+    }
+    res.status(500).json({ error: error.message || 'Failed to activate Brevo assets for campaigns' });
   }
 });
 

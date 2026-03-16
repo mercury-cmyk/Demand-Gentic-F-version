@@ -1,17 +1,23 @@
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
+import { parse as parseDomain } from 'tldts';
 import { db } from '../db';
 import {
   domainAuth,
+  domainConfiguration,
   domainHealthScores,
   senderProfiles,
 } from '@shared/schema';
 import {
   bindDomainToCampaignEmailProvider,
   bindSenderProfileToCampaignEmailProvider,
+  createCampaignEmailProvider,
+  generateDnsRecordsForCampaignEmailProvider,
   getCampaignEmailProvider,
   getCampaignEmailProviderBindingForDomain,
   getCampaignEmailProviderBindingForSender,
+  updateCampaignEmailProvider,
 } from './campaign-email-provider-service';
+import { generateDkimSelector, generateSecureCode } from './domain-dns-generator';
 
 type BrevoProvider = NonNullable<Awaited<ReturnType<typeof getCampaignEmailProvider>>>;
 
@@ -103,6 +109,17 @@ export interface BrevoSyncResult {
   skipped: string[];
 }
 
+export interface BrevoActivationResult extends BrevoSyncResult {
+  providerId: string;
+  providerName: string;
+  materializedProvider: boolean;
+  defaultProviderSet: boolean;
+  defaultSenderSet: boolean;
+  activatedSenderCount: number;
+  activatedDomainCount: number;
+  defaultSenderEmail: string | null;
+}
+
 function normalizeEmail(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toLowerCase();
@@ -167,6 +184,219 @@ function getStringArray(value: unknown): string[] {
   }
 
   return [];
+}
+
+function splitDomainParts(domainName: string): { parentDomain: string; subdomain: string | null } {
+  const parsed = parseDomain(domainName);
+  const parentDomain = parsed.domain && parsed.publicSuffix
+    ? `${parsed.domain}.${parsed.publicSuffix}`
+    : domainName;
+  const subdomain = parsed.subdomain?.trim() || null;
+
+  return {
+    parentDomain,
+    subdomain,
+  };
+}
+
+function findBestMatchingDomain(
+  senderDomain: string | null,
+  localDomains: Array<{ id: number; domain: string }>,
+): { id: number; domain: string } | null {
+  if (!senderDomain) return null;
+
+  const normalizedSenderDomain = normalizeDomainName(senderDomain);
+  if (!normalizedSenderDomain) return null;
+
+  const exactMatch = localDomains.find((domain) => normalizeDomainName(domain.domain) === normalizedSenderDomain);
+  if (exactMatch) return exactMatch;
+
+  const suffixMatches = localDomains
+    .filter((domain) => {
+      const normalizedDomain = normalizeDomainName(domain.domain);
+      if (!normalizedDomain) return false;
+      return (
+        normalizedSenderDomain.endsWith(`.${normalizedDomain}`) ||
+        normalizedDomain.endsWith(`.${normalizedSenderDomain}`)
+      );
+    })
+    .sort((a, b) => b.domain.length - a.domain.length);
+
+  return suffixMatches[0] || null;
+}
+
+function selectBrevoDnsRecord(
+  domain: BrevoManagedDomain,
+  predicate: (record: BrevoManagedDomain["dnsRecords"][number]) => boolean,
+) {
+  return domain.dnsRecords.find(predicate) || null;
+}
+
+function inferBrevoDkimSelector(domain: BrevoManagedDomain): string | null {
+  const dkimRecord = selectBrevoDnsRecord(
+    domain,
+    (record) => record.name.includes('._domainkey'),
+  );
+
+  if (!dkimRecord) return null;
+
+  return dkimRecord.name.split('._domainkey')[0]?.split('.').filter(Boolean).pop() || null;
+}
+
+function isBrevoDomainVerified(domain: BrevoManagedDomain): boolean {
+  return domain.verified === true || domain.authenticated === true;
+}
+
+async function ensureBrevoDomainConfiguration(
+  provider: BrevoProvider,
+  domain: BrevoManagedDomain,
+  domainAuthId: number,
+  isVerified: boolean,
+): Promise<boolean> {
+  const [existingConfig] = await db
+    .select()
+    .from(domainConfiguration)
+    .where(eq(domainConfiguration.domainAuthId, domainAuthId))
+    .limit(1);
+
+  const inferredSelector = inferBrevoDkimSelector(domain) || existingConfig?.generatedDkimSelector || generateDkimSelector(domain.domain);
+  const fallbackDns = await generateDnsRecordsForCampaignEmailProvider({
+    providerId: provider.id,
+    providerKey: provider.providerKey,
+    domain: domain.domain,
+    dkimSelector: inferredSelector,
+    includeTracking: true,
+    dmarcPolicy: 'none',
+  });
+
+  const spfRecord = selectBrevoDnsRecord(
+    domain,
+    (record) => record.type.toUpperCase() === 'TXT' && record.value.toLowerCase().includes('spf'),
+  );
+  const dkimRecord = selectBrevoDnsRecord(
+    domain,
+    (record) => record.name.includes('._domainkey'),
+  );
+  const dmarcRecord = selectBrevoDnsRecord(
+    domain,
+    (record) => record.name.toLowerCase().startsWith('_dmarc.'),
+  );
+  const trackingRecord = selectBrevoDnsRecord(
+    domain,
+    (record) =>
+      record.type.toUpperCase() === 'CNAME'
+      && !record.name.includes('._domainkey')
+      && !record.name.toLowerCase().startsWith('_dmarc.'),
+  );
+
+  const { parentDomain, subdomain } = splitDomainParts(domain.domain);
+  const verificationTimestamp = isVerified ? new Date() : null;
+
+  if (existingConfig) {
+    await db
+      .update(domainConfiguration)
+      .set({
+        subdomain: existingConfig.subdomain || subdomain,
+        parentDomain: existingConfig.parentDomain || parentDomain,
+        domainPurpose: existingConfig.domainPurpose || 'marketing',
+        generatedSpfRecord: spfRecord?.value || existingConfig.generatedSpfRecord || fallbackDns.spf.value,
+        generatedDkimSelector: inferredSelector,
+        generatedDkimRecord: dkimRecord?.value || existingConfig.generatedDkimRecord || fallbackDns.dkim.value,
+        generatedDmarcRecord: dmarcRecord?.value || existingConfig.generatedDmarcRecord || fallbackDns.dmarc.value,
+        generatedTrackingCname: trackingRecord?.value || existingConfig.generatedTrackingCname || fallbackDns.tracking?.value || null,
+        spfVerifiedAt: isVerified ? (existingConfig.spfVerifiedAt || verificationTimestamp) : existingConfig.spfVerifiedAt,
+        dkimVerifiedAt: isVerified ? (existingConfig.dkimVerifiedAt || verificationTimestamp) : existingConfig.dkimVerifiedAt,
+        dmarcVerifiedAt: isVerified ? (existingConfig.dmarcVerifiedAt || verificationTimestamp) : existingConfig.dmarcVerifiedAt,
+        trackingVerifiedAt: isVerified ? (existingConfig.trackingVerifiedAt || verificationTimestamp) : existingConfig.trackingVerifiedAt,
+        allowMarketing: existingConfig.allowMarketing ?? true,
+        allowTransactional: existingConfig.allowTransactional ?? true,
+        updatedAt: new Date(),
+      })
+      .where(eq(domainConfiguration.domainAuthId, domainAuthId));
+
+    return false;
+  }
+
+  await db.insert(domainConfiguration).values({
+    domainAuthId,
+    secureCode: generateSecureCode(),
+    subdomain,
+    parentDomain,
+    domainPurpose: 'marketing',
+    generatedSpfRecord: spfRecord?.value || fallbackDns.spf.value,
+    generatedDkimSelector: inferredSelector,
+    generatedDkimRecord: dkimRecord?.value || fallbackDns.dkim.value,
+    generatedDmarcRecord: dmarcRecord?.value || fallbackDns.dmarc.value,
+    generatedTrackingCname: trackingRecord?.value || fallbackDns.tracking?.value || null,
+    spfVerifiedAt: verificationTimestamp,
+    dkimVerifiedAt: verificationTimestamp,
+    dmarcVerifiedAt: verificationTimestamp,
+    trackingVerifiedAt: verificationTimestamp,
+    allowMarketing: true,
+    allowTransactional: true,
+  });
+
+  return true;
+}
+
+async function ensureBrevoDomainHealthScore(domainAuthId: number, isVerified: boolean): Promise<void> {
+  const [existingScore] = await db
+    .select()
+    .from(domainHealthScores)
+    .where(eq(domainHealthScores.domainAuthId, domainAuthId))
+    .orderBy(desc(domainHealthScores.scoredAt))
+    .limit(1);
+
+  const healthPayload = {
+    overallScore: isVerified ? 85 : 0,
+    authenticationScore: isVerified ? 100 : 0,
+    warmupPhase: existingScore?.warmupPhase || 'not_started',
+    updatedAt: new Date(),
+  };
+
+  if (existingScore) {
+    await db
+      .update(domainHealthScores)
+      .set(healthPayload)
+      .where(eq(domainHealthScores.id, existingScore.id));
+    return;
+  }
+
+  await db.insert(domainHealthScores).values({
+    domainAuthId,
+    overallScore: healthPayload.overallScore,
+    authenticationScore: healthPayload.authenticationScore,
+    warmupPhase: healthPayload.warmupPhase,
+  });
+}
+
+async function materializeBrevoProviderIfNeeded(
+  provider: BrevoProvider,
+  setAsDefault: boolean,
+): Promise<{ provider: BrevoProvider; materialized: boolean }> {
+  if (provider.source === 'database') {
+    return { provider, materialized: false };
+  }
+
+  const persisted = await createCampaignEmailProvider({
+    providerKey: 'brevo',
+    name: provider.name.replace(/\s*\(Environment\)\s*$/i, '') || 'Brevo',
+    description: provider.description || 'Materialized from environment-backed Brevo settings for governed campaign routing.',
+    transport: 'brevo_api',
+    isEnabled: true,
+    isDefault: setAsDefault,
+    priority: 1,
+    apiBaseUrl: provider.apiBaseUrl || undefined,
+    apiKey: provider.apiKey,
+    defaultFromEmail: provider.defaultFromEmail || undefined,
+    defaultFromName: provider.defaultFromName || undefined,
+    replyToEmail: provider.replyToEmail || undefined,
+    dnsProfile: provider.dnsProfile,
+    sendingProfile: provider.sendingProfile,
+  });
+
+  const materialized = await requireBrevoProvider(persisted.id);
+  return { provider: materialized, materialized: true };
 }
 
 async function requireBrevoProvider(providerId: string): Promise<BrevoProvider> {
@@ -536,7 +766,25 @@ async function upsertSyncedSender(
   provider: BrevoProvider,
   sender: BrevoManagedSender,
   result: BrevoSyncResult,
+  localDomains: Array<{
+    id: number;
+    domain: string;
+    spfStatus: string;
+    dkimStatus: string;
+    dmarcStatus: string | null;
+    trackingDomainStatus: string;
+  }>,
 ): Promise<void> {
+  const matchedDomain = findBestMatchingDomain(sender.domain, localDomains);
+  const matchedDomainState = matchedDomain
+    ? localDomains.find((domain) => domain.id === matchedDomain.id) || null
+    : null;
+  const derivedVerification = sender.verified ?? (
+    matchedDomainState
+      ? matchedDomainState.spfStatus === 'verified' && matchedDomainState.dkimStatus === 'verified'
+      : null
+  );
+
   const [existingSender] = sender.localMatch
     ? await db
       .select()
@@ -563,7 +811,9 @@ async function upsertSyncedSender(
         fromName: sender.name || existingSender.fromName,
         fromEmail: sender.email,
         isActive: sender.active ?? existingSender.isActive,
-        isVerified: sender.verified ?? existingSender.isVerified,
+        isVerified: derivedVerification ?? existingSender.isVerified,
+        domainAuthId: matchedDomain?.id || existingSender.domainAuthId,
+        dkimDomain: sender.domain || existingSender.dkimDomain,
         espProvider: 'brevo',
         espAdapter: 'brevo',
         updatedAt: new Date(),
@@ -585,7 +835,9 @@ async function upsertSyncedSender(
       fromName: sender.name,
       fromEmail: sender.email,
       isActive: sender.active ?? true,
-      isVerified: sender.verified ?? null,
+      isVerified: derivedVerification ?? null,
+      domainAuthId: matchedDomain?.id || null,
+      dkimDomain: sender.domain,
       espProvider: 'brevo',
       espAdapter: 'brevo',
       createdAt: new Date(),
@@ -605,7 +857,7 @@ async function upsertSyncedDomain(
   domain: BrevoManagedDomain,
   result: BrevoSyncResult,
 ): Promise<void> {
-  const verifiedStatus = domain.verified || domain.authenticated ? 'verified' : 'pending';
+  const verifiedStatus = isBrevoDomainVerified(domain) ? 'verified' : 'pending';
 
   const [existingDomain] = domain.localMatch
     ? await db
@@ -638,6 +890,9 @@ async function upsertSyncedDomain(
       })
       .where(eq(domainAuth.id, existingDomain.id));
 
+    await ensureBrevoDomainConfiguration(provider, domain, existingDomain.id, isBrevoDomainVerified(domain));
+    await ensureBrevoDomainHealthScore(existingDomain.id, isBrevoDomainVerified(domain));
+
     if (provider.source === 'database') {
       await bindDomainToCampaignEmailProvider(existingDomain.id, provider.id);
     }
@@ -660,12 +915,8 @@ async function upsertSyncedDomain(
     })
     .returning();
 
-  await db.insert(domainHealthScores).values({
-    domainAuthId: created.id,
-    overallScore: domain.verified || domain.authenticated ? 85 : 0,
-    authenticationScore: domain.verified || domain.authenticated ? 100 : 0,
-    warmupPhase: 'not_started',
-  });
+  await ensureBrevoDomainConfiguration(provider, domain, created.id, isBrevoDomainVerified(domain));
+  await ensureBrevoDomainHealthScore(created.id, isBrevoDomainVerified(domain));
 
   if (provider.source === 'database') {
     await bindDomainToCampaignEmailProvider(created.id, provider.id);
@@ -685,12 +936,16 @@ export async function syncBrevoAssetsToDashboard(providerId: string): Promise<Br
     skipped: [],
   };
 
-  for (const sender of overview.senders) {
-    await upsertSyncedSender(provider, sender, result);
-  }
-
   for (const domain of overview.domains) {
     await upsertSyncedDomain(provider, domain, result);
+  }
+
+  const localDomains = await db
+    .select()
+    .from(domainAuth);
+
+  for (const sender of overview.senders) {
+    await upsertSyncedSender(provider, sender, result, localDomains);
   }
 
   if (provider.source !== 'database') {
@@ -698,4 +953,93 @@ export async function syncBrevoAssetsToDashboard(providerId: string): Promise<Br
   }
 
   return result;
+}
+
+export async function activateBrevoAssetsForCampaigns(
+  providerId: string,
+  options: {
+    makeDefaultProvider?: boolean;
+    makeDefaultSender?: boolean;
+  } = {},
+): Promise<BrevoActivationResult> {
+  const requestedProvider = await requireBrevoProvider(providerId);
+  const makeDefaultProvider = options.makeDefaultProvider ?? true;
+  const makeDefaultSender = options.makeDefaultSender ?? true;
+
+  const { provider, materialized } = await materializeBrevoProviderIfNeeded(requestedProvider, makeDefaultProvider);
+  const syncResult = await syncBrevoAssetsToDashboard(provider.id);
+  const overview = await getBrevoInfrastructureOverview(provider.id);
+
+  const localSenders = await db
+    .select()
+    .from(senderProfiles);
+
+  const providerSenders = localSenders.filter((sender) => (sender.espProvider || sender.espAdapter) === 'brevo');
+  const defaultSenderCandidate = providerSenders.find((sender) => sender.fromEmail === provider.defaultFromEmail)
+    || providerSenders.find((sender) => sender.isVerified)
+    || providerSenders.find((sender) => sender.isActive !== false)
+    || providerSenders[0]
+    || null;
+
+  const providerUpdatePayload: {
+    isEnabled?: boolean;
+    isDefault?: boolean;
+    defaultFromEmail?: string | null;
+    defaultFromName?: string | null;
+    replyToEmail?: string | null;
+  } = {
+    isEnabled: true,
+  };
+
+  if (makeDefaultProvider) {
+    providerUpdatePayload.isDefault = true;
+  }
+
+  if (defaultSenderCandidate) {
+    if (!provider.defaultFromEmail) {
+      providerUpdatePayload.defaultFromEmail = defaultSenderCandidate.fromEmail;
+    }
+    if (!provider.defaultFromName) {
+      providerUpdatePayload.defaultFromName = defaultSenderCandidate.fromName || defaultSenderCandidate.name;
+    }
+    if (!provider.replyToEmail) {
+      providerUpdatePayload.replyToEmail = defaultSenderCandidate.replyToEmail || defaultSenderCandidate.fromEmail;
+    }
+  }
+
+  await updateCampaignEmailProvider(provider.id, providerUpdatePayload);
+
+  let defaultSenderSet = false;
+  if (makeDefaultSender && defaultSenderCandidate) {
+    await db
+      .update(senderProfiles)
+      .set({
+        isDefault: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(senderProfiles.isDefault, true));
+
+    await db
+      .update(senderProfiles)
+      .set({
+        isDefault: true,
+        isActive: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(senderProfiles.id, defaultSenderCandidate.id));
+
+    defaultSenderSet = true;
+  }
+
+  return {
+    ...syncResult,
+    providerId: provider.id,
+    providerName: provider.name,
+    materializedProvider: materialized,
+    defaultProviderSet: makeDefaultProvider,
+    defaultSenderSet,
+    activatedSenderCount: overview.senders.length,
+    activatedDomainCount: overview.domains.length,
+    defaultSenderEmail: defaultSenderCandidate?.fromEmail || null,
+  };
 }

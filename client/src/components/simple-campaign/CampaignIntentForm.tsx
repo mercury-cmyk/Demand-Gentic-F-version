@@ -180,12 +180,18 @@ export function CampaignIntentForm({ initialData, onNext, onCancel }: CampaignIn
   );
 
   const availableSenders = useMemo(() => {
-    return senders.filter((sender) => {
+    // First try strict filtering (matching provider + domain)
+    const strict = senders.filter((sender) => {
       if (sender.isActive === false) return false;
       if (selectedProviderId !== DEFAULT_PROVIDER_OPTION && sender.campaignProviderId !== selectedProviderId) return false;
       if (selectedDomainId !== AUTO_DOMAIN_OPTION && String(sender.domainAuthId || "") !== selectedDomainId) return false;
       return true;
     });
+    // If strict filtering returns results, use them
+    if (strict.length > 0) return strict;
+    // Fallback: show all active senders regardless of provider/domain binding
+    // This prevents empty sender dropdowns when provider-sender mapping is incomplete
+    return senders.filter((sender) => sender.isActive !== false);
   }, [selectedDomainId, selectedProviderId, senders]);
 
   const selectedSender = useMemo(
@@ -490,72 +496,113 @@ export function CampaignIntentForm({ initialData, onNext, onCancel }: CampaignIn
                 </div>
 
                 {loadingRouting ? (
-                  <div className="flex min-h-[220px] items-center justify-center rounded-3xl border border-slate-200 bg-slate-50">
-                    <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading providers, domains, and senders...</div>
+                  <div className="flex min-h-[120px] items-center justify-center rounded-3xl border border-slate-200 bg-slate-50">
+                    <div className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading senders...</div>
                   </div>
                 ) : (
                   <>
-                    <div className="grid gap-5 xl:grid-cols-3">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Provider Route</Label>
-                        <Select value={selectedProviderId} onValueChange={setSelectedProviderId}>
-                          <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select provider" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={DEFAULT_PROVIDER_OPTION}>Use default routing</SelectItem>
-                            {providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Authenticated Domain</Label>
-                        <Select value={selectedDomainId} onValueChange={setSelectedDomainId}>
-                          <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select domain" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={AUTO_DOMAIN_OPTION}>Use sender-linked domain</SelectItem>
-                            {availableDomains.map((domain) => <SelectItem key={domain.id} value={String(domain.id)}>{domain.domain}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Sender Identity</Label>
-                        <Select value={senderProfileId} onValueChange={setSenderProfileId}>
-                          <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select sender" /></SelectTrigger>
-                          <SelectContent>
-                            {availableSenders.map((sender) => (
-                              <SelectItem key={sender.id} value={sender.id}>{sender.fromName || sender.name} &lt;{sender.fromEmail}&gt;</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    {/* Primary: Sender Selection */}
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">From (Sender)</Label>
+                      <Select value={senderProfileId} onValueChange={setSenderProfileId}>
+                        <SelectTrigger className="h-14 rounded-2xl border-slate-200 bg-white px-4 text-sm">
+                          <SelectValue placeholder="Choose who this email comes from" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableSenders.map((sender) => (
+                            <SelectItem key={sender.id} value={sender.id}>
+                              <div className="flex items-center gap-2">
+                                <User className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                                <span className="font-medium">{sender.fromName || sender.name}</span>
+                                <span className="text-slate-500">&lt;{sender.fromEmail}&gt;</span>
+                                {sender.campaignProvider && (
+                                  <Badge variant="outline" className="ml-1 text-[10px] px-1.5 py-0">{providerLabel(sender.campaignProvider)}</Badge>
+                                )}
+                              </div>
+                            </SelectItem>
+                          ))}
+                          {availableSenders.length === 0 && (
+                            <div className="px-4 py-3 text-sm text-slate-500">No senders configured. Add one in Email Management.</div>
+                          )}
+                        </SelectContent>
+                      </Select>
                     </div>
 
-                    <div className="grid gap-4 xl:grid-cols-3">
-                      <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Provider Status</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-950">{providerSummary?.name || "Default routing"}</p>
-                        <p className="mt-1 text-xs text-slate-500">{providerLabel(providerSummary)} via {providerSummary?.transport === "smtp" ? "SMTP" : "API"}</p>
-                        <Badge className={cn("mt-3 border text-[11px]", toneForStatus(providerSummary?.healthStatus))}>{providerSummary?.healthStatus || "resolved at launch"}</Badge>
+                    {/* Selected sender summary */}
+                    {selectedSender && (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-xl bg-white p-2 shadow-sm">
+                              <Mail className="h-4 w-4 text-slate-600" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">{selectedSender.fromName || selectedSender.name} &lt;{selectedSender.fromEmail}&gt;</p>
+                              <p className="text-xs text-slate-500">
+                                via {providerLabel(selectedSender.campaignProvider || providerSummary)}
+                                {domainSummary ? ` · ${domainSummary.domain}` : ''}
+                                {selectedSender.warmupStatus === 'in_progress' ? ' · Warming up' : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge className={cn("border text-[11px]", toneForStatus(providerSummary?.healthStatus))}>
+                              {providerSummary?.healthStatus || "ready"}
+                            </Badge>
+                            <Badge className={cn("border text-[11px]", toneForStatus(selectedSender.isVerified ? "verified" : "pending"))}>
+                              {selectedSender.isVerified ? "verified" : "unverified"}
+                            </Badge>
+                          </div>
+                        </div>
                       </div>
-                      <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Domain Readiness</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-950">{domainSummary?.domain || "Sender-linked domain"}</p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {domainSummary ? `SPF ${domainSummary.spfStatus}, DKIM ${domainSummary.dkimStatus}, DMARC ${domainSummary.dmarcStatus}` : "Domain will follow sender binding."}
-                        </p>
-                        <Badge className={cn("mt-3 border text-[11px]", toneForStatus(domainReady(domainSummary) ? "verified" : "pending"))}>
-                          {domainReady(domainSummary) ? "ready" : "review"}
-                        </Badge>
+                    )}
+
+                    {/* Advanced: Provider & Domain (collapsed by default) */}
+                    <details className="group">
+                      <summary className="cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-700">
+                        Advanced: Override provider route & domain
+                      </summary>
+                      <div className="mt-3 grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Provider Route</Label>
+                          <Select value={selectedProviderId} onValueChange={setSelectedProviderId}>
+                            <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select provider" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={DEFAULT_PROVIDER_OPTION}>Use default routing</SelectItem>
+                              {providers.map((provider) => (
+                                <SelectItem key={provider.id} value={provider.id}>
+                                  <div className="flex items-center gap-2">
+                                    <Globe className="h-3.5 w-3.5 text-slate-400" />
+                                    {provider.name}
+                                    <Badge className={cn("ml-1 border text-[10px] px-1.5 py-0", toneForStatus(provider.healthStatus))}>{provider.healthStatus}</Badge>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Authenticated Domain</Label>
+                          <Select value={selectedDomainId} onValueChange={setSelectedDomainId}>
+                            <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-white px-4 text-sm"><SelectValue placeholder="Select domain" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={AUTO_DOMAIN_OPTION}>Auto (sender-linked domain)</SelectItem>
+                              {availableDomains.map((domain) => (
+                                <SelectItem key={domain.id} value={String(domain.id)}>
+                                  <div className="flex items-center gap-2">
+                                    <ShieldCheck className="h-3.5 w-3.5 text-slate-400" />
+                                    {domain.domain}
+                                    <Badge className={cn("ml-1 border text-[10px] px-1.5 py-0", toneForStatus(domainReady(domain) ? "verified" : "pending"))}>
+                                      {domainReady(domain) ? "ready" : "review"}
+                                    </Badge>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                      <div className="rounded-3xl border border-slate-200 bg-slate-50/80 p-5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Sender Envelope</p>
-                        <p className="mt-3 text-sm font-semibold text-slate-950">{selectedSender?.fromName || selectedSender?.name || "No sender selected"}</p>
-                        <p className="mt-1 text-xs text-slate-500">{selectedSender?.fromEmail || "Select a sender"}</p>
-                        <Badge className={cn("mt-3 border text-[11px]", toneForStatus(selectedSender?.isVerified ? "verified" : "pending"))}>
-                          {selectedSender?.isVerified ? "verified" : "provider managed"}
-                        </Badge>
-                        <p className="mt-3 text-xs text-slate-500">{warmupLabel(selectedSender?.warmupStatus)}</p>
-                      </div>
-                    </div>
+                    </details>
                   </>
                 )}
               </CardContent>

@@ -99,6 +99,22 @@ interface EmailManagementOverview {
   domainBindingCount: number;
 }
 
+interface BrevoActivationResult {
+  providerId: string;
+  providerName: string;
+  materializedProvider: boolean;
+  defaultProviderSet: boolean;
+  defaultSenderSet: boolean;
+  activatedSenderCount: number;
+  activatedDomainCount: number;
+  defaultSenderEmail: string | null;
+  importedSenders: number;
+  updatedSenders: number;
+  importedDomains: number;
+  updatedDomains: number;
+  skipped: string[];
+}
+
 interface ManagedSenderProfile {
   id: string;
   name: string;
@@ -482,6 +498,35 @@ export default function EmailManagementPage() {
     },
   });
 
+  const activateBrevoMutation = useMutation({
+    mutationFn: async (providerId: string) => {
+      const response = await apiRequest("POST", `/api/email-management/providers/${providerId}/brevo/activate-for-campaigns`, {
+        makeDefaultProvider: true,
+        makeDefaultSender: true,
+      });
+      return response.json() as Promise<BrevoActivationResult>;
+    },
+    onSuccess: (result) => {
+      refreshProviders();
+      refreshSenders();
+      refreshDomains();
+      toast({
+        title: "Brevo activated for campaigns",
+        description: `${result.activatedSenderCount} senders and ${result.activatedDomainCount} domains are now governed for campaign routing.`,
+      });
+
+      if (result.skipped.length) {
+        toast({
+          title: "Some Brevo assets were skipped",
+          description: result.skipped[0],
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Brevo activation failed", description: error.message, variant: "destructive" });
+    },
+  });
+
   const createSenderMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/email-management/sender-profiles", {
@@ -769,10 +814,23 @@ export default function EmailManagementPage() {
 
                     <div className="flex flex-wrap gap-2">
                       {provider.providerKey === "brevo" && (
-                        <Button variant="outline" onClick={() => setBrevoProvider(provider)}>
-                          <ShieldCheck className="mr-2 h-4 w-4" />
-                          Brevo Infrastructure
-                        </Button>
+                        <>
+                          <Button
+                            onClick={() => activateBrevoMutation.mutate(provider.id)}
+                            disabled={activateBrevoMutation.isPending}
+                          >
+                            {activateBrevoMutation.isPending ? (
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                              <Sparkles className="mr-2 h-4 w-4" />
+                            )}
+                            Bring In + Activate
+                          </Button>
+                          <Button variant="outline" onClick={() => setBrevoProvider(provider)}>
+                            <ShieldCheck className="mr-2 h-4 w-4" />
+                            Brevo Infrastructure
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="outline"
