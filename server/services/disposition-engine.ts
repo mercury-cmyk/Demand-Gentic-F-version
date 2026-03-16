@@ -24,6 +24,7 @@ import {
   qcWorkQueue,
   recycleJobs,
   activityLog,
+  campaignAccountStats,
   type CanonicalDisposition,
   type CampaignContactState
 } from "@shared/schema";
@@ -469,6 +470,46 @@ export async function processDisposition(
     } catch (statsErr) {
       console.error(`[DispositionEngine] Failed to update dialer run stats for ${callAttempt.dialerRunId}:`, statsErr);
       result.errors.push(`Stats update failed: ${statsErr instanceof Error ? statsErr.message : 'Unknown error'}`);
+    }
+
+    // Update campaign account stats (connected count, positive disposition count)
+    // This was previously only done in the legacy human-agent path (storage.createCallDisposition),
+    // so AI call outcomes were never reflected in campaign_account_stats.
+    try {
+      const accountId = await getContactAccountId(callAttempt.contactId);
+      if (accountId) {
+        const connectedDispositions: CanonicalDisposition[] = [
+          'qualified_lead', 'not_interested', 'do_not_call',
+          'callback_requested', 'needs_review', 'invalid_data'
+        ];
+        const positiveDispositions: CanonicalDisposition[] = [
+          'qualified_lead', 'callback_requested'
+        ];
+        const isConnected = connectedDispositions.includes(finalDisposition);
+        const isPositive = positiveDispositions.includes(finalDisposition);
+
+        if (isConnected || isPositive) {
+          await db
+            .insert(campaignAccountStats)
+            .values({
+              campaignId: callAttempt.campaignId,
+              accountId,
+              queuedCount: 0,
+              connectedCount: isConnected ? 1 : 0,
+              positiveDispCount: isPositive ? 1 : 0,
+            })
+            .onConflictDoUpdate({
+              target: [campaignAccountStats.campaignId, campaignAccountStats.accountId],
+              set: {
+                ...(isConnected ? { connectedCount: sql`${campaignAccountStats.connectedCount} + 1` } : {}),
+                ...(isPositive ? { positiveDispCount: sql`${campaignAccountStats.positiveDispCount} + 1` } : {}),
+              },
+            });
+          result.actions.push(`Campaign account stats updated (connected=${isConnected}, positive=${isPositive})`);
+        }
+      }
+    } catch (accountStatsErr) {
+      console.warn(`[DispositionEngine] Failed to update campaign account stats:`, accountStatsErr);
     }
 
     // Queue post-call analyzer for all dispositions (SIP + TeXML)
@@ -1598,6 +1639,18 @@ async function processCallbackRequested(
   });
 
   result.queueState = 'qualified';
+}
+
+/**
+ * Look up a contact's accountId for campaign account stats tracking
+ */
+async function getContactAccountId(contactId: string): Promise<string | null> {
+  const [contact] = await db
+    .select({ accountId: contacts.accountId })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+  return contact?.accountId || null;
 }
 
 /**
