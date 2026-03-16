@@ -478,7 +478,26 @@ export function startBackgroundJobs() {
     }, TELNYX_RECORDING_SYNC_INTERVAL);
   }
 
-  // Old journey pipeline jobs removed — unified pipeline handles pipeline automation
+  // GCS Recording Sync — retry pending recordings every 2 minutes
+  if (ENABLE_JOURNEY_AUTOMATION) {
+    const GCS_SYNC_INTERVAL = 2 * 60 * 1000; // Every 2 minutes
+    let isGcsSyncRunning = false;
+    setInterval(async () => {
+      if (isGcsSyncRunning) return;
+      isGcsSyncRunning = true;
+      try {
+        const { syncPendingRecordingsToGCS } = await import('./recording-storage');
+        const result = await withJobTimeout('GCS Recording Sync', () => syncPendingRecordingsToGCS(20));
+        if (result.stored > 0 || result.failed > 0) {
+          console.log(`[Background Jobs] GCS sync: ${result.stored} stored, ${result.failed} failed of ${result.processed}`);
+        }
+      } catch (error) {
+        console.error('[Background Jobs] GCS recording sync error:', error);
+      } finally {
+        isGcsSyncRunning = false;
+      }
+    }, GCS_SYNC_INTERVAL);
+  }
 
   // Email validation job (cron-based) - Only start if enabled
   if (ENABLE_EMAIL_VALIDATION) {

@@ -24,7 +24,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   BRAND,
   FOOTER,
@@ -302,8 +301,8 @@ export default function LandingPage() {
                 const Icon = getIcon(item.iconName);
 
                 return (
-                  <Card key={item.title} className="h-full border-slate-200 bg-white shadow-[0_24px_80px_-48px_rgba(15,23,42,0.25)]">
-                    <CardContent className="p-7">
+                  <div key={item.title} className="h-full rounded-xl border border-slate-200 bg-white shadow-[0_24px_80px_-48px_rgba(15,23,42,0.25)]">
+                    <div className="p-7">
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
                           <Icon className="h-5 w-5" />
@@ -314,8 +313,8 @@ export default function LandingPage() {
                       </div>
                       <h3 className="mt-6 font-display text-2xl font-semibold tracking-[-0.03em] text-slate-950">{item.title}</h3>
                       <p className="mt-4 text-base leading-7 text-slate-600">{item.description}</p>
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -357,8 +356,8 @@ export default function LandingPage() {
                   const tone = toneStyles[module.tone as keyof typeof toneStyles];
 
                   return (
-                    <Card key={module.name} className="h-full border-slate-200 bg-white shadow-[0_28px_80px_-56px_rgba(14,116,144,0.32)]">
-                      <CardContent className="p-6">
+                    <div key={module.name} className="h-full rounded-xl border border-slate-200 bg-white shadow-[0_28px_80px_-56px_rgba(14,116,144,0.32)]">
+                      <div className="p-6">
                         <div className="flex items-start justify-between gap-4">
                           <div className={`flex h-12 w-12 items-center justify-center rounded-2xl border ${tone}`}>
                             <Icon className="h-5 w-5" />
@@ -377,8 +376,8 @@ export default function LandingPage() {
                             </div>
                           ))}
                         </div>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -415,15 +414,15 @@ export default function LandingPage() {
                   const Icon = getIcon(item.iconName);
 
                   return (
-                    <Card key={item.title} className="h-full border-white/10 bg-white/5 text-white backdrop-blur-xl">
-                      <CardContent className="p-6">
+                    <div key={item.title} className="h-full rounded-xl border border-white/10 bg-white/5 text-white backdrop-blur-xl">
+                      <div className="p-6">
                         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-300/10 text-cyan-100">
                           <Icon className="h-5 w-5" />
                         </div>
                         <h3 className="mt-6 font-display text-2xl font-semibold tracking-[-0.03em] text-white">{item.title}</h3>
                         <p className="mt-3 text-sm leading-7 text-slate-200/78">{item.description}</p>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -440,8 +439,8 @@ export default function LandingPage() {
               </h2>
               <p className="mt-5 text-lg leading-8 text-slate-600">{HOMEPAGE_GOVERNANCE.story.body}</p>
 
-              <Card className="mt-8 border-slate-200 bg-white shadow-[0_24px_80px_-52px_rgba(15,23,42,0.24)]">
-                <CardContent className="p-7">
+              <div className="mt-8 rounded-xl border border-slate-200 bg-white shadow-[0_24px_80px_-52px_rgba(15,23,42,0.24)]">
+                <div className="p-7">
                   <div className="flex items-center gap-4">
                     <div className="flex h-16 w-16 items-center justify-center rounded-[24px] bg-slate-950 text-2xl font-semibold text-white">
                       {BRAND.founder.initials}
@@ -469,13 +468,13 @@ export default function LandingPage() {
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-6">
-              <Card className="border-slate-200 bg-white shadow-[0_24px_80px_-52px_rgba(15,23,42,0.22)]">
-                <CardContent className="p-7">
+              <div className="rounded-xl border border-slate-200 bg-white shadow-[0_24px_80px_-52px_rgba(15,23,42,0.22)]">
+                <div className="p-7">
                   <div className="flex items-center gap-3">
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-900">
                       <Users className="h-5 w-5" />
@@ -493,11 +492,11 @@ export default function LandingPage() {
                       </div>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
 
-              <Card className="border-slate-200 bg-[linear-gradient(145deg,#ecfeff_0%,#f8fafc_100%)] shadow-[0_24px_80px_-52px_rgba(6,182,212,0.25)]">
-                <CardContent className="p-7">
+              <div className="rounded-xl border border-slate-200 bg-[linear-gradient(145deg,#ecfeff_0%,#f8fafc_100%)] shadow-[0_24px_80px_-52px_rgba(6,182,212,0.25)]">
+                <div className="p-7">
                   <div className="flex items-start gap-4">
                     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-white">
                       <Database className="h-5 w-5" />
@@ -509,8 +508,8 @@ export default function LandingPage() {
                       <p className="mt-3 text-sm leading-7 text-slate-600">{TAGLINE.corePromise}</p>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </div>
           </div>
         </section>

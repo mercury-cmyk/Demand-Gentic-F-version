@@ -9,7 +9,7 @@
 import { uploadToS3, getPresignedDownloadUrl, s3ObjectExists, isS3Configured } from '../lib/storage';
 import { db } from '../db';
 import { leads, callSessions } from '../../shared/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 const RECORDING_PREFIX = 'recordings';
 const CALL_SESSION_RECORDING_PREFIX = 'call-recordings'; // Separate prefix for call sessions
@@ -541,7 +541,94 @@ export async function uploadCallSessionRecordingBuffer(
     await db.update(callSessions)
       .set({ recordingStatus: 'failed' })
       .where(eq(callSessions.id, callSessionId));
-    
+
     return null;
   }
+}
+
+// ============================================================================
+// BATCH GCS SYNC — Retry pending recordings
+// ============================================================================
+
+/**
+ * Sync pending recordings to GCS.
+ * Finds call sessions with recording URLs but no GCS key (pending/failed status)
+ * and attempts to download + upload to GCS.
+ * Called from background jobs on a regular interval.
+ */
+export async function syncPendingRecordingsToGCS(
+  limit: number = 20
+): Promise<{ processed: number; stored: number; failed: number; skipped: number }> {
+  if (!isS3Configured()) {
+    return { processed: 0, stored: 0, failed: 0, skipped: 0 };
+  }
+
+  // Find sessions with recording URLs but not yet stored in GCS
+  const pending = await db.select({
+    id: callSessions.id,
+    recordingUrl: callSessions.recordingUrl,
+    campaignId: callSessions.campaignId,
+    recordingStatus: callSessions.recordingStatus,
+  })
+    .from(callSessions)
+    .where(
+      and(
+        sql`${callSessions.recordingUrl} IS NOT NULL`,
+        sql`${callSessions.recordingUrl} != ''`,
+        sql`(${callSessions.recordingS3Key} IS NULL OR ${callSessions.recordingS3Key} = '')`,
+        sql`${callSessions.recordingStatus} IN ('pending', 'failed')`,
+        // Only try recordings from the last 3 days (URLs expire)
+        sql`${callSessions.createdAt} > NOW() - INTERVAL '3 days'`
+      )
+    )
+    .orderBy(sql`${callSessions.createdAt} DESC`)
+    .limit(limit);
+
+  let stored = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const session of pending) {
+    if (!session.recordingUrl) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const { s3Key, fileSizeBytes } = await downloadAndStoreCallSessionRecording(
+        session.recordingUrl,
+        session.id,
+        session.campaignId
+      );
+
+      if (s3Key) {
+        await db.update(callSessions)
+          .set({
+            recordingS3Key: s3Key,
+            recordingStatus: 'stored',
+            recordingFileSizeBytes: fileSizeBytes,
+            recordingFormat: s3Key.endsWith('.wav') ? 'wav' : 'mp3',
+          })
+          .where(eq(callSessions.id, session.id));
+        stored++;
+      } else {
+        await db.update(callSessions)
+          .set({ recordingStatus: 'failed' })
+          .where(eq(callSessions.id, session.id));
+        failed++;
+      }
+    } catch (error: any) {
+      console.error(`[RecordingSync] Failed for session ${session.id}:`, error.message);
+      await db.update(callSessions)
+        .set({ recordingStatus: 'failed' })
+        .where(eq(callSessions.id, session.id));
+      failed++;
+    }
+  }
+
+  if (stored > 0 || failed > 0) {
+    console.log(`[RecordingSync] Batch: ${pending.length} checked, ${stored} stored, ${failed} failed, ${skipped} skipped`);
+  }
+
+  return { processed: pending.length, stored, failed, skipped };
 }
