@@ -60,9 +60,7 @@ import { MessagingProofTab } from '@/components/ai-studio/org-intelligence/tabs/
 import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/service-catalog-tab';
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
-import { JourneyPipelineTab } from '@/components/client-journey-pipeline';
 import { UnifiedPipelineTab } from '@/components/unified-pipeline';
-import { CampaignPipelineTab } from '@/components/campaign-pipeline';
 
 interface ClientUser {
   id: string;
@@ -958,23 +956,6 @@ export default function ClientPortalDashboard() {
     staleTime: 5 * 60 * 1000,
   });
   const ukefTranscriptQaEnabled = ukefTranscriptQaProbe?.enabled ?? false;
-
-  // Lead Journey Pipeline feature probe
-  const { data: journeyPipelineProbe } = useQuery<{ enabled: boolean }>({
-    queryKey: ['journey-pipeline-feature-probe', user?.clientAccountId],
-    queryFn: async () => {
-      try {
-        const res = await fetch('/api/client-portal/journey-pipeline/status', authHeaders);
-        if (!res.ok) return { enabled: false };
-        return await res.json();
-      } catch {
-        return { enabled: false };
-      }
-    },
-    enabled: !!user,
-    staleTime: 5 * 60 * 1000,
-  });
-  const journeyPipelineEnabled = journeyPipelineProbe?.enabled ?? false;
 
   // Business profile query
   const { data: businessProfileData, isLoading: profileLoading } = useQuery<{
@@ -3022,20 +3003,6 @@ export default function ClientPortalDashboard() {
               authHeaders={authHeaders}
               clientAccountId={user.clientAccountId}
             />
-          </div>
-        )}
-
-        {/* ==================== LEAD JOURNEY PIPELINE TAB ==================== */}
-        {activeTab === 'journey-pipeline' && journeyPipelineEnabled && (
-          <div className="space-y-6">
-            <JourneyPipelineTab authHeaders={authHeaders} />
-          </div>
-        )}
-
-        {/* ==================== CAMPAIGN PIPELINE TAB ==================== */}
-        {activeTab === 'campaign-pipeline' && user?.clientAccountId && (
-          <div className="space-y-6">
-            <CampaignPipelineTab authHeaders={authHeaders} clientAccountId={user.clientAccountId} />
           </div>
         )}
 

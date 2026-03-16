@@ -54,9 +54,9 @@ export default function ClientServices() {
     {
       icon: Users,
       title: "3. Track Leads in the Pipeline",
-      description: "Review lead activity in one place, open source context instantly, and move follow-up work through a single unified pipeline.",
-      action: "Open Lead Pipeline",
-      link: "/client-portal/dashboard?tab=journey-pipeline"
+      description: "Review account activity in one place, track engagement across campaigns, and move accounts through the full-funnel pipeline.",
+      action: "Open Pipelines",
+      link: "/client-portal/dashboard?tab=unified-pipelines"
     },
     {
       icon: BarChart,

@@ -124,8 +124,7 @@ const agenticOperator = {
 const NAV_FEATURE_MAP: Record<string, string> = {
   '/client-portal/dashboard?tab=campaigns': 'campaign_reports',
   '/client-portal/create-campaign': 'campaign_reports',
-  '/client-portal/dashboard?tab=journey-pipeline': 'lead_journey_pipeline',
-  '/client-portal/dashboard?tab=campaign-pipeline': 'pipeline_view',
+  '/client-portal/dashboard?tab=unified-pipelines': 'lead_journey_pipeline',
   '/client-portal/dashboard?tab=work-orders': 'work_orders',
   '/client-portal/dashboard?tab=bookings': 'calendar_booking',
   '/client-portal/agents': 'ai_studio_dashboard',
@@ -165,9 +164,6 @@ const baseNavigationGroups: NavGroup[] = [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
       { name: 'Pipelines', href: '/client-portal/dashboard?tab=unified-pipelines', icon: Workflow, highlighted: true },
-      // Legacy qualified-leads entry removed in favor of Lead Pipeline.
-      { name: 'Lead Pipeline', href: '/client-portal/dashboard?tab=journey-pipeline', icon: GitBranch },
-      { name: 'Campaign Pipeline', href: '/client-portal/dashboard?tab=campaign-pipeline', icon: Workflow },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
       // { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
       // { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
@@ -473,14 +469,12 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const currentPageLabel = React.useMemo(() => {
     if (location === '/client-portal/dashboard') {
       const requestedTab = new URLSearchParams(searchString).get('tab') || 'overview';
-      const tab = requestedTab === 'leads' ? 'journey-pipeline' : requestedTab;
+      const tab = requestedTab === 'leads' ? 'unified-pipelines' : requestedTab;
       const tabLabels: Record<string, string> = {
         overview: 'Overview',
         campaigns: 'All Campaigns',
         leads: 'Lead Pipeline',
-        'journey-pipeline': 'Lead Pipeline',
         'unified-pipelines': 'Pipelines',
-        'campaign-pipeline': 'Campaign Pipeline',
         'work-orders': 'Work Orders',
         bookings: 'Bookings',
         'target-markets': 'Target Markets',

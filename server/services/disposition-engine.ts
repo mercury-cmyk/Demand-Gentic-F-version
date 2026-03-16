@@ -39,8 +39,6 @@ import { analyzeLeadQualification } from "./ai-qa-analyzer";
 import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
 import callQualityTracker from "./call-quality-tracker";
 import { telnyxNumbers } from "@shared/number-pool-schema";
-import { autoEnrollJourneyLeadFromDisposition } from "./client-journey-automation";
-import { processEmailEngagement } from "./campaign-pipeline-orchestrator";
 import { processEmailEngagement, type EngagementSignal } from "./campaign-pipeline-orchestrator";
 
 // Campaign rules interface (stored in campaign.config)
@@ -1174,28 +1172,8 @@ async function processVoicemailOrNoAnswer(
   result.nextAttemptAt = nextAttemptAt;
   result.queueState = 'waiting_retry';
 
-  // Auto-enroll into journey pipeline + emit engagement signal for follow-up automation
+  // Emit engagement signal to unified pipeline for follow-up automation
   setImmediate(async () => {
-    try {
-      await autoEnrollJourneyLeadFromDisposition({
-        campaignId: callAttempt.campaignId,
-        contactId: callAttempt.contactId,
-        sourceCallSessionId: callAttempt.callSessionId,
-        sourceDisposition: type as 'voicemail' | 'no_answer',
-        sourceCallSummary: callAttempt.notes || null,
-        sourceAiAnalysis: {
-          callAttemptId: callAttempt.id,
-          agentType: callAttempt.agentType,
-          callDurationSeconds: callAttempt.callDurationSeconds,
-          attemptNumber: currentAttempts,
-          nextAttemptAt: nextAttemptAt.toISOString(),
-        },
-        callbackAt: nextAttemptAt,
-      });
-    } catch (err: any) {
-      console.warn(`[DispositionEngine] Journey enrollment failed for ${type}:`, err.message);
-    }
-    // Also emit to campaign-pipeline orchestrator for email follow-up scheduling
     try {
       const signal = type === 'voicemail' ? 'call_voicemail' as const : 'call_no_answer' as const;
       await processEmailEngagement({
@@ -1395,23 +1373,18 @@ async function processNeedsReview(
   result.nextAttemptAt = nextAttemptAt;
   result.queueState = 'waiting_retry';
 
-  // Emit engagement signal — needs_review contacts should enter pipeline for nurture
+  // Emit engagement signal to unified pipeline
   setImmediate(async () => {
     try {
-      await autoEnrollJourneyLeadFromDisposition({
+      await processEmailEngagement({
+        signal: 'call_no_answer',
         campaignId: callAttempt.campaignId,
         contactId: callAttempt.contactId,
-        sourceCallSessionId: callAttempt.callSessionId,
-        sourceDisposition: 'needs_review',
-        sourceCallSummary: callAttempt.notes || null,
-        sourceAiAnalysis: {
+        metadata: {
           callAttemptId: callAttempt.id,
-          agentType: callAttempt.agentType,
           callDurationSeconds: callAttempt.callDurationSeconds,
-          reason: 'ambiguous_outcome',
-          nextAttemptAt: nextAttemptAt.toISOString(),
+          disposition: 'needs_review',
         },
-        callbackAt: nextAttemptAt,
       });
     } catch (err: any) {
       console.warn(`[DispositionEngine] Journey enrollment failed for needs_review:`, err.message);
@@ -1485,30 +1458,14 @@ async function processCallbackRequested(
 
     setImmediate(async () => {
       try {
-        const enrollResult = await autoEnrollJourneyLeadFromDisposition({
+        await processEmailEngagement({
+          signal: 'call_callback_requested',
           campaignId: callAttempt.campaignId,
           contactId: callAttempt.contactId,
-          sourceCallSessionId: callAttempt.callSessionId,
-          sourceDisposition: 'callback_requested',
-          sourceCallSummary: callAttempt.notes || null,
-          sourceAiAnalysis: {
-            callAttemptId: callAttempt.id,
-            agentType: callAttempt.agentType,
-            callDurationSeconds: callDuration,
-            queueState: 'waiting_retry',
-            requeuedAt: nextAttemptAt.toISOString(),
-            callbackRequestedAt: nextAttemptAt.toISOString(),
-          },
-          callbackAt: nextAttemptAt,
+          metadata: { callAttemptId: callAttempt.id, callDurationSeconds: callDuration },
         });
-
-        if (enrollResult.enrolled) {
-          console.log(
-            `[DispositionEngine] ✅ Auto-enrolled callback into journey pipeline: pipeline=${enrollResult.pipelineId} lead=${enrollResult.leadId}`
-          );
-        }
       } catch (automationError) {
-        console.error('[DispositionEngine] Journey auto-enrollment failed for appointment callback:', automationError);
+        console.error('[DispositionEngine] Pipeline signal failed for appointment callback:', automationError);
       }
     });
 
@@ -1629,30 +1586,14 @@ async function processCallbackRequested(
 
   setImmediate(async () => {
     try {
-      const enrollResult = await autoEnrollJourneyLeadFromDisposition({
+      await processEmailEngagement({
+        signal: 'call_callback_requested',
         campaignId: callAttempt.campaignId,
         contactId: callAttempt.contactId,
-        sourceCallSessionId: callAttempt.callSessionId,
-        sourceDisposition: 'callback_requested',
-        sourceCallSummary: callAttempt.notes || null,
-        sourceAiAnalysis: {
-          callAttemptId: callAttempt.id,
-          leadId: result.leadId || null,
-          agentType: callAttempt.agentType,
-          callDurationSeconds: callDuration,
-          queueState: 'qualified',
-          callbackRequestedAt: requestedCallbackAt.toISOString(),
-        },
-        callbackAt: requestedCallbackAt,
+        metadata: { callAttemptId: callAttempt.id, callDurationSeconds: callDuration, leadId: result.leadId },
       });
-
-      if (enrollResult.enrolled) {
-        console.log(
-          `[DispositionEngine] ✅ Auto-enrolled callback lead into journey pipeline: pipeline=${enrollResult.pipelineId} lead=${enrollResult.leadId}`
-        );
-      }
     } catch (automationError) {
-      console.error('[DispositionEngine] Journey auto-enrollment failed for callback lead:', automationError);
+      console.error('[DispositionEngine] Pipeline signal failed for callback lead:', automationError);
     }
   });
 

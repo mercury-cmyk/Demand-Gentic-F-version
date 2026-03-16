@@ -141,13 +141,13 @@ import aiAudienceFilterRouter from './routes/ai-audience-filter-routes';
 import oiBatchRouter from './routes/oi-batch-routes';
 import previewStudioRouter from './routes/preview-studio';
 import clientPortalSimulationRouter from './routes/client-portal-simulation';
-import campaignPipelineRouter from './routes/campaign-pipeline-routes';
+// Old campaign-pipeline-routes removed — unified pipeline handles this
 import unifiedPipelineRouter from './routes/unified-pipeline-routes';
 import precisionLeadsRouter from './routes/precision-leads-routes';
 import financeProgramRouter from './routes/finance-program-routes';
 import googleCloudAccountsRouter from './routes/google-cloud-accounts-routes';
 import openAiWebrtcRouter from './routes/openai-webrtc';
-import { autoEnrollJourneyLeadFromDisposition } from './services/client-journey-automation';
+// Old journey pipeline auto-enrollment removed — unified pipeline handles this via campaign-pipeline-orchestrator
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
 // recording-link-resolver handles GCS/Telnyx URL resolution on-demand per call
 import { z } from "zod";
@@ -16502,7 +16502,7 @@ Provide JSON response with:
   app.use('/api', qaGatedContentRouter);
 
   // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
-  app.use('/api/campaign-pipeline', requireAuth, campaignPipelineRouter);
+  // Old campaign-pipeline routes removed — use /api/unified-pipelines instead
   app.use('/api/unified-pipelines', requireAuth, unifiedPipelineRouter);
 
   // ==================== PRECISION LEADS (Kimi + DeepSeek dual-model) ====================

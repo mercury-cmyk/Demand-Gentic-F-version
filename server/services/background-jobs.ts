@@ -9,9 +9,7 @@ import { startEmailValidationJob } from '../jobs/email-validation-job';
 import { startAiEnrichmentJob } from '../jobs/ai-enrichment-job';
 import { processMissingTranscripts, processLongCallMissingTranscripts } from './transcription-reliability';
 import { syncTelnyxRecordingsToDatabase } from './telnyx-sync-service';
-import { executeDueJourneyActions } from './client-journey-automation';
-import { executePipelineEmailActions } from './campaign-pipeline-orchestrator';
-import { monitorPipelineHealth } from './ai-pipeline-agent';
+// Old journey pipeline jobs removed — unified pipeline handles these
 import { mercuryEmailService } from './mercury/email-service';
 import { db } from '../db';
 import { agentQueue, campaignQueue } from '@shared/schema';
@@ -480,70 +478,7 @@ export function startBackgroundJobs() {
     }, TELNYX_RECORDING_SYNC_INTERVAL);
   }
 
-  // Client journey automation executor (callbacks/emails)
-  if (ENABLE_JOURNEY_AUTOMATION) {
-    journeyActionInterval = setInterval(async () => {
-      if (isJourneyActionRunning) {
-        return;
-      }
-
-      isJourneyActionRunning = true;
-      try {
-        const result = await withJobTimeout('Journey Automation', () => executeDueJourneyActions(30));
-        if (result.processed > 0) {
-          console.log(
-            `[Background Jobs] Journey automation: processed=${result.processed}, completed=${result.completed}, failed=${result.failed}`
-          );
-        }
-      } catch (error) {
-        console.error('[Background Jobs] Journey automation error:', error);
-      } finally {
-        isJourneyActionRunning = false;
-      }
-    }, JOURNEY_ACTION_INTERVAL);
-  }
-
-  // Pipeline email automation — generates AI email content and sends via Mercury
-  // Runs alongside journey automation but handles email actions specifically
-  if (ENABLE_JOURNEY_AUTOMATION) {
-    const PIPELINE_EMAIL_INTERVAL = 90000; // Every 90 seconds
-    pipelineEmailInterval = setInterval(async () => {
-      if (isPipelineEmailRunning) {
-        return;
-      }
-
-      isPipelineEmailRunning = true;
-      try {
-        const result = await withJobTimeout('Pipeline Email', () => executePipelineEmailActions(10));
-        if (result.processed > 0) {
-          console.log(
-            `[Background Jobs] Pipeline email: processed=${result.processed}, sent=${result.sent}, failed=${result.failed}`
-          );
-        }
-      } catch (error) {
-        console.error('[Background Jobs] Pipeline email error:', error);
-      } finally {
-        isPipelineEmailRunning = false;
-      }
-    }, PIPELINE_EMAIL_INTERVAL);
-  }
-
-  // Pipeline Agent health monitor — scans for stale leads and takes action
-  if (ENABLE_JOURNEY_AUTOMATION) {
-    const PIPELINE_HEALTH_INTERVAL = 10 * 60 * 1000; // Every 10 minutes
-    setInterval(async () => {
-      try {
-        const result = await withJobTimeout('Pipeline Health', () => monitorPipelineHealth(10));
-        if (result.actioned > 0) {
-          console.log(
-            `[Background Jobs] Pipeline Agent health: scanned=${result.scanned}, actioned=${result.actioned}`
-          );
-        }
-      } catch (error) {
-        console.error('[Background Jobs] Pipeline Agent health error:', error);
-      }
-    }, PIPELINE_HEALTH_INTERVAL);
-  }
+  // Old journey pipeline jobs removed — unified pipeline handles pipeline automation
 
   // Email validation job (cron-based) - Only start if enabled
   if (ENABLE_EMAIL_VALIDATION) {
