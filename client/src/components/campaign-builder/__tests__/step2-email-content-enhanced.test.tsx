@@ -1,352 +1,269 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { Step2EmailContentEnhanced } from '@/components/campaign-builder/step2-email-content-enhanced';
-import * as queryClient from '@/lib/queryClient';
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { Step2EmailContentEnhanced } from "@/components/campaign-builder/step2-email-content-enhanced";
+import * as queryClient from "@/lib/queryClient";
 
-// Mock API
-vi.mock('@/lib/queryClient', () => ({
-  apiRequest: vi.fn()
+const toast = vi.fn();
+
+vi.mock("@/hooks/use-toast", () => ({
+  useToast: () => ({ toast }),
 }));
 
-describe('Step2EmailContentEnhanced Integration Tests', () => {
-  const mockData = {
-    audience: {
-      sampleContacts: [
-        {
-          id: '1',
-          firstName: 'John',
-          lastName: 'Doe',
-          email: 'john@example.com',
-          company: 'Acme Corp'
-        }
-      ]
-    },
-    content: {
-      subject: 'Test Subject',
-      preheader: 'Test Preview',
-      html: '<html><body>Hello {{first_name}}!</body></html>',
-      design: null,
-      senderProfileId: 'profile-1'
-    }
-  };
+vi.mock("@/lib/queryClient", () => ({
+  apiRequest: vi.fn(),
+}));
 
+vi.mock("@/components/email-builder", () => ({
+  EmailBuilderPro: ({
+    initialSubject,
+    initialPreheader,
+    onDraftChange,
+    onSave,
+  }: {
+    initialSubject?: string;
+    initialPreheader?: string;
+    onDraftChange?: (draft: { subject: string; preheader: string; htmlContent: string }) => void;
+    onSave?: (draft: { subject: string; preheader: string; htmlContent: string }) => void;
+  }) => (
+    <div data-testid="mock-email-builder">
+      <div data-testid="mock-builder-subject">{initialSubject}</div>
+      <div data-testid="mock-builder-preheader">{initialPreheader}</div>
+      <button
+        type="button"
+        onClick={() =>
+          onDraftChange?.({
+            subject: "Live synced subject",
+            preheader: "Live synced preheader",
+            htmlContent: "<p>Live synced body</p>",
+          })
+        }
+      >
+        Emit Draft Change
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onSave?.({
+            subject: "Saved subject",
+            preheader: "Saved preheader",
+            htmlContent: "<p>Saved body</p>",
+          })
+        }
+      >
+        Emit Builder Save
+      </button>
+    </div>
+  ),
+  TemplateSelectorModal: ({
+    open,
+    onSelectTemplate,
+  }: {
+    open: boolean;
+    onSelectTemplate: (template: { id: string; name: string; subject: string; htmlContent: string }) => void;
+  }) =>
+    open ? (
+      <button
+        type="button"
+        onClick={() =>
+          onSelectTemplate({
+            id: "template-1",
+            name: "Template One",
+            subject: "Template subject",
+            htmlContent: "<p>Template body</p>",
+          })
+        }
+      >
+        Use Mock Template
+      </button>
+    ) : null,
+}));
+
+function jsonResponse(payload: unknown) {
+  return {
+    ok: true,
+    json: async () => payload,
+  };
+}
+
+describe("Step2EmailContentEnhanced", () => {
+  const mockApiRequest = vi.mocked(queryClient.apiRequest);
   const mockOnNext = vi.fn();
   const mockOnBack = vi.fn();
 
+  const baseData = {
+    name: "Q2 Expansion Push",
+    organizationId: "org-1",
+    clientAccountId: "client-1",
+    projectId: "project-1",
+    audience: {
+      estimatedCount: 428,
+      sampleContacts: [
+        {
+          id: "1",
+          firstName: "John",
+          lastName: "Doe",
+          company: "Acme Corp",
+          email: "john@acme.com",
+        },
+      ],
+    },
+    content: {
+      subject: "Initial subject",
+      preheader: "Initial preview",
+      html: "<p>Existing draft body</p>",
+      senderProfileId: "profile-1",
+    },
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    (queryClient.apiRequest as any).mockResolvedValue({
-      senderProfiles: [
-        {
-          id: 'profile-1',
-          name: 'Support',
-          email: 'support@company.com',
-          verified: true
-        },
-        {
-          id: 'profile-2',
-          name: 'Marketing',
-          email: 'marketing@company.com',
-          verified: false
-        }
-      ]
-    });
-  });
 
-  describe('Component Rendering', () => {
-    it('should render without errors', () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-      expect(screen.getByText(/Sender Profile/i)).toBeInTheDocument();
-    });
+    mockApiRequest.mockImplementation(async (method: string, url: string) => {
+      if (method === "GET" && url === "/api/sender-profiles") {
+        return jsonResponse([
+          {
+            id: "profile-1",
+            name: "Support",
+            email: "support@company.com",
+            isVerified: true,
+          },
+          {
+            id: "profile-2",
+            name: "Marketing",
+            email: "marketing@company.com",
+            isVerified: false,
+          },
+        ]);
+      }
 
-    it('should load sender profiles on mount', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
+      if (method === "GET" && url === "/api/client-portal/admin/clients") {
+        return jsonResponse([{ id: "client-1", name: "Acme Corp" }]);
+      }
 
-      await waitFor(() => {
-        expect(queryClient.apiRequest).toHaveBeenCalledWith('GET', '/api/sender-profiles');
-      });
-    });
-
-    it('should display all tabs', () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      expect(screen.getByText(/Email Builder/i)).toBeInTheDocument();
-      expect(screen.getByText(/Templates/i)).toBeInTheDocument();
-      expect(screen.getByText(/Preview/i)).toBeInTheDocument();
-    });
-  });
-
-  describe('Sender Profile Selection', () => {
-    it('should auto-select first verified profile', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      await waitFor(() => {
-        const selector = screen.getByDisplayValue(/Support/i);
-        expect(selector).toBeInTheDocument();
-      });
-    });
-
-    it('should show verification badge for verified profiles', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/Verified/i)).toBeInTheDocument();
-      });
-    });
-
-    it('should show warning for unverified profiles', async () => {
-      const dataWithUnverified = {
-        ...mockData,
-        content: { ...mockData.content, senderProfileId: 'profile-2' }
-      };
-
-      render(
-        <Step2EmailContentEnhanced
-          data={dataWithUnverified}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/not been verified/i)).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe('Form Validation', () => {
-    it('should require subject line', async () => {
-      const dataNoSubject = {
-        ...mockData,
-        content: { ...mockData.content, subject: '' }
-      };
-
-      render(
-        <Step2EmailContentEnhanced
-          data={dataNoSubject}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      const continueButton = screen.getByText(/Continue to Scheduling/i);
-      fireEvent.click(continueButton);
-
-      await waitFor(() => {
-        expect(screen.getByText(/Subject line is required/i)).toBeInTheDocument();
-      });
-    });
-
-    it('should require email content', async () => {
-      const dataNoContent = {
-        ...mockData,
-        content: { ...mockData.content, html: '' }
-      };
-
-      render(
-        <Step2EmailContentEnhanced
-          data={dataNoContent}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      const continueButton = screen.getByText(/Continue to Scheduling/i);
-      fireEvent.click(continueButton);
-
-      await waitFor(() => {
-        expect(screen.getByText(/Email content is required/i)).toBeInTheDocument();
-      });
-    });
-
-    it('should pass validation with all required fields', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      const continueButton = screen.getByText(/Continue to Scheduling/i);
-      fireEvent.click(continueButton);
-
-      await waitFor(() => {
-        expect(mockOnNext).toHaveBeenCalledWith({
-          content: expect.objectContaining({
-            subject: 'Test Subject',
-            html: expect.any(String),
-            senderProfileId: 'profile-1'
-          })
+      if (method === "GET" && url === "/api/client-portal/admin/clients/client-1") {
+        return jsonResponse({
+          projects: [
+            {
+              id: "project-1",
+              name: "Q2 Expansion",
+              description: "Grow qualified pipeline with a focused outbound motion.",
+            },
+          ],
         });
+      }
+
+      if (method === "POST" && url === "/api/ai/generate-email") {
+        return jsonResponse({
+          usedAi: true,
+          subject: "New AI Subject",
+          body: "<p>AI generated body</p>",
+          rawContent: {
+            preheader: "AI preview text",
+          },
+        });
+      }
+
+      if (method === "POST" && url === "/api/ai/suggest-subject") {
+        return jsonResponse({ subject: "Suggested subject line" });
+      }
+
+      if (method === "POST" && url === "/api/campaigns/send-test") {
+        return jsonResponse({ success: true });
+      }
+
+      throw new Error(`Unhandled request: ${method} ${url}`);
+    });
+  });
+
+  it("loads sender profiles and renders the guided content step", async () => {
+    render(<Step2EmailContentEnhanced data={baseData} onNext={mockOnNext} onBack={mockOnBack} />);
+
+    expect(screen.getByText(/AI Draft Studio/i)).toBeInTheDocument();
+    expect(screen.getByText(/Message Studio/i)).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mockApiRequest).toHaveBeenCalledWith("GET", "/api/sender-profiles");
+    });
+
+    expect(screen.getByText(/Support <support@company.com>/i)).toBeInTheDocument();
+    expect(screen.getByText(/Acme Corp/i)).toBeInTheDocument();
+  });
+
+  it("applies the AI draft to the live message snapshot", async () => {
+    const user = userEvent.setup();
+    render(<Step2EmailContentEnhanced data={baseData} onNext={mockOnNext} onBack={mockOnBack} />);
+
+    await user.click(screen.getByRole("button", { name: /Generate AI Draft/i }));
+
+    await waitFor(() => {
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        "POST",
+        "/api/ai/generate-email",
+        expect.objectContaining({
+          campaignName: "Q2 Expansion Push",
+          clientName: "Acme Corp",
+          projectName: "Q2 Expansion",
+        }),
+      );
+    });
+
+    expect(screen.getByText("New AI Subject")).toBeInTheDocument();
+    expect(screen.getByText("AI preview text")).toBeInTheDocument();
+    expect(screen.getByText(/AI drafted the current message/i)).toBeInTheDocument();
+  });
+
+  it("uses the live builder draft when continuing without a separate builder save", async () => {
+    const user = userEvent.setup();
+    render(<Step2EmailContentEnhanced data={baseData} onNext={mockOnNext} onBack={mockOnBack} />);
+
+    await user.click(screen.getByRole("button", { name: /Emit Draft Change/i }));
+    await user.click(screen.getByRole("button", { name: /Continue to Scheduling/i }));
+
+    await waitFor(() => {
+      expect(mockOnNext).toHaveBeenCalledWith({
+        content: expect.objectContaining({
+          subject: "Live synced subject",
+          preheader: "Live synced preheader",
+          html: "<p>Live synced body</p>",
+          senderProfileId: "profile-1",
+        }),
       });
     });
   });
 
-  describe('Email Summary Card', () => {
-    it('should display email summary information', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
+  it("validates missing subject and content before continuing", async () => {
+    const user = userEvent.setup();
+    render(
+      <Step2EmailContentEnhanced
+        data={{
+          ...baseData,
+          content: {
+            subject: "",
+            preheader: "",
+            html: "",
+            senderProfileId: "profile-1",
+          },
+        }}
+        onNext={mockOnNext}
+        onBack={mockOnBack}
+      />,
+    );
 
-      await waitFor(() => {
-        expect(screen.getByText('Test Subject')).toBeInTheDocument();
-        expect(screen.getByText('Test Preview')).toBeInTheDocument();
-      });
-    });
+    await user.click(screen.getByRole("button", { name: /Continue to Scheduling/i }));
 
-    it('should show content status as Ready', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/Ready/i)).toBeInTheDocument();
-      });
-    });
-
-    it('should show content status as Empty when no content', async () => {
-      const dataNoContent = {
-        ...mockData,
-        content: { ...mockData.content, html: '' }
-      };
-
-      render(
-        <Step2EmailContentEnhanced
-          data={dataNoContent}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/Empty/i)).toBeInTheDocument();
-      });
-    });
+    expect(await screen.findByText(/Subject line is required/i)).toBeInTheDocument();
+    expect(screen.getByText(/Email content is required/i)).toBeInTheDocument();
+    expect(mockOnNext).not.toHaveBeenCalled();
   });
 
-  describe('Navigation', () => {
-    it('should call onBack when back button clicked', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
+  it("loads the selected template into the draft", async () => {
+    const user = userEvent.setup();
+    render(<Step2EmailContentEnhanced data={baseData} onNext={mockOnNext} onBack={mockOnBack} />);
 
-      const backButton = screen.getByText(/Back to Audience/i);
-      fireEvent.click(backButton);
+    await user.click(screen.getByRole("button", { name: /Load Template/i }));
+    await user.click(screen.getByRole("button", { name: /Use Mock Template/i }));
 
-      expect(mockOnBack).toHaveBeenCalled();
-    });
-
-    it('should call onNext with form data when continue button clicked', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      const continueButton = screen.getByText(/Continue to Scheduling/i);
-      fireEvent.click(continueButton);
-
-      await waitFor(() => {
-        expect(mockOnNext).toHaveBeenCalled();
-      });
-    });
-  });
-
-  describe('Tab Navigation', () => {
-    it('should switch between tabs', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      const templatesTab = screen.getByText(/Templates/i);
-      fireEvent.click(templatesTab);
-
-      await waitFor(() => {
-        expect(screen.getByText(/Browse Templates/i)).toBeInTheDocument();
-      });
-    });
-
-    it('should open template selector modal', async () => {
-      render(
-        <Step2EmailContentEnhanced
-          data={mockData}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        />
-      );
-
-      const templatesTab = screen.getByText(/Templates/i);
-      fireEvent.click(templatesTab);
-
-      const browseButton = await screen.findByText(/Browse Templates/i);
-      fireEvent.click(browseButton);
-
-      // Modal should open (implementation specific)
-    });
-  });
-});
-
-describe('Campaign Creation E2E Tests', () => {
-  it('should complete full campaign creation flow', async () => {
-    // This would test the complete flow from Step 1 to Step 5
-    // Including creating a campaign and verifying it's stored
-  });
-
-  it('should render emails with personalization', async () => {
-    // Test that emails render with personalization tokens replaced
-  });
-
-  it('should inject tracking pixels', async () => {
-    // Test that tracking pixels are properly injected
+    expect(screen.getByText("Template subject")).toBeInTheDocument();
   });
 });

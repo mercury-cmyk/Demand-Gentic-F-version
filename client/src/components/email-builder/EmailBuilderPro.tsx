@@ -68,6 +68,11 @@ interface EmailBuilderProProps {
   organizationAddress?: string;
   sampleContacts?: Contact[];
   senderProfileId?: string;
+  onDraftChange?: (data: {
+    subject: string;
+    preheader: string;
+    htmlContent: string;
+  }) => void;
   onSave?: (data: {
     subject: string;
     preheader: string;
@@ -299,6 +304,7 @@ export function EmailBuilderPro({
   organizationAddress = "123 Business St, City, State 12345",
   sampleContacts = [],
   senderProfileId = "",
+  onDraftChange,
   onSave,
   onSendTest,
   onLaunch
@@ -341,6 +347,14 @@ export function EmailBuilderPro({
     () => generateCleanHtml(bodyContent, organizationName, organizationAddress),
     [bodyContent, organizationName, organizationAddress]
   );
+
+  useEffect(() => {
+    onDraftChange?.({
+      subject,
+      preheader,
+      htmlContent: fullHtml,
+    });
+  }, [fullHtml, onDraftChange, preheader, subject]);
   
   // Insert token at cursor
   const insertToken = useCallback((token: string) => {
