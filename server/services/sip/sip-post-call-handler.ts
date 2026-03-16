@@ -18,6 +18,11 @@ import {
   previewSimulationTranscripts,
   previewStudioSessions,
 } from '@shared/schema';
+import {
+  formatTranscriptTurns,
+  normalizeTranscriptTurns,
+  type StructuredTranscriptTurn,
+} from '../transcript-structuring';
 
 const LOG_PREFIX = '[SIPPostCallHandler]';
 
@@ -50,25 +55,17 @@ export function extractCampaignTestCallId(callAttemptId: string | null | undefin
 }
 
 function mapCampaignTestTranscriptTurns(turns: SIPTranscriptTurn[]): Array<{ role: 'agent' | 'contact'; text: string; timestamp?: string }> {
-  return turns
-    .map((turn) => {
-      const text = String(turn.text || '').trim();
-      if (!text) {
-        return null;
-      }
-
-      const payload: { role: 'agent' | 'contact'; text: string; timestamp?: string } = {
-        role: turn.speaker,
-        text,
-      };
-
-      if (typeof turn.timestamp === 'number' && Number.isFinite(turn.timestamp)) {
-        payload.timestamp = new Date(turn.timestamp).toISOString();
-      }
-
-      return payload;
-    })
-    .filter((turn): turn is { role: 'agent' | 'contact'; text: string; timestamp?: string } => !!turn);
+  return normalizeTranscriptTurns(
+    turns.map((turn) => ({
+      role: turn.speaker,
+      text: turn.text,
+      timestamp: turn.timestamp,
+    }))
+  ).map((turn) => ({
+    role: turn.role,
+    text: turn.text,
+    ...(turn.timestamp ? { timestamp: turn.timestamp } : {}),
+  }));
 }
 
 type SIPQualityAnalysis = {
@@ -96,34 +93,80 @@ function buildPreviewTranscriptRows(sessionId: string, turns: SIPTranscriptTurn[
   timestampMs: number;
   metadata: Record<string, unknown>;
 }> {
-  const cleanedTurns = turns
-    .map((turn, index) => ({
-      speaker: turn.speaker,
-      text: String(turn.text || '').trim(),
-      timestamp: typeof turn.timestamp === 'number' && Number.isFinite(turn.timestamp) ? turn.timestamp : undefined,
-      index,
+  const cleanedTurns = normalizeTranscriptTurns(
+    turns.map((turn) => ({
+      role: turn.speaker,
+      text: turn.text,
+      timestamp: turn.timestamp,
     }))
-    .filter((turn) => !!turn.text);
+  ).map((turn, index) => ({
+    role: turn.role,
+    text: turn.text,
+    timestampMs: turn.timestamp ? Date.parse(turn.timestamp) : undefined,
+    index,
+  }));
 
   if (cleanedTurns.length === 0) {
     return [];
   }
 
-  const baseTimestamp = cleanedTurns.find((turn) => typeof turn.timestamp === 'number')?.timestamp;
+  const baseTimestamp = cleanedTurns.find((turn) => typeof turn.timestampMs === 'number')?.timestampMs;
 
   return cleanedTurns.map((turn) => ({
     sessionId,
-    role: turn.speaker === 'agent' ? 'assistant' : 'user',
+    role: turn.role === 'agent' ? 'assistant' : 'user',
     content: turn.text,
     timestampMs:
-      typeof turn.timestamp === 'number' && typeof baseTimestamp === 'number'
-        ? Math.max(0, Math.round(turn.timestamp - baseTimestamp))
+      typeof turn.timestampMs === 'number' && typeof baseTimestamp === 'number'
+        ? Math.max(0, Math.round(turn.timestampMs - baseTimestamp))
         : turn.index * 1000,
     metadata: {
       source: 'sip_post_call_handler',
-      speaker: turn.speaker,
+      speaker: turn.role,
     },
   }));
+}
+
+function normalizeSipTurns(turns: SIPTranscriptTurn[]): StructuredTranscriptTurn[] {
+  return normalizeTranscriptTurns(
+    turns.map((turn) => ({
+      role: turn.speaker,
+      text: turn.text,
+      timestamp: turn.timestamp,
+    }))
+  );
+}
+
+function mapStructuredTurnsToSipTurns(turns: StructuredTranscriptTurn[]): SIPTranscriptTurn[] {
+  return turns.map((turn) => ({
+    speaker: turn.role,
+    text: turn.text,
+    timestamp: turn.timestamp ? Date.parse(turn.timestamp) : undefined,
+  }));
+}
+
+function buildProvisionalAiAnalysis(turns: StructuredTranscriptTurn[]): Record<string, unknown> {
+  return {
+    transcriptLifecycle: {
+      status: 'provisional',
+      source: 'sip_media_bridge_live',
+      needsRecordingTranscription: true,
+      structuredTurnCount: turns.length,
+      updatedAt: new Date().toISOString(),
+    },
+    provisionalTranscript: {
+      generatedAt: new Date().toISOString(),
+      turnCount: turns.length,
+      turns: turns.map((turn) => ({
+        role: turn.role,
+        text: turn.text,
+        timestamp: turn.timestamp,
+        timeOffsetSec: turn.timeOffsetSec,
+        startSec: turn.startSec,
+        endSec: turn.endSec,
+      })),
+    },
+  };
 }
 
 export function buildPreviewSessionUpdate(options: {
@@ -245,15 +288,14 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
     console.log(`${LOG_PREFIX} Starting post-call analysis for call attempt ${data.callAttemptId}`);
     const campaignTestCallId = extractCampaignTestCallId(data.callAttemptId);
     const previewSessionId = data.previewSessionId || null;
+    const normalizedTurns = normalizeSipTurns(data.turnTranscript);
+    const normalizedSipTurns = mapStructuredTurnsToSipTurns(normalizedTurns);
 
-    const plainTranscript = data.turnTranscript
-      .map((turn) => `${turn.speaker === 'agent' ? 'Agent' : 'Contact'}: ${String(turn.text || '').trim()}`)
-      .filter((line) => !line.endsWith(':'))
-      .join('\n')
-      .trim();
+    const plainTranscript = formatTranscriptTurns(normalizedTurns);
     const previewTranscriptRows = previewSessionId
-      ? buildPreviewTranscriptRows(previewSessionId, data.turnTranscript)
+      ? buildPreviewTranscriptRows(previewSessionId, normalizedSipTurns)
       : [];
+    const provisionalAiAnalysis = buildProvisionalAiAnalysis(normalizedTurns);
 
     if (!plainTranscript) {
       console.log(`${LOG_PREFIX} No transcript content - creating synthetic callSession without transcript for ${data.callAttemptId}`);
@@ -267,6 +309,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
     let previewSessionPhoneNumber: string | null = null;
     let previewSessionStartedAt: Date | null = null;
     let hasPersistedAttempt = false;
+    const shouldAwaitRecordingBasedTranscription = normalizedTurns.length > 0 && !campaignTestCallId && !previewSessionId;
 
     if (previewSessionId) {
       try {
@@ -318,6 +361,20 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
 
       if (attempt?.callSessionId) {
         callSessionId = attempt.callSessionId;
+        const [existingSession] = await db
+          .select({ aiAnalysis: callSessions.aiAnalysis })
+          .from(callSessions)
+          .where(eq(callSessions.id, callSessionId))
+          .limit(1);
+        const existingAiAnalysis = (existingSession?.aiAnalysis as Record<string, unknown> | null) || {};
+        const nextAiAnalysis = {
+          ...existingAiAnalysis,
+          ...provisionalAiAnalysis,
+          transcriptLifecycle: {
+            ...(((existingAiAnalysis as any).transcriptLifecycle as Record<string, unknown> | undefined) || {}),
+            ...((provisionalAiAnalysis.transcriptLifecycle as Record<string, unknown>) || {}),
+          },
+        };
 
         await db
           .update(callSessions)
@@ -329,6 +386,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
             durationSec: data.callDurationSeconds,
             aiDisposition: data.disposition,
             ...(plainTranscript ? { aiTranscript: plainTranscript } : {}),
+            aiAnalysis: nextAiAnalysis as any,
           } as any)
           .where(eq(callSessions.id, callSessionId));
       } else {
@@ -347,6 +405,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
             endedAt: new Date(),
             durationSec: data.callDurationSeconds,
             aiTranscript: plainTranscript || null,
+            aiAnalysis: provisionalAiAnalysis as any,
             aiDisposition: data.disposition,
           })
           .returning({ id: callSessions.id });
@@ -393,6 +452,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
             endedAt: new Date(),
             durationSec: data.callDurationSeconds,
             aiTranscript: plainTranscript || null,
+            aiAnalysis: provisionalAiAnalysis as any,
             aiDisposition: data.disposition,
           })
           .returning({ id: callSessions.id });
@@ -429,7 +489,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
               disposition: data.disposition,
               callDurationSeconds: data.callDurationSeconds,
               plainTranscript,
-              turnTranscript: data.turnTranscript,
+              turnTranscript: normalizedSipTurns,
             }) as any
           )
           .where(eq(campaignTestCalls.id, campaignTestCallId));
@@ -468,7 +528,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
     }
 
     let previewQualityAnalysis: SIPQualityAnalysis = null;
-    if (callSessionId && plainTranscript) {
+    if (callSessionId && plainTranscript && !shouldAwaitRecordingBasedTranscription) {
       const { runPostCallAnalysis } = await import('../post-call-analyzer');
       const result = await runPostCallAnalysis(callSessionId, {
         callAttemptId: hasPersistedAttempt ? data.callAttemptId : undefined,
@@ -492,7 +552,7 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
                   disposition: data.disposition,
                   callDurationSeconds: data.callDurationSeconds,
                   plainTranscript,
-                  turnTranscript: data.turnTranscript,
+                  turnTranscript: normalizedSipTurns,
                   qualityAnalysis: result.qualityAnalysis,
                 }) as any
               )
@@ -504,6 +564,8 @@ export async function processSIPPostCallAnalysis(data: SIPPostCallData): Promise
       } else {
         console.warn(`${LOG_PREFIX} Post-call analysis returned: ${result.error || 'unknown error'}`);
       }
+    } else if (shouldAwaitRecordingBasedTranscription) {
+      console.log(`${LOG_PREFIX} Stored provisional SIP transcript for ${data.callAttemptId}; waiting for recording-based transcription to finalize turn detection`);
     } else if (callSessionId) {
       console.log(`${LOG_PREFIX} Created callSession ${callSessionId} without transcript; waiting for recording/transcription fallback`);
     } else {

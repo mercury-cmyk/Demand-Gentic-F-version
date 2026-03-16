@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useRoute } from "wouter";
+import { useLocation, useRoute, useSearch } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,6 +60,16 @@ interface CampaignRecord {
   landingPageUrl: string | null;
   audienceRefs?: any;
   enabledChannels?: string[] | null;
+  senderProfileId?: string | null;
+  senderName?: string | null;
+  fromEmail?: string | null;
+  replyToEmail?: string | null;
+  campaignProviderId?: string | null;
+  campaignProviderKey?: string | null;
+  campaignProviderName?: string | null;
+  campaignProviderHealthStatus?: string | null;
+  domainAuthId?: number | null;
+  domainName?: string | null;
 }
 
 interface ProjectRequestRecord {
@@ -67,9 +77,16 @@ interface ProjectRequestRecord {
   name: string;
   clientAccountId?: string | null;
   description: string | null;
+  projectType?: string | null;
   landingPageUrl: string | null;
   requestedLeadCount: number | null;
   externalEventId: string | null;
+  eventTitle?: string | null;
+  eventCommunity?: string | null;
+  eventType?: string | null;
+  eventLocation?: string | null;
+  eventDate?: string | null;
+  eventSourceUrl?: string | null;
 }
 
 interface AdminOrderRow {
@@ -93,6 +110,34 @@ interface ClientAccountRecord {
   id: string;
   name: string;
   companyName?: string | null;
+}
+
+interface ClientProjectRecord {
+  id: string;
+  name: string;
+  status?: string | null;
+  description?: string | null;
+  clientAccountId?: string | null;
+  campaignOrganizationId?: string | null;
+}
+
+interface ManagedSenderProfile {
+  id: string;
+  name: string;
+  fromName: string;
+  fromEmail: string;
+  replyTo?: string | null;
+  replyToEmail?: string | null;
+  isDefault?: boolean | null;
+  isActive?: boolean | null;
+  domainAuthId?: number | null;
+  campaignProviderId?: string | null;
+  campaignProvider?: {
+    id?: string | null;
+    name?: string | null;
+    providerKey?: string | null;
+    healthStatus?: string | null;
+  } | null;
 }
 
 interface SegmentRecord {
@@ -580,13 +625,23 @@ function getRouteCampaignId(): string | null {
   return match?.[1] || null;
 }
 
-export default function SimpleEmailCampaignEditPage() {
+interface SimpleEmailCampaignSetupPageProps {
+  mode?: "create" | "edit";
+}
+
+export default function SimpleEmailCampaignEditPage({ mode = "edit" }: SimpleEmailCampaignSetupPageProps = {}) {
   const [, paramsA] = useRoute("/campaigns/email/:id/edit");
   const [, paramsB] = useRoute("/simple-email-campaigns/:id/edit");
+  const search = useSearch();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
   const campaignId = paramsA?.id || paramsB?.id || getRouteCampaignId();
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  const seedClientAccountId = firstNonEmptyString(searchParams.get("clientId"));
+  const seedProjectId = firstNonEmptyString(searchParams.get("projectId"), searchParams.get("clientProjectId"));
+  const seedWorkOrderId = firstNonEmptyString(searchParams.get("workOrderId"), searchParams.get("orderId"));
+  const isCreateMode = mode === "create" || !campaignId;
 
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<EditFormState>(DEFAULT_FORM);
@@ -610,11 +665,14 @@ export default function SimpleEmailCampaignEditPage() {
   const [selectedAudienceSource, setSelectedAudienceSource] = useState<AudienceSource>("segment");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>("");
   const [selectedListId, setSelectedListId] = useState<string>("");
+  const [selectedSenderProfileId, setSelectedSenderProfileId] = useState<string>("");
+  const [replyToEmail, setReplyToEmail] = useState("");
   const [excludedContactIds, setExcludedContactIds] = useState<string[]>([]);
   const [contactSelection, setContactSelection] = useState<Record<string, boolean>>({});
   const [listSearchQuery, setListSearchQuery] = useState("");
   const [listPage, setListPage] = useState(1);
   const [selectedClientAccountId, setSelectedClientAccountId] = useState<string>("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState<string>("");
   const [templateTone, setTemplateTone] = useState<TemplateTone>(DEFAULT_TEMPLATE_TONE);
   const [templateDesign, setTemplateDesign] = useState<TemplateDesign>(DEFAULT_TEMPLATE_DESIGN);
@@ -656,6 +714,27 @@ export default function SimpleEmailCampaignEditPage() {
     staleTime: 60_000,
   });
 
+  const { data: clientProjects = [], isLoading: clientProjectsLoading } = useQuery<ClientProjectRecord[]>({
+    queryKey: ["admin-email-campaign-client-projects", selectedClientAccountId],
+    enabled: !!selectedClientAccountId,
+    queryFn: async () => {
+      if (!selectedClientAccountId) return [];
+      const res = await apiRequest("GET", `/api/client-portal/admin/clients/${selectedClientAccountId}`);
+      const body = await res.json();
+      return Array.isArray(body?.projects) ? body.projects : [];
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: senderProfiles = [], isLoading: senderProfilesLoading } = useQuery<ManagedSenderProfile[]>({
+    queryKey: ["admin-email-campaign-sender-profiles"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/email-management/sender-profiles");
+      return res.json();
+    },
+    staleTime: 60_000,
+  });
+
   const { data: adminOrders } = useQuery<AdminOrderRow[]>({
     queryKey: ["admin-email-campaign-orders"],
     queryFn: async () => {
@@ -666,24 +745,34 @@ export default function SimpleEmailCampaignEditPage() {
   });
 
   const relatedOrder = useMemo(() => {
-    if (!campaign || !adminOrders?.length) return null;
+    if (!adminOrders?.length) return null;
+    if (selectedWorkOrderId) {
+      return adminOrders.find((row) => row.order.id === selectedWorkOrderId)?.order || null;
+    }
+
+    const inferredProjectId = firstNonEmptyString(selectedProjectId, campaign?.projectId, seedProjectId);
+    const inferredClientId = firstNonEmptyString(selectedClientAccountId, campaign?.clientAccountId, seedClientAccountId);
     const candidates = adminOrders.filter((row) => {
-      if (campaign.projectId && row.order.projectId === campaign.projectId) return true;
-      if (row.order.campaignId && row.order.campaignId === campaign.id) return true;
+      if (campaign?.id && row.order.campaignId && row.order.campaignId === campaign.id) return true;
+      if (inferredProjectId && row.order.projectId === inferredProjectId) return true;
+      if (!inferredProjectId && inferredClientId && row.order.clientAccountId === inferredClientId) return true;
       return false;
     });
     if (candidates.length === 0) return null;
     return [...candidates].sort((a, b) => {
       return new Date(b.order.createdAt).getTime() - new Date(a.order.createdAt).getTime();
     })[0].order;
-  }, [campaign, adminOrders]);
+  }, [adminOrders, campaign?.id, campaign?.projectId, campaign?.clientAccountId, seedClientAccountId, seedProjectId, selectedClientAccountId, selectedProjectId, selectedWorkOrderId]);
 
   const filteredWorkOrders = useMemo(() => {
     if (!adminOrders?.length) return [];
     const orders = adminOrders.map((row) => row.order);
-    if (!selectedClientAccountId) return orders;
-    return orders.filter((order) => order.clientAccountId === selectedClientAccountId);
-  }, [adminOrders, selectedClientAccountId]);
+    return orders.filter((order) => {
+      if (selectedClientAccountId && order.clientAccountId !== selectedClientAccountId) return false;
+      if (selectedProjectId && order.projectId !== selectedProjectId) return false;
+      return true;
+    });
+  }, [adminOrders, selectedClientAccountId, selectedProjectId]);
 
   const selectedWorkOrder = useMemo(() => {
     if (!selectedWorkOrderId || !adminOrders?.length) return null;
@@ -691,13 +780,29 @@ export default function SimpleEmailCampaignEditPage() {
     return match?.order || null;
   }, [adminOrders, selectedWorkOrderId]);
 
+  const selectedProject = useMemo(
+    () => clientProjects.find((project) => project.id === selectedProjectId) || null,
+    [clientProjects, selectedProjectId]
+  );
+
+  const contextProjectId = firstNonEmptyString(
+    selectedWorkOrder?.projectId,
+    selectedProjectId,
+    campaign?.projectId,
+    seedProjectId
+  ) || null;
+  const contextClientAccountId = firstNonEmptyString(
+    selectedClientAccountId,
+    selectedWorkOrder?.clientAccountId,
+    selectedProject?.clientAccountId,
+    campaign?.clientAccountId,
+    seedClientAccountId
+  ) || null;
+
   const effectiveProjectId =
-    selectedWorkOrder?.projectId ||
-    (selectedClientAccountId && campaign?.clientAccountId && selectedClientAccountId !== campaign.clientAccountId
-      ? null
-      : campaign?.projectId || null);
+    contextProjectId;
   const effectiveOrgClientAccountId =
-    selectedClientAccountId || selectedWorkOrder?.clientAccountId || campaign?.clientAccountId || relatedOrder?.clientAccountId || null;
+    contextClientAccountId;
 
   const { data: projectRequest } = useQuery<ProjectRequestRecord | null>({
     queryKey: ["admin-email-campaign-project", effectiveProjectId],
@@ -740,6 +845,11 @@ export default function SimpleEmailCampaignEditPage() {
   const selectedClientAccount = useMemo(
     () => clientAccounts.find((client) => client.id === selectedClientAccountId) || null,
     [clientAccounts, selectedClientAccountId]
+  );
+
+  const selectedSender = useMemo(
+    () => senderProfiles.find((sender) => sender.id === selectedSenderProfileId) || null,
+    [senderProfiles, selectedSenderProfileId]
   );
 
   const selectedOrgNameForBrand = firstNonEmptyString(
@@ -896,27 +1006,59 @@ export default function SimpleEmailCampaignEditPage() {
     const wizardDetails = (campaign?.audienceRefs as any)?.wizardDetails || {};
     const targetTitlesFromOrder = normalizeTextArray(relatedOrder?.targetTitles);
     const targetIndustriesFromOrder = normalizeTextArray(relatedOrder?.targetIndustries);
-
     const campaignConfig = (relatedOrder?.campaignConfig || {}) as any;
+    const audienceFallbackParts: string[] = [];
+    if (targetTitlesFromOrder.length > 0) {
+      audienceFallbackParts.push(`titles: ${targetTitlesFromOrder.slice(0, 6).join(", ")}`);
+    }
+    if (targetIndustriesFromOrder.length > 0) {
+      audienceFallbackParts.push(`industries: ${targetIndustriesFromOrder.slice(0, 6).join(", ")}`);
+    }
+    const orderAudienceFallback = audienceFallbackParts.join(" | ");
+    const requestedLeadGoal =
+      typeof projectRequest?.requestedLeadCount === "number" && projectRequest.requestedLeadCount > 0
+        ? `Generate ${projectRequest.requestedLeadCount} qualified leads.`
+        : "";
 
     return {
-      name: campaign?.name || "",
+      name:
+        campaign?.name ||
+        firstNonEmptyString(projectRequest?.name, selectedProject?.name, relatedOrder?.title),
       objective:
         campaign?.campaignObjective ||
-        campaignConfig.objective ||
+        firstNonEmptyString(
+          campaignConfig.objective,
+          projectRequest?.description,
+          selectedProject?.description,
+          relatedOrder?.description
+        ) ||
         "",
       description:
         campaign?.productServiceInfo ||
-        relatedOrder?.description ||
-        projectRequest?.description ||
+        firstNonEmptyString(
+          relatedOrder?.description,
+          selectedProject?.description,
+          projectRequest?.description,
+          relatedOrder?.title
+        ) ||
         "",
       targetAudience:
         campaign?.targetAudienceDescription ||
-        campaignConfig.targetAudience ||
+        firstNonEmptyString(
+          campaignConfig.targetAudience,
+          campaignConfig.audienceDescription,
+          campaignConfig.audience,
+          orderAudienceFallback
+        ) ||
         "",
       successCriteria:
         campaign?.successCriteria ||
-        campaignConfig.successCriteria ||
+        firstNonEmptyString(
+          campaignConfig.successCriteria,
+          campaignConfig.goal,
+          campaignConfig.primaryKpi,
+          requestedLeadGoal
+        ) ||
         "",
       targetJobTitles:
         normalizeTextArray(wizardDetails.targetJobTitles).length > 0
@@ -932,12 +1074,13 @@ export default function SimpleEmailCampaignEditPage() {
         campaignConfig.landingPageUrl ||
         "",
     };
-  }, [campaign, relatedOrder, projectRequest]);
+  }, [campaign, projectRequest, relatedOrder, selectedProject]);
 
   useEffect(() => {
-    if (!campaign || initialized) return;
+    if (initialized) return;
+    if (!isCreateMode && !campaign) return;
 
-    const normalizedType = campaign.type === "combo" ? "combo" : "email";
+    const normalizedType = campaign?.type === "combo" ? "combo" : "email";
 
     setForm({
       channel: normalizedType,
@@ -950,35 +1093,44 @@ export default function SimpleEmailCampaignEditPage() {
       targetIndustries: clientSnapshot.targetIndustries,
       landingPageUrl: clientSnapshot.landingPageUrl,
     });
-    const inferredClientAccountId =
-      campaign.clientAccountId ||
-      relatedOrder?.clientAccountId ||
-      "";
-    const inferredWorkOrderId = relatedOrder?.id || "";
+    const inferredClientAccountId = firstNonEmptyString(
+      campaign?.clientAccountId,
+      seedClientAccountId,
+      relatedOrder?.clientAccountId
+    );
+    const inferredProjectId = firstNonEmptyString(
+      campaign?.projectId,
+      seedProjectId,
+      relatedOrder?.projectId
+    );
+    const inferredWorkOrderId = firstNonEmptyString(seedWorkOrderId, relatedOrder?.id);
     setSelectedClientAccountId(inferredClientAccountId);
+    setSelectedProjectId(inferredProjectId);
     setSelectedWorkOrderId(inferredWorkOrderId);
 
     const inferredAudienceSource: AudienceSource =
       persistedAudienceConfig?.source === "list" || persistedAudienceConfig?.source === "segment"
         ? persistedAudienceConfig.source
-        : Array.isArray((campaign.audienceRefs as any)?.segments) && (campaign.audienceRefs as any).segments.length > 0
+        : Array.isArray((campaign?.audienceRefs as any)?.segments) && (campaign?.audienceRefs as any).segments.length > 0
           ? "segment"
           : "list";
 
     const inferredSegmentId =
       firstNonEmptyString(
         persistedAudienceConfig?.segmentId,
-        Array.isArray((campaign.audienceRefs as any)?.segments) ? (campaign.audienceRefs as any).segments[0] : ""
+        Array.isArray((campaign?.audienceRefs as any)?.segments) ? (campaign?.audienceRefs as any).segments[0] : ""
       ) || "";
     const inferredListId =
       firstNonEmptyString(
         persistedAudienceConfig?.listId,
-        Array.isArray((campaign.audienceRefs as any)?.lists) ? (campaign.audienceRefs as any).lists[0] : ""
+        Array.isArray((campaign?.audienceRefs as any)?.lists) ? (campaign?.audienceRefs as any).lists[0] : ""
       ) || "";
 
     setSelectedAudienceSource(inferredAudienceSource);
     setSelectedSegmentId(inferredSegmentId);
     setSelectedListId(inferredListId);
+    setSelectedSenderProfileId(firstNonEmptyString(campaign?.senderProfileId));
+    setReplyToEmail(firstNonEmptyString(campaign?.replyToEmail));
     setExcludedContactIds(normalizeTextArray(persistedAudienceConfig?.excludedContactIds));
     setContactSelection({});
     setListSearchQuery("");
@@ -1005,6 +1157,7 @@ export default function SimpleEmailCampaignEditPage() {
       targetAudience: clientSnapshot.targetAudience,
       orgName:
         clientAccounts.find((client) => client.id === inferredClientAccountId)?.name ||
+        selectedProject?.name ||
         relatedOrder?.title ||
         "Your Organization",
       paletteOverrides: initialDesign === "argyle-brand" ? argylePaletteOverrides : undefined,
@@ -1056,6 +1209,7 @@ export default function SimpleEmailCampaignEditPage() {
     });
     setInitialized(true);
   }, [
+    isCreateMode,
     campaign,
     initialized,
     clientSnapshot,
@@ -1065,7 +1219,89 @@ export default function SimpleEmailCampaignEditPage() {
     persistedTestSendConfig,
     clientAccounts,
     argylePaletteOverrides,
+    seedClientAccountId,
+    seedProjectId,
+    seedWorkOrderId,
+    selectedProject,
   ]);
+
+  useEffect(() => {
+    if (!senderProfiles.length) return;
+    if (selectedSenderProfileId && senderProfiles.some((sender) => sender.id === selectedSenderProfileId)) return;
+
+    const preferredSender =
+      senderProfiles.find((sender) => sender.id === campaign?.senderProfileId) ||
+      senderProfiles.find((sender) => sender.isDefault) ||
+      senderProfiles[0] ||
+      null;
+
+    if (!preferredSender) return;
+
+    setSelectedSenderProfileId(preferredSender.id);
+    setReplyToEmail((current) =>
+      current.trim() || preferredSender.replyToEmail || preferredSender.replyTo || preferredSender.fromEmail || ""
+    );
+  }, [campaign?.senderProfileId, selectedSenderProfileId, senderProfiles]);
+
+  useEffect(() => {
+    if (!selectedClientAccountId) {
+      setSelectedProjectId("");
+      return;
+    }
+    if (!clientProjects.some((project) => project.id === selectedProjectId)) {
+      const fallbackProjectId = firstNonEmptyString(seedProjectId, campaign?.projectId, relatedOrder?.projectId, clientProjects[0]?.id);
+      setSelectedProjectId(fallbackProjectId);
+    }
+  }, [campaign?.projectId, clientProjects, relatedOrder?.projectId, seedProjectId, selectedClientAccountId, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedWorkOrderId || filteredWorkOrders.some((order) => order.id === selectedWorkOrderId)) return;
+    setSelectedWorkOrderId("");
+  }, [filteredWorkOrders, selectedWorkOrderId]);
+
+  useEffect(() => {
+    if (!initialized) return;
+
+    setForm((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      if (!next.name.trim() && clientSnapshot.name) {
+        next.name = clientSnapshot.name;
+        changed = true;
+      }
+      if (!next.objective.trim() && clientSnapshot.objective) {
+        next.objective = clientSnapshot.objective;
+        changed = true;
+      }
+      if (!next.description.trim() && clientSnapshot.description) {
+        next.description = clientSnapshot.description;
+        changed = true;
+      }
+      if (!next.targetAudience.trim() && clientSnapshot.targetAudience) {
+        next.targetAudience = clientSnapshot.targetAudience;
+        changed = true;
+      }
+      if (!next.successCriteria.trim() && clientSnapshot.successCriteria) {
+        next.successCriteria = clientSnapshot.successCriteria;
+        changed = true;
+      }
+      if (next.targetJobTitles.length === 0 && clientSnapshot.targetJobTitles.length > 0) {
+        next.targetJobTitles = clientSnapshot.targetJobTitles;
+        changed = true;
+      }
+      if (next.targetIndustries.length === 0 && clientSnapshot.targetIndustries.length > 0) {
+        next.targetIndustries = clientSnapshot.targetIndustries;
+        changed = true;
+      }
+      if (!next.landingPageUrl.trim() && clientSnapshot.landingPageUrl) {
+        next.landingPageUrl = clientSnapshot.landingPageUrl;
+        changed = true;
+      }
+
+      return changed ? next : prev;
+    });
+  }, [clientSnapshot, initialized]);
 
   const listMemberIds = useMemo(
     () => listMembers.map((member) => member.id).filter((id): id is string => typeof id === "string" && id.length > 0),
@@ -1207,15 +1443,23 @@ export default function SimpleEmailCampaignEditPage() {
       ? !!selectedSegmentId
       : !!selectedListId && staticListIncludedCount > 0;
   const templateReady = templateSubject.trim().length > 0 && templateBodyText.trim().length > 0;
+  const emailRoutingReady = !!selectedSenderProfileId && isValidEmail(replyToEmail);
 
   const canProceed = useMemo(() => {
     if (step === 0) return !!form.channel;
-    if (step === 1) return form.name.trim().length > 0 && form.objective.trim().length > 0;
+    if (step === 1) {
+      return (
+        form.name.trim().length > 0 &&
+        form.objective.trim().length > 0 &&
+        emailRoutingReady &&
+        !!selectedClientAccountId
+      );
+    }
     if (step === 2) return true;
     if (step === 3) return audienceReady;
     if (step === 4) return templateReady;
     return true;
-  }, [step, form, audienceReady, templateReady]);
+  }, [step, form, audienceReady, emailRoutingReady, selectedClientAccountId, templateReady]);
 
   useEffect(() => {
     if (selectedSegmentId && !contactSegments.some((segment) => segment.id === selectedSegmentId)) {
@@ -1735,6 +1979,22 @@ export default function SimpleEmailCampaignEditPage() {
       });
       return;
     }
+    if (!selectedSenderProfileId) {
+      toast({
+        title: "Sender required",
+        description: "Select a sender before sending test emails.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!isValidEmail(replyToEmail)) {
+      toast({
+        title: "Reply-to required",
+        description: "Enter a valid reply-to email before sending test emails.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!templateReady) {
       toast({
         title: "Template incomplete",
@@ -1803,6 +2063,8 @@ export default function SimpleEmailCampaignEditPage() {
             to: row.email.trim(),
             subject,
             html,
+            senderProfileId: selectedSenderProfileId,
+            replyToEmail: replyToEmail.trim(),
           });
           const body = await response.json();
 
@@ -1874,10 +2136,34 @@ export default function SimpleEmailCampaignEditPage() {
   };
 
   const handleSave = async () => {
-    if (!campaignId || !campaign) return;
-
     try {
       setIsSaving(true);
+      const linkageProjectId =
+        firstNonEmptyString(selectedProjectId, selectedWorkOrder?.projectId, campaign?.projectId) || null;
+      if (!selectedClientAccountId) {
+        toast({
+          title: "Organization required",
+          description: "Select an organization before saving this email campaign.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!emailRoutingReady) {
+        toast({
+          title: "Email routing required",
+          description: "Select a sender and provide a valid reply-to email before saving.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!isCreateMode && !linkageProjectId) {
+        toast({
+          title: "Project required",
+          description: "Select a project before updating this campaign.",
+          variant: "destructive",
+        });
+        return;
+      }
       if (selectedAudienceSource === "segment" && !selectedSegmentId) {
         toast({
           title: "Audience required",
@@ -1911,7 +2197,7 @@ export default function SimpleEmailCampaignEditPage() {
         return;
       }
 
-      const existingRefs = (campaign.audienceRefs || {}) as any;
+      const existingRefs = (campaign?.audienceRefs || {}) as any;
       const nextAudienceRefs: any = { ...existingRefs };
       delete nextAudienceRefs.lists;
       delete nextAudienceRefs.selectedLists;
@@ -1932,9 +2218,6 @@ export default function SimpleEmailCampaignEditPage() {
         selectedAudienceSource === "list"
           ? excludedContactIds.filter((contactId) => listMemberIdSet.has(contactId))
           : [];
-      const linkageProjectId =
-        selectedWorkOrder?.projectId ||
-        (selectedClientAccountId && campaign.clientAccountId === selectedClientAccountId ? campaign.projectId : null);
       const persistedTemplate: PersistedAdminEmailTemplateConfig = {
         tone: templateTone,
         design: templateDesign,
@@ -1959,18 +2242,27 @@ export default function SimpleEmailCampaignEditPage() {
         failedCount: testSendSummary.failedCount,
       };
 
-      const patchPayload = {
+      const payload = {
         type: form.channel === "combo" ? "combo" : "email",
         enabledChannels: form.channel === "combo" ? ["email", "voice"] : ["email"],
-        ...(selectedClientAccountId && linkageProjectId
-          ? { clientAccountId: selectedClientAccountId, projectId: linkageProjectId }
-          : {}),
+        status: campaign?.status || "draft",
+        clientAccountId: selectedClientAccountId,
+        ...(linkageProjectId ? { projectId: linkageProjectId } : {}),
         name: form.name.trim(),
         campaignObjective: form.objective.trim(),
         productServiceInfo: form.description.trim() || null,
         targetAudienceDescription: form.targetAudience.trim() || null,
         successCriteria: form.successCriteria.trim() || null,
         landingPageUrl: form.landingPageUrl.trim() || null,
+        senderProfileId: selectedSenderProfileId || null,
+        senderName: firstNonEmptyString(selectedSender?.fromName, selectedSender?.name) || null,
+        fromEmail: selectedSender?.fromEmail || null,
+        replyToEmail: replyToEmail.trim() || null,
+        campaignProviderId: selectedSender?.campaignProviderId || selectedSender?.campaignProvider?.id || null,
+        campaignProviderKey: selectedSender?.campaignProvider?.providerKey || null,
+        campaignProviderName: selectedSender?.campaignProvider?.name || null,
+        campaignProviderHealthStatus: selectedSender?.campaignProvider?.healthStatus || null,
+        domainAuthId: selectedSender?.domainAuthId || null,
         audienceRefs: {
           ...nextAudienceRefs,
           wizardDetails: {
@@ -1997,13 +2289,22 @@ export default function SimpleEmailCampaignEditPage() {
         } as any,
       };
 
-      await apiRequest("PATCH", `/api/campaigns/${campaignId}`, patchPayload);
+      const response = isCreateMode
+        ? await apiRequest("POST", "/api/campaigns", payload)
+        : await apiRequest("PATCH", `/api/campaigns/${campaignId}`, payload);
+      const savedCampaign = await response.json();
 
       toast({
-        title: "Campaign setup saved",
-        description: "Campaign updated successfully.",
+        title: isCreateMode ? "Campaign created" : "Campaign setup saved",
+        description: isCreateMode
+          ? "Draft email campaign created successfully."
+          : "Campaign updated successfully.",
       });
 
+      if (isCreateMode && savedCampaign?.id) {
+        setLocation(`/campaigns/email/${savedCampaign.id}/edit`);
+        return;
+      }
       setLocation("/campaigns?tab=email");
     } catch (error: any) {
       toast({ title: "Save failed", description: error?.message || "Failed to save campaign setup", variant: "destructive" });
@@ -2012,7 +2313,7 @@ export default function SimpleEmailCampaignEditPage() {
     }
   };
 
-  if (!campaignId) {
+  if (!campaignId && !isCreateMode) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Card className="w-full max-w-lg">
@@ -2028,7 +2329,7 @@ export default function SimpleEmailCampaignEditPage() {
     );
   }
 
-  if (campaignLoading || !initialized) {
+  if ((!isCreateMode && campaignLoading) || !initialized) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -2036,7 +2337,7 @@ export default function SimpleEmailCampaignEditPage() {
     );
   }
 
-  if (campaignError || !campaign) {
+  if (!isCreateMode && (campaignError || !campaign)) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Card className="w-full max-w-lg">
@@ -2053,15 +2354,18 @@ export default function SimpleEmailCampaignEditPage() {
   }
 
   const currentStep = STEPS[step];
+  const pageTitle = isCreateMode ? "Email Campaign Setup" : "Edit Email Campaign Setup";
+  const pageDescription = isCreateMode
+    ? "Create a draft email campaign using the same guided setup used for existing campaigns."
+    : "Edit this email campaign with the same guided setup used during creation.";
+  const primarySaveLabel = isCreateMode ? "Create Campaign" : "Save Setup";
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">Admin Email Campaign Setup</h1>
-          <p className="text-sm text-muted-foreground">
-            Replace generic edit with guided setup: Channel, Basics, Details, Audience, Email Template, Test Send, Review.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">{pageTitle}</h1>
+          <p className="text-sm text-muted-foreground">{pageDescription}</p>
         </div>
         <Button variant="outline" onClick={() => setLocation("/campaigns?tab=email")}> 
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -2201,18 +2505,23 @@ export default function SimpleEmailCampaignEditPage() {
               <div>
                 <h3 className="text-sm font-semibold">Ownership Linkage</h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Auto-selected from the client submission. You can still override Organization and Work Order.
+                  Auto-selected from client, project, and work order context when available. You can still override the linkage.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label className="font-medium">Organization</Label>
+                  <Label className="font-medium">
+                    Organization <span className="text-red-500">*</span>
+                  </Label>
                   <Select
                     value={selectedClientAccountId || "__none"}
                     onValueChange={(value) => {
                       const nextOrg = value === "__none" ? "" : value;
                       setSelectedClientAccountId(nextOrg);
+                      if (selectedProject && selectedProject.clientAccountId && selectedProject.clientAccountId !== nextOrg) {
+                        setSelectedProjectId("");
+                      }
                       if (selectedWorkOrder && selectedWorkOrder.clientAccountId !== nextOrg) {
                         setSelectedWorkOrderId("");
                       }
@@ -2233,6 +2542,36 @@ export default function SimpleEmailCampaignEditPage() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label className="font-medium">Project</Label>
+                  <Select
+                    value={selectedProjectId || "__none"}
+                    onValueChange={(value) => {
+                      const nextProjectId = value === "__none" ? "" : value;
+                      setSelectedProjectId(nextProjectId);
+                      const nextProject = clientProjects.find((project) => project.id === nextProjectId) || null;
+                      if (nextProject?.clientAccountId && nextProject.clientAccountId !== selectedClientAccountId) {
+                        setSelectedClientAccountId(nextProject.clientAccountId);
+                      }
+                      if (selectedWorkOrder && selectedWorkOrder.projectId !== nextProjectId) {
+                        setSelectedWorkOrderId("");
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={clientProjectsLoading ? "Loading projects..." : "Select project"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Unassigned</SelectItem>
+                      {clientProjects.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label className="font-medium">Work Order</Label>
                   <Select
                     value={selectedWorkOrderId || "__none"}
@@ -2243,6 +2582,9 @@ export default function SimpleEmailCampaignEditPage() {
                       const selected = adminOrders?.find((row) => row.order.id === nextWorkOrderId)?.order;
                       if (selected?.clientAccountId && selected.clientAccountId !== selectedClientAccountId) {
                         setSelectedClientAccountId(selected.clientAccountId);
+                      }
+                      if (selected?.projectId) {
+                        setSelectedProjectId(selected.projectId);
                       }
                     }}
                   >
@@ -2261,10 +2603,97 @@ export default function SimpleEmailCampaignEditPage() {
                 </div>
               </div>
 
-              {!!projectRequest?.name && (
-                <p className="text-xs text-muted-foreground">
-                  Linked request: <span className="font-medium text-foreground">{projectRequest.name}</span>
+              <div className="rounded-md border bg-muted/20 p-3 space-y-1.5">
+                {!!projectRequest?.name && (
+                  <p className="text-xs text-muted-foreground">
+                    Linked request: <span className="font-medium text-foreground">{projectRequest.name}</span>
+                  </p>
+                )}
+                {!!selectedProject?.description && (
+                  <p className="text-xs text-muted-foreground">
+                    Project context: <span className="text-foreground">{selectedProject.description}</span>
+                  </p>
+                )}
+                {!!relatedOrder?.description && (
+                  <p className="text-xs text-muted-foreground">
+                    Order context: <span className="text-foreground">{relatedOrder.description}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border p-4 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold">Email Routing</h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Choose the sender identity and reply inbox used for test sends, launch, and delivery reporting.
                 </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="font-medium">
+                    Sender <span className="text-red-500">*</span>
+                  </Label>
+                  {senderProfilesLoading ? (
+                    <div className="flex h-10 items-center justify-center rounded-md border">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <Select
+                      value={selectedSenderProfileId || "__none"}
+                      onValueChange={(value) => {
+                        const nextSenderId = value === "__none" ? "" : value;
+                        setSelectedSenderProfileId(nextSenderId);
+                        const nextSender = senderProfiles.find((sender) => sender.id === nextSenderId);
+                        if (nextSender) {
+                          setReplyToEmail(nextSender.replyToEmail || nextSender.replyTo || nextSender.fromEmail || "");
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select sender profile" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">No sender selected</SelectItem>
+                        {senderProfiles.map((sender) => (
+                          <SelectItem key={sender.id} value={sender.id}>
+                            {firstNonEmptyString(sender.fromName, sender.name)} &lt;{sender.fromEmail}&gt;
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="font-medium">
+                    Reply-To Email <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    placeholder="replies@yourdomain.com"
+                    value={replyToEmail}
+                    onChange={(e) => setReplyToEmail(e.target.value)}
+                    className={replyToEmail && !isValidEmail(replyToEmail) ? "border-red-300" : ""}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Replies should route to the monitored campaign inbox.
+                  </p>
+                </div>
+              </div>
+
+              {selectedSender && (
+                <div className="rounded-md border bg-muted/20 p-3 space-y-1.5">
+                  <p className="text-sm font-medium">
+                    {firstNonEmptyString(selectedSender.fromName, selectedSender.name)} &lt;{selectedSender.fromEmail}&gt;
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Provider: {selectedSender.campaignProvider?.name || selectedSender.campaignProvider?.providerKey || "Default routing"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Reply-To: {replyToEmail || selectedSender.replyToEmail || selectedSender.replyTo || selectedSender.fromEmail}
+                  </p>
+                </div>
               )}
             </div>
           </CardContent>
@@ -3008,6 +3437,21 @@ export default function SimpleEmailCampaignEditPage() {
                 <p className="text-xs text-muted-foreground">Campaign Name</p>
                 <p className="font-medium">{form.name}</p>
               </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Sender</p>
+                <p className="font-medium">
+                  {selectedSender
+                    ? `${firstNonEmptyString(selectedSender.fromName, selectedSender.name)} <${selectedSender.fromEmail}>`
+                    : "-"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {selectedSender?.campaignProvider?.name || selectedSender?.campaignProvider?.providerKey || "Default routing"}
+                </p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">Reply-To</p>
+                <p className="font-medium">{replyToEmail || "-"}</p>
+              </div>
               <div className="rounded-md border p-3 md:col-span-2">
                 <p className="text-xs text-muted-foreground">Objective</p>
                 <p className="font-medium whitespace-pre-wrap">{form.objective || "-"}</p>
@@ -3145,8 +3589,8 @@ export default function SimpleEmailCampaignEditPage() {
         htmlContent={templateRenderedHtmlWithTargets}
         subject={templateRenderedSubject || templateSubject || "Untitled email"}
         preheader={templateRenderedPreheader || templateRenderedBodyText.split("\n")[0] || ""}
-        fromName={templateOrganizationName}
-        fromEmail="campaigns@demandgentic.local"
+        fromName={firstNonEmptyString(selectedSender?.fromName, selectedSender?.name, templateOrganizationName)}
+        fromEmail={selectedSender?.fromEmail || "campaigns@demandgentic.local"}
         sampleContacts={previewContacts}
       />
 
@@ -3164,7 +3608,7 @@ export default function SimpleEmailCampaignEditPage() {
         ) : (
           <Button disabled={isSaving || !audienceReady || !templateReady} onClick={() => void handleSave()}>
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
-            Save Setup
+            {primarySaveLabel}
           </Button>
         )}
       </div>

@@ -929,6 +929,9 @@ export function CSVImportDialog({
     setErrors([]);
     setImportProgress(0);
     setImportResults({ success: 0, created: 0, updated: 0, failed: 0 });
+    setIsPreviewOnly(false);
+    setBackgroundJobId(null);
+    setImportStatusMessage("Preparing import...");
     setSelectedListId("");
     setIsCreatingNewList(false);
     setNewListName("");
@@ -961,6 +964,15 @@ export function CSVImportDialog({
                 <p className="text-xs text-muted-foreground mb-3">
                   Organize your imported contacts by adding them to a list for easy filtering and tracking.
                 </p>
+                <p className="text-xs text-muted-foreground">
+                  {listsLoading
+                    ? "Loading contact lists..."
+                    : listsError
+                    ? "Could not load existing lists. You can retry or create a new list."
+                    : contactLists.length > 0
+                    ? `${contactLists.length} contact list(s) available.`
+                    : "No existing contact lists found yet."}
+                </p>
                 
                 {!isCreatingNewList ? (
                   <div className="flex gap-2">
@@ -975,10 +987,14 @@ export function CSVImportDialog({
                         }
                       }}
                     >
-                      <SelectTrigger className="flex-1" data-testid="select-import-list">
+                      <SelectTrigger
+                        className="flex-1"
+                        data-testid="select-import-list"
+                        disabled={listsLoading}
+                      >
                         <SelectValue placeholder="Select a list or skip" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent position="popper" sideOffset={4} className="max-h-[280px]">
                         <SelectItem value="__none__">No list (skip)</SelectItem>
                         {contactLists.map((list) => (
                           <SelectItem key={list.id} value={list.id}>
@@ -993,6 +1009,11 @@ export function CSVImportDialog({
                         </SelectItem>
                       </SelectContent>
                     </Select>
+                    {listsError && (
+                      <Button variant="outline" size="sm" onClick={() => void refetchLists()}>
+                        Retry
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <div className="flex gap-2">
@@ -1083,7 +1104,7 @@ export function CSVImportDialog({
             <div className="space-y-4">
               <CSVFieldMapper
                 csvHeaders={headers}
-                sampleData={csvData.slice(0, 3)}
+                sampleData={csvData.slice(0, PREVIEW_ROW_LIMIT)}
                 onMappingComplete={handleMappingComplete}
                 onCancel={handleClose}
               />
@@ -1096,7 +1117,7 @@ export function CSVImportDialog({
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Found {errors.length} validation error(s) in your CSV file.
+                  Found {errors.length} validation error(s) in your CSV {isPreviewOnly ? "preview" : "file"}.
                   Please fix these errors and try again.
                 </AlertDescription>
               </Alert>
@@ -1146,12 +1167,19 @@ export function CSVImportDialog({
               <Alert>
                 <CheckCircle2 className="h-4 w-4" />
                 <AlertDescription>
-                  Validation passed! Ready to import {csvData.length} record(s).
+                  {isPreviewOnly && file
+                    ? `Preview validation passed. Ready to import ${file.name} (${formatFileSize(file.size)}) in the background.`
+                    : `Validation passed! Ready to import ${csvData.length} record(s).`}
                 </AlertDescription>
               </Alert>
 
               <div className="border rounded-lg p-4">
-                <h4 className="font-medium mb-2">Preview (first 5 rows)</h4>
+                <h4 className="font-medium mb-2">Preview (first 5 row{csvData.length === 1 ? "" : "s"})</h4>
+                {isPreviewOnly && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Large files are previewed from the first {PREVIEW_ROW_LIMIT} rows only. The complete CSV will be processed server-side after you start the import.
+                  </p>
+                )}
                 <ScrollArea className="h-[200px]">
                   <table className="w-full text-sm">
                     <thead>
@@ -1185,11 +1213,14 @@ export function CSVImportDialog({
             <div className="space-y-4">
               <div className="text-center py-8">
                 <p className="text-sm text-muted-foreground mb-4">
-                  Importing records... Please wait.
+                  {importStatusMessage}
                 </p>
                 <Progress value={importProgress} className="w-full" />
                 <p className="text-sm text-muted-foreground mt-2">
                   {importProgress}% complete
+                </p>
+                <p className="text-xs text-muted-foreground mt-3">
+                  You can close this dialog. The import will continue on the server.
                 </p>
               </div>
             </div>
@@ -1229,7 +1260,7 @@ export function CSVImportDialog({
                 Cancel
               </Button>
               <Button onClick={handleImport} data-testid="button-start-import">
-                Import {csvData.length} Record(s)
+                {isPreviewOnly ? "Start Background Import" : "Import Contacts"}
               </Button>
             </>
           )}

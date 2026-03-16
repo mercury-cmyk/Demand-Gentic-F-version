@@ -93,6 +93,18 @@ interface EmailCampaignStats {
   clickToOpenRate: number;
   bounceRate: number;
   unsubscribeRate: number;
+  deliveryRoute?: {
+    senderProfileId?: string | null;
+    senderName?: string | null;
+    fromEmail?: string | null;
+    replyToEmail?: string | null;
+    providerKey?: string | null;
+    providerName?: string | null;
+    providerLabel?: string | null;
+    providerHealthStatus?: string | null;
+    source?: string | null;
+    isBrevo?: boolean;
+  };
 }
 
 interface LinkClickStats {
@@ -290,6 +302,45 @@ export default function EmailCampaignReportsPage() {
         data={performanceSnapshot}
         isLoading={statsLoading}
       />
+
+      {stats?.deliveryRoute && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Delivery Route</CardTitle>
+            <CardDescription>
+              {stats.deliveryRoute.isBrevo ? "Brevo-connected delivery is configured for this campaign." : "Current sender, reply, and provider routing for this campaign."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-lg border p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Sender</p>
+              <p className="mt-2 font-medium">
+                {stats.deliveryRoute.senderName
+                  ? `${stats.deliveryRoute.senderName} <${stats.deliveryRoute.fromEmail || "unknown"}>`
+                  : stats.deliveryRoute.fromEmail || "Not set"}
+              </p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Reply-To</p>
+              <p className="mt-2 font-medium">{stats.deliveryRoute.replyToEmail || "Not set"}</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center gap-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Provider</p>
+                {stats.deliveryRoute.isBrevo && (
+                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                    Brevo
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-2 font-medium">{stats.deliveryRoute.providerLabel || "Default routing"}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Source: {stats.deliveryRoute.source === "send-history" ? "campaign send history" : stats.deliveryRoute.source === "campaign-routing" ? "campaign routing" : "fallback routing"}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Key Metrics Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">

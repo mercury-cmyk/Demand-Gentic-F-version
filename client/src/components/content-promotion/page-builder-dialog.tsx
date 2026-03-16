@@ -390,6 +390,11 @@ export default function PageBuilderDialog({
   const [formData, setFormData] = useState<FormData>(getDefaultFormData());
 
   const isEditing = !!editingPage;
+  const effectiveCampaignId = campaignId || editingPage?.campaignId || undefined;
+  const effectiveProjectId = projectId || editingPage?.projectId || undefined;
+  const effectiveOrganizationId = organizationId || editingPage?.organizationId || undefined;
+  const effectiveClientId = clientId || editingPage?.clientAccountId || undefined;
+  const canGenerateWithAi = !!effectiveCampaignId || !!effectiveOrganizationId;
 
   // Reset form when dialog opens/closes or editingPage changes
   useEffect(() => {
@@ -440,14 +445,20 @@ export default function PageBuilderDialog({
         ? `/api/content-promotion/pages/${editingPage!.id}`
         : "/api/content-promotion/pages";
       const method = isEditing ? "PUT" : "POST";
-      const res = await apiRequest(method, url, data);
+      const res = await apiRequest(method, url, {
+        ...data,
+        campaignId: effectiveCampaignId,
+        projectId: effectiveProjectId,
+        organizationId: effectiveOrganizationId,
+        clientAccountId: effectiveClientId,
+      });
       const result = await res.json();
       
       // If campaignId is provided, update campaign with landing page URL
-      if (campaignId && result.id && result.slug) {
+      if (effectiveCampaignId && result.id && result.slug) {
         try {
           const landingPageUrl = `${window.location.origin}/promo/${result.slug}`;
-          await apiRequest("PATCH", `/api/campaigns/${campaignId}`, {
+          await apiRequest("PATCH", `/api/campaigns/${effectiveCampaignId}`, {
             landingPageUrl,
           });
         } catch (err) {
@@ -467,8 +478,8 @@ export default function PageBuilderDialog({
           : "Your content promotion page has been created." + (previewUrl ? ` Preview: ${previewUrl}` : ""),
       });
       queryClient.invalidateQueries({ queryKey: ["/api/content-promotion/pages"] });
-      if (campaignId) {
-        queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${campaignId}`] });
+      if (effectiveCampaignId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/campaigns/${effectiveCampaignId}`] });
       }
       onSuccess();
       onOpenChange(false);
@@ -484,14 +495,14 @@ export default function PageBuilderDialog({
 
   const generateWithAIMutation = useMutation({
     mutationFn: async () => {
-      if (!campaignId && !projectId) {
+      if (!effectiveCampaignId && !effectiveProjectId) {
         throw new Error("Campaign or Project context is required for AI generation");
       }
       const res = await apiRequest("POST", "/api/content-promotion/pages/generate", {
-        campaignId,
-        projectId,
-        organizationId,
-        clientId,
+        campaignId: effectiveCampaignId,
+        projectId: effectiveProjectId,
+        organizationId: effectiveOrganizationId,
+        clientId: effectiveClientId,
       }, { timeout: 180000 });
       return res.json();
     },
@@ -697,16 +708,18 @@ export default function PageBuilderDialog({
                 {isEditing ? "Edit Content Promotion Page" : "Create Content Promotion Page"}
               </DialogTitle>
               <DialogDescription>
-                {campaignId || projectId ? 
+                {effectiveCampaignId || effectiveProjectId ? 
                   "Configure your landing page with AI assistance based on your campaign/project context." :
                   "Configure every aspect of your landing page across the tabs below."
                 }
               </DialogDescription>
             </div>
-            {(campaignId || projectId) && (
+            {(effectiveCampaignId || effectiveProjectId || effectiveClientId || effectiveOrganizationId) && (
               <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-                {campaignId && <span className="text-blue-600">📋 Campaign Context</span>}
-                {projectId && <span className="text-purple-600">📁 Project Context</span>}
+                {effectiveClientId && <span className="text-emerald-600">Client Linked</span>}
+                {effectiveCampaignId && <span className="text-blue-600">Campaign Context</span>}
+                {effectiveProjectId && <span className="text-purple-600">Project Context</span>}
+                {effectiveOrganizationId && <span className="text-amber-600">Organization Context</span>}
               </div>
             )}
           </div>
@@ -2184,7 +2197,7 @@ export default function PageBuilderDialog({
           </div>
 
           {/* OI requirement banner */}
-          {!organizationId && (campaignId || projectId) && !isEditing && (
+          {!effectiveOrganizationId && !effectiveCampaignId && effectiveProjectId && !isEditing && (
             <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-700 mx-6 mb-2">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               <div>
@@ -2197,13 +2210,13 @@ export default function PageBuilderDialog({
           {/* Footer */}
           <div className="border-t px-6 py-4 flex items-center justify-between gap-3 shrink-0">
             <div>
-              {(campaignId || projectId) && !isEditing && (
+              {(effectiveCampaignId || effectiveProjectId) && !isEditing && (
                 <Button
                   variant="outline"
                   onClick={() => generateWithAIMutation.mutate()}
-                  disabled={generateWithAIMutation.isPending || saveMutation.isPending || !organizationId}
+                  disabled={generateWithAIMutation.isPending || saveMutation.isPending || !canGenerateWithAi}
                   className="gap-1.5"
-                  title={!organizationId ? "Organization Intelligence required for AI generation" : undefined}
+                  title={!canGenerateWithAi ? "Organization Intelligence required for AI generation" : undefined}
                 >
                   {generateWithAIMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                   {!generateWithAIMutation.isPending && <Sparkles className="h-4 w-4" />}

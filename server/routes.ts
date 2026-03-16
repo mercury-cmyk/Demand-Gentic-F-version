@@ -7,6 +7,10 @@ import CryptoJS from "crypto-js";
 import { eq, and, or, inArray, isNotNull, isNull, lte, gte, sql, desc, asc, like } from "drizzle-orm";
 import { validateLeadQuality } from "./lib/lead-quality-guard";
 import { enrichCampaignQADefaults, buildCampaignContextBrief, generateQAParametersFromContext } from "./lib/campaign-qa-defaults";
+import {
+  mergeCampaignEmailRouting,
+  withCampaignEmailRouting,
+} from "./lib/campaign-email-routing";
 import { buildCallFlowPromptSection } from "@shared/call-flow";
 import { storage } from "./storage";
 import { emailTrackingService } from "./lib/email-tracking-service";
@@ -5265,7 +5269,7 @@ export function registerRoutes(app: Express) {
       console.log('[GET /api/campaigns] Query params:', { typeFilter });
       
       console.log('[GET /api/campaigns] Calling storage.getCampaigns()...');
-      let campaigns = await storage.getCampaigns();
+      let campaigns = (await storage.getCampaigns()).map((campaign) => withCampaignEmailRouting(campaign));
       console.log(`[GET /api/campaigns] ✓ Query successful: ${campaigns.length} campaigns`);
 
       // Filter by type if specified
@@ -5381,7 +5385,7 @@ export function registerRoutes(app: Express) {
         }
       }
 
-      res.json(campaign);
+      res.json(withCampaignEmailRouting(campaign));
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch campaign" });
     }
@@ -5884,7 +5888,8 @@ export function registerRoutes(app: Express) {
 
   app.post("/api/campaigns", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
-      const { assignedAgents, ...campaignData } = req.body;
+      const { assignedAgents, ...rawCampaignData } = req.body;
+      const campaignData = mergeCampaignEmailRouting(rawCampaignData);
 
       // clientAccountId is required; projectId can be auto-created if not provided
       if (!campaignData.clientAccountId) {
@@ -5938,6 +5943,29 @@ export function registerRoutes(app: Express) {
 
       if (project.clientAccountId !== campaignData.clientAccountId) {
         return res.status(400).json({ message: "Project does not belong to the specified client account" });
+      }
+
+      const createContextFieldKeys = ['campaignObjective', 'successCriteria', 'targetAudienceDescription', 'productServiceInfo', 'talkingPoints'];
+      const hasCreateContext = createContextFieldKeys.some((key) => {
+        const value = (campaignData as any)?.[key];
+        if (Array.isArray(value)) return value.length > 0;
+        return typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+      });
+      if (hasCreateContext) {
+        if (!campaignData.campaignContextBrief) {
+          const brief = buildCampaignContextBrief(campaignData);
+          if (brief) {
+            campaignData.campaignContextBrief = brief;
+            console.log('[Campaign Create] Auto-generated campaignContextBrief from context fields');
+          }
+        }
+        if (!campaignData.qaParameters) {
+          const generatedQaParameters = generateQAParametersFromContext(campaignData);
+          if (generatedQaParameters) {
+            campaignData.qaParameters = generatedQaParameters;
+            console.log('[Campaign Create] Auto-generated qaParameters from context fields');
+          }
+        }
       }
       
       // Parse natural language rules once on save (performance optimization)
@@ -6041,12 +6069,13 @@ export function registerRoutes(app: Express) {
 
   app.patch("/api/campaigns/:id", requireDualAuth, requireRole('admin', 'campaign_manager', 'client', 'client_user'), async (req, res) => {
     try {
-      const updateData = { ...req.body };
+      let updateData = { ...req.body };
       // Approval fields are managed via the dedicated approval endpoint
       delete updateData.approvalStatus;
       delete updateData.approvedById;
       delete updateData.approvedAt;
       delete updateData.publishedAt;
+      const requestedFieldNames = new Set(Object.keys(updateData));
 
       const existingCampaign = await storage.getCampaign(req.params.id);
       if (!existingCampaign) {
@@ -6069,6 +6098,8 @@ export function registerRoutes(app: Express) {
           return res.status(403).json({ message: `Clients cannot update these fields: ${disallowedFields.join(', ')}` });
         }
       }
+
+      updateData = mergeCampaignEmailRouting(updateData, existingCampaign.audienceRefs);
 
       const hasClientUpdate = "clientAccountId" in updateData || "projectId" in updateData;
       if (hasClientUpdate) {
@@ -6199,7 +6230,7 @@ export function registerRoutes(app: Express) {
       }
 
       // === AUTO-POPULATE QUEUE WHEN AUDIENCE/STATUS CHANGES (all campaign types) ===
-      const audienceChanged = 'audienceRefs' in updateData;
+      const audienceChanged = requestedFieldNames.has('audienceRefs');
       const statusChangedToActive = updateData.status === 'active';
       const transitionedToActive = statusChangedToActive && existingCampaign.status !== 'active';
 
@@ -10035,7 +10066,7 @@ export function registerRoutes(app: Express) {
   // Send test email from campaign builder
   app.post("/api/email/send-test", requireAuth, requireRole('admin', 'campaign_manager'), async (req, res) => {
     try {
-      const { to, subject, html, senderProfileId } = req.body;
+      const { to, subject, html, senderProfileId, replyToEmail } = req.body;
 
       if (!to || !subject || !html) {
         return res.status(400).json({ message: "Missing required fields: to, subject, html" });
@@ -10050,14 +10081,14 @@ export function registerRoutes(app: Express) {
       // Get sender profile if provided, otherwise use default
       let from = process.env.DEFAULT_FROM_EMAIL || process.env.MAILGUN_FROM_EMAIL;
       let fromName: string | undefined;
-      let replyTo: string | undefined;
+      let replyTo = typeof replyToEmail === "string" && replyToEmail.trim() ? replyToEmail.trim() : undefined;
 
       if (senderProfileId) {
         const profile = await storage.getSenderProfile(senderProfileId);
         if (profile) {
           from = profile.fromEmail;
           fromName = profile.fromName || undefined;
-          replyTo = profile.replyToEmail || profile.fromEmail;
+          replyTo = replyTo || profile.replyToEmail || profile.fromEmail;
         }
       }
 

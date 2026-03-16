@@ -60,6 +60,11 @@ export interface EmailCampaignPanelProps {
     id: string | number;
     name: string;
     status: string;
+    senderName?: string | null;
+    fromEmail?: string | null;
+    replyToEmail?: string | null;
+    campaignProviderName?: string | null;
+    campaignProviderKey?: string | null;
   };
   emailStats?: EmailStats | null;
   isLoading?: boolean;
@@ -267,6 +272,28 @@ export function EmailCampaignPanel({
                 {emailStats.spamComplaints} spam complaints
               </span>
             </div>
+          )}
+        </div>
+      )}
+
+      {(campaign.fromEmail || campaign.replyToEmail || campaign.campaignProviderName || campaign.campaignProviderKey) && (
+        <div className="mb-4 rounded-lg border border-border/70 bg-background/70 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {(campaign.campaignProviderName || campaign.campaignProviderKey) && (
+              <span className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium">
+                {campaign.campaignProviderKey === 'brevo'
+                  ? 'Brevo connected'
+                  : campaign.campaignProviderName || campaign.campaignProviderKey}
+              </span>
+            )}
+          </div>
+          {campaign.fromEmail && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Sender: {campaign.senderName ? `${campaign.senderName} ` : ""}&lt;{campaign.fromEmail}&gt;
+            </p>
+          )}
+          {campaign.replyToEmail && (
+            <p className="mt-1 text-sm text-muted-foreground">Reply-To: {campaign.replyToEmail}</p>
           )}
         </div>
       )}

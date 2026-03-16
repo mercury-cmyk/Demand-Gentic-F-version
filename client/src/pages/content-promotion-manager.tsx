@@ -46,6 +46,10 @@ import PageBuilderDialog from "@/components/content-promotion/page-builder-dialo
 interface ContentPromotionPage {
   id: string;
   tenantId: string;
+  clientAccountId?: string | null;
+  projectId?: string | null;
+  campaignId?: string | null;
+  organizationId?: string | null;
   title: string;
   slug: string;
   pageType: 'gated_download' | 'ungated_download' | 'webinar_registration' | 'demo_request' | 'confirmation';
@@ -73,6 +77,14 @@ interface ContentPromotionPage {
   sourceType?: 'content_promotion' | 'content_studio';
   sourceProjectId?: string | null;
   previewPath?: string | null;
+  contextSnapshot?: {
+    clientName?: string | null;
+    projectName?: string | null;
+    campaignName?: string | null;
+    organizationName?: string | null;
+    campaignObjective?: string | null;
+    campaignContextBrief?: string | null;
+  } | null;
 }
 
 function formatNumber(num: number): string {
@@ -136,6 +148,7 @@ export default function ContentPromotionManager() {
   const projectId = searchParams.get('projectId') || undefined;
   const organizationId = searchParams.get('organizationId') || undefined;
   const clientId = searchParams.get('clientId') || undefined;
+  const isScopedView = !!(campaignId || projectId || organizationId || clientId);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -145,7 +158,17 @@ export default function ContentPromotionManager() {
 
   // Fetch pages
   const { data: pages = [], isLoading } = useQuery<ContentPromotionPage[]>({
-    queryKey: ["/api/content-promotion/pages"],
+    queryKey: ["/api/content-promotion/pages", { campaignId, projectId, organizationId, clientId }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (campaignId) params.set("campaignId", campaignId);
+      if (projectId) params.set("projectId", projectId);
+      if (organizationId) params.set("organizationId", organizationId);
+      if (clientId) params.set("clientId", clientId);
+      const query = params.toString();
+      const response = await apiRequest("GET", `/api/content-promotion/pages${query ? `?${query}` : ""}`);
+      return response.json();
+    },
   });
 
   // Publish mutation
@@ -385,7 +408,9 @@ export default function ContentPromotionManager() {
             <h1 className="text-2xl font-bold">Content Promotion</h1>
           </div>
           <p className="text-muted-foreground mt-1">
-            Create and manage conversion-optimized landing pages for your email campaigns
+            {isScopedView
+              ? "Create and manage landing pages linked to the selected client, project, campaign, or organization context"
+              : "Create and manage conversion-optimized landing pages for your email campaigns"}
           </p>
         </div>
         <Button onClick={handleCreate}>
@@ -481,9 +506,13 @@ export default function ContentPromotionManager() {
       {filteredPages.length === 0 && pages.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <PanelTop className="h-16 w-16 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-semibold mb-2">No content promotion pages yet</h3>
+          <h3 className="text-lg font-semibold mb-2">
+            {isScopedView ? "No content promotion pages for this context yet" : "No content promotion pages yet"}
+          </h3>
           <p className="text-muted-foreground mb-6 max-w-md">
-            Create your first landing page to capture leads from email campaigns
+            {isScopedView
+              ? "Create a landing page and it will stay linked to this client, project, campaign, and campaign context."
+              : "Create your first landing page to capture leads from email campaigns"}
           </p>
           <Button onClick={handleCreate}>
             <Plus className="h-4 w-4 mr-2" />
@@ -548,6 +577,15 @@ export default function ContentPromotionManager() {
                     <ExternalLink className="h-3 w-3 flex-shrink-0" />
                     <span className="font-mono text-xs truncate">{previewLabel}</span>
                   </div>
+
+                  {(page.contextSnapshot?.clientName || page.contextSnapshot?.projectName || page.contextSnapshot?.campaignName || page.contextSnapshot?.organizationName) && (
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      {page.contextSnapshot?.clientName && <div>Client: {page.contextSnapshot.clientName}</div>}
+                      {page.contextSnapshot?.projectName && <div>Project: {page.contextSnapshot.projectName}</div>}
+                      {page.contextSnapshot?.campaignName && <div>Campaign: {page.contextSnapshot.campaignName}</div>}
+                      {page.contextSnapshot?.organizationName && <div>Organization: {page.contextSnapshot.organizationName}</div>}
+                    </div>
+                  )}
 
                   {/* Stats Row */}
                   <div className="flex items-center gap-4 text-sm">

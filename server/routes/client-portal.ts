@@ -3598,6 +3598,12 @@ router.get('/admin/clients/:id', requireAuth, requireRole('admin', 'campaign_man
         id: p.id,
         name: p.name,
         status: p.status,
+        description: p.description,
+        landingPageUrl: p.landingPageUrl,
+        campaignOrganizationId: p.campaignOrganizationId,
+        projectType: p.projectType,
+        externalEventId: p.externalEventId,
+        clientAccountId: p.clientAccountId,
         createdAt: p.createdAt,
       })),
       workOrders: clientWorkOrders.map((wo) => ({

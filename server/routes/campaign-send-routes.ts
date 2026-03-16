@@ -8,6 +8,7 @@ import { Router, Request, Response } from "express";
 import { z } from "zod";
 import { db } from "../db";
 import { campaigns, contacts, senderProfiles, lists, segments } from "../../shared/schema";
+import { readCampaignEmailRouting } from "../lib/campaign-email-routing";
 import { eq, and, inArray, or, isNull } from "drizzle-orm";
 import { sendBulkEmails, type BulkEmailRecipient } from "../services/bulk-email-service";
 import { buildFilterQuery } from "../filter-builder";
@@ -46,17 +47,16 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       });
     }
 
+    const routing = readCampaignEmailRouting(campaign);
+
     // Get sender profile - use campaign's profile or the default active profile
     let senderProfile;
 
-    // @ts-ignore - senderProfileId may not exist on campaign
-    if (campaign.senderProfileId) {
-      // @ts-ignore
+    if (routing.senderProfileId) {
       [senderProfile] = await db
         .select()
         .from(senderProfiles)
-        // @ts-ignore
-        .where(eq(senderProfiles.id, campaign.senderProfileId))
+        .where(eq(senderProfiles.id, routing.senderProfileId))
         .limit(1);
     }
 
@@ -118,6 +118,7 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       id: campaignProvider?.id || null,
       providerKey: campaignProvider?.providerKey || senderProfile.espProvider || senderProfile.espAdapter || 'mailgun',
       name: campaignProvider?.name || null,
+      replyTo: routing.replyToEmail || senderProfile.replyToEmail || senderProfile.fromEmail,
     });
 
     console.log(`[Campaign Send] Fetching audience for campaign ${campaignId}`);
@@ -291,11 +292,10 @@ router.post("/:id/send", async (req: Request, res: Response) => {
       senderProfileId: senderProfile.id,
       from: senderProfile.fromEmail,
       fromName: senderProfile.fromName,
-      replyTo: senderProfile.replyToEmail || senderProfile.fromEmail,
+      replyTo: routing.replyToEmail || senderProfile.replyToEmail || senderProfile.fromEmail,
       subject: campaign.emailSubject,
       html: campaign.emailHtmlContent,
-      // @ts-ignore - emailPreheader may not exist
-      preheader: campaign.emailPreheader || undefined,
+      preheader: (campaign.audienceRefs as any)?.wizardDetails?.adminEmailTemplate?.preheader || undefined,
       text: undefined, // campaigns table doesn't have text content field
       recipients,
       tags: ['campaign', `campaign-${campaignId}`],

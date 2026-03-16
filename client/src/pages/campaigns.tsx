@@ -779,6 +779,9 @@ export default function CampaignsPage() {
                 const engagementRate = emailRecipients > 0
                   ? Math.round((emailOpens / emailRecipients) * 100)
                   : 0;
+                const canOpenEmailReports = isEmail && (campaign.status !== 'draft' || emailRecipients > 0);
+                const emailProviderLabel = campaign.campaignProviderName
+                  || (campaign.campaignProviderKey === 'brevo' ? 'Brevo' : campaign.campaignProviderKey || null);
                 const callAttempts = callSnapshot?.callsMade ?? campaign.calls ?? 0;
                 const callConnected = callSnapshot?.callsConnected ?? campaign.connected ?? 0;
                 const connectRate = callAttempts > 0
@@ -814,6 +817,14 @@ export default function CampaignsPage() {
                               {campaign.status}
                             </Badge>
                             <span className="text-[10px] text-muted-foreground capitalize">{isPhone ? 'Phone' : campaign.type}</span>
+                            {isEmail && emailProviderLabel && (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] py-0 px-1 h-4 ${campaign.campaignProviderKey === 'brevo' ? 'border-blue-300 text-blue-700 dark:border-blue-800 dark:text-blue-300' : ''}`}
+                              >
+                                {campaign.campaignProviderKey === 'brevo' ? 'Brevo' : emailProviderLabel}
+                              </Badge>
+                            )}
                             <span className="text-[10px] text-muted-foreground">
                               Updated {new Date(campaign.updatedAt || campaign.createdAt || Date.now()).toLocaleDateString()}
                             </span>
@@ -897,6 +908,20 @@ export default function CampaignsPage() {
 
                         {/* Actions cluster */}
                         <div className="flex items-center gap-1 shrink-0">
+                          {canManageCampaigns && !isArchived && isEmail && campaign.status === 'draft' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1.5 rounded-lg px-3 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditClick(campaign);
+                              }}
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                          )}
                           {canManageCampaigns && !isArchived && campaign.status === 'draft' && isEmail && (
                             <Button
                               variant="default"
@@ -988,51 +1013,85 @@ export default function CampaignsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              {canManageCampaigns && isEmail && campaign.status === 'draft' && !isArchived && (
-                                <DropdownMenuItem onClick={() => handleLaunchClick(campaign)} disabled={launchMutation.isPending}>
-                                  <Send className="mr-2 h-3.5 w-3.5" />Send campaign
-                                </DropdownMenuItem>
-                              )}
-                              {canManageCampaigns && (
-                                <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
-                                  <Edit className="mr-2 h-3.5 w-3.5" />Edit
-                                </DropdownMenuItem>
-                              )}
-                              {canManageCampaigns && (
-                                <DropdownMenuItem onClick={() => handleDuplicateClick(campaign)} disabled={duplicateMutation.isPending}>
-                                  <Copy className="mr-2 h-3.5 w-3.5" />Duplicate
-                                </DropdownMenuItem>
-                              )}
-                              {canManageCampaigns && (
-                                <DropdownMenuItem onClick={() => handleArchiveToggle(campaign)} disabled={archiveMutation.isPending}>
-                                  <Archive className="mr-2 h-3.5 w-3.5" />
-                                  {isArchived ? "Restore to live" : "Archive"}
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem onClick={() => handleCreateLandingPageClick(campaign)}>
-                                <Globe className="mr-2 h-3.5 w-3.5" />Create Landing Page
-                              </DropdownMenuItem>
-                              {isPhone && (
+                              {isEmail ? (
                                 <>
-                                  {canManageCampaigns && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
-                                    <DropdownMenuItem
-                                      onClick={() => handleStartAiCallsClick(campaign)}
-                                      disabled={startAiCallsMutation.isPending}
-                                      className="text-green-600"
-                                    >
-                                      <Phone className="mr-2 h-3.5 w-3.5" />
-                                      {startAiCallsMutation.isPending ? 'Starting...' : 'Start AI Calls'}
+                                  {canManageCampaigns && !isArchived && campaign.status === 'draft' && (
+                                    <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
+                                      <Edit className="mr-2 h-3.5 w-3.5" />Edit email
                                     </DropdownMenuItem>
                                   )}
-                                  {canSelectVoice && (
-                                    <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
-                                      <Mic className="mr-2 h-3.5 w-3.5" />Select AI Voice
+                                  {canManageCampaigns && !isArchived && campaign.status === 'draft' && (
+                                    <DropdownMenuItem onClick={() => handleLaunchClick(campaign)} disabled={launchMutation.isPending}>
+                                      <Send className="mr-2 h-3.5 w-3.5" />Send campaign
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canOpenEmailReports && (
+                                    <DropdownMenuItem onClick={() => setLocation(`/campaigns/email/${campaign.id}/reports`)}>
+                                      <BarChart className="mr-2 h-3.5 w-3.5" />View reports
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onClick={() => setLocation(`/campaigns/${campaign.id}/suppressions`)}>
+                                    <Settings className="mr-2 h-3.5 w-3.5" />Suppressions
+                                  </DropdownMenuItem>
+                                  {canManageCampaigns && (
+                                    <DropdownMenuItem onClick={() => handleDuplicateClick(campaign)} disabled={duplicateMutation.isPending}>
+                                      <Copy className="mr-2 h-3.5 w-3.5" />Duplicate
                                     </DropdownMenuItem>
                                   )}
                                   {canManageCampaigns && (
-                                    <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
-                                      <Users className="mr-2 h-3.5 w-3.5" />Assign Agents
+                                    <DropdownMenuItem onClick={() => handleArchiveToggle(campaign)} disabled={archiveMutation.isPending}>
+                                      <Archive className="mr-2 h-3.5 w-3.5" />
+                                      {isArchived ? "Restore to live" : "Archive"}
                                     </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onClick={() => handleCreateLandingPageClick(campaign)}>
+                                    <Globe className="mr-2 h-3.5 w-3.5" />Create landing page
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
+                                <>
+                                  {canManageCampaigns && (
+                                    <DropdownMenuItem onClick={() => handleEditClick(campaign)}>
+                                      <Edit className="mr-2 h-3.5 w-3.5" />Edit
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canManageCampaigns && (
+                                    <DropdownMenuItem onClick={() => handleDuplicateClick(campaign)} disabled={duplicateMutation.isPending}>
+                                      <Copy className="mr-2 h-3.5 w-3.5" />Duplicate
+                                    </DropdownMenuItem>
+                                  )}
+                                  {canManageCampaigns && (
+                                    <DropdownMenuItem onClick={() => handleArchiveToggle(campaign)} disabled={archiveMutation.isPending}>
+                                      <Archive className="mr-2 h-3.5 w-3.5" />
+                                      {isArchived ? "Restore to live" : "Archive"}
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onClick={() => handleCreateLandingPageClick(campaign)}>
+                                    <Globe className="mr-2 h-3.5 w-3.5" />Create landing page
+                                  </DropdownMenuItem>
+                                  {isPhone && (
+                                    <>
+                                      {canManageCampaigns && (campaign.dialMode === 'ai_agent' || campaign.dialMode === 'sql') && campaign.status === 'active' && (
+                                        <DropdownMenuItem
+                                          onClick={() => handleStartAiCallsClick(campaign)}
+                                          disabled={startAiCallsMutation.isPending}
+                                          className="text-green-600"
+                                        >
+                                          <Phone className="mr-2 h-3.5 w-3.5" />
+                                          {startAiCallsMutation.isPending ? 'Starting...' : 'Start AI Calls'}
+                                        </DropdownMenuItem>
+                                      )}
+                                      {canSelectVoice && (
+                                        <DropdownMenuItem onClick={() => handleSelectVoiceClick(campaign)}>
+                                          <Mic className="mr-2 h-3.5 w-3.5" />Select AI Voice
+                                        </DropdownMenuItem>
+                                      )}
+                                      {canManageCampaigns && (
+                                        <DropdownMenuItem onClick={() => handleAssignAgentsClick(campaign)}>
+                                          <Users className="mr-2 h-3.5 w-3.5" />Assign Agents
+                                        </DropdownMenuItem>
+                                      )}
+                                    </>
                                   )}
                                 </>
                               )}
@@ -1091,6 +1150,11 @@ export default function CampaignsPage() {
                                 id: campaign.id,
                                 name: campaign.name,
                                 status: campaign.status,
+                                senderName: campaign.senderName,
+                                fromEmail: campaign.fromEmail,
+                                replyToEmail: campaign.replyToEmail,
+                                campaignProviderName: campaign.campaignProviderName,
+                                campaignProviderKey: campaign.campaignProviderKey,
                               }}
                               emailStats={emailStats}
                               isLoading={snapshotsLoading}

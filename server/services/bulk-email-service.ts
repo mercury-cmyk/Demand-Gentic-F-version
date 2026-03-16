@@ -2,6 +2,7 @@ import { db } from '../db';
 import { emailSends, contacts, accounts, campaigns, lists, segments, senderProfiles, type SenderProfile } from '@shared/schema';
 import { eq, inArray, and, isNull, or } from 'drizzle-orm';
 import { emailTrackingService } from '../lib/email-tracking-service';
+import { readCampaignEmailRouting } from '../lib/campaign-email-routing';
 import { initializeEmailQueue, type EmailJobData } from '../workers/email-worker';
 import { checkCampaignSuppression } from '../lib/campaign-suppression';
 import { buildFilterQuery } from '../filter-builder';
@@ -202,6 +203,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
 
   // Resolve campaign audience from audienceRefs (filterGroup, lists, segments)
   const audienceRefs = campaign.audienceRefs as any;
+  const routing = readCampaignEmailRouting(campaign);
   const uniqueContactIds = new Set<string>();
   let campaignContacts: any[] = [];
 
@@ -365,8 +367,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
   let senderProfileId: string | undefined;
   let selectedProfile = null as SenderProfile | null;
 
-  // @ts-ignore - senderProfileId may not be typed on campaign
-  const campaignSenderProfileId = campaign.senderProfileId;
+  const campaignSenderProfileId = routing.senderProfileId;
   if (campaignSenderProfileId) {
     const [profile] = await db.select().from(senderProfiles).where(eq(senderProfiles.id, campaignSenderProfileId)).limit(1);
     if (profile) {
@@ -374,7 +375,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
       senderProfileId = profile.id;
       fromEmail = profile.fromEmail;
       fromName = profile.fromName || undefined;
-      replyTo = profile.replyToEmail || profile.fromEmail;
+      replyTo = routing.replyToEmail || profile.replyToEmail || profile.fromEmail;
       espAdapter = profile.espAdapter || 'mailgun';
     }
   } else {
@@ -388,7 +389,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
       senderProfileId = defaultProfile.id;
       fromEmail = defaultProfile.fromEmail;
       fromName = defaultProfile.fromName || undefined;
-      replyTo = defaultProfile.replyToEmail || defaultProfile.fromEmail;
+      replyTo = routing.replyToEmail || defaultProfile.replyToEmail || defaultProfile.fromEmail;
       espAdapter = defaultProfile.espAdapter || 'mailgun';
     }
   }
@@ -411,8 +412,7 @@ export async function sendCampaignEmails(campaignId: string): Promise<BulkEmailR
     replyTo,
     subject: campaign.emailSubject,
     html: campaign.emailHtmlContent,
-    // @ts-ignore - emailPreheader may not be typed
-    preheader: campaign.emailPreheader || undefined,
+    preheader: audienceRefs?.wizardDetails?.adminEmailTemplate?.preheader || undefined,
     recipients,
     tags: ['campaign', `campaign-${campaignId}`],
     providerId,

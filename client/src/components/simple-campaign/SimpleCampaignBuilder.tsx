@@ -25,6 +25,7 @@ interface TemplateData {
   preheader: string;
   bodyContent: string;
   htmlContent: string;
+  ctaUrl?: string;
 }
 
 interface LaunchData {
@@ -40,6 +41,80 @@ interface LaunchData {
   throttlingLimit?: number;
   clientAccountId: string;
   projectId: string;
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function toSentence(value: string): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  return /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
+}
+
+function buildAudienceDescriptor(launchData: LaunchData): string {
+  if (launchData.audienceType === "all") {
+    return "all eligible contacts";
+  }
+
+  if (launchData.audienceType === "filters") {
+    return "the filtered audience";
+  }
+
+  if (launchData.audienceName?.trim()) {
+    return `${launchData.audienceType} "${launchData.audienceName.trim()}"`;
+  }
+
+  return `the selected ${launchData.audienceType}`;
+}
+
+function buildCampaignContextFromProject(args: {
+  campaignIntent: CampaignIntent;
+  template: TemplateData;
+  launchData: LaunchData;
+}) {
+  const { campaignIntent, template, launchData } = args;
+  const projectName = firstNonEmpty(campaignIntent.projectName, campaignIntent.campaignName, "the client project");
+  const clientName = firstNonEmpty(campaignIntent.clientName);
+  const projectDescription = firstNonEmpty(campaignIntent.projectDescription);
+  const audienceDescriptor = buildAudienceDescriptor(launchData);
+  const landingPageUrl = firstNonEmpty(template.ctaUrl, campaignIntent.projectLandingPageUrl);
+  const objective = toSentence(
+    `Drive qualified email engagement for ${projectName}${clientName ? ` on behalf of ${clientName}` : ""}`
+  );
+  const productServiceInfo = projectDescription
+    ? toSentence(projectDescription)
+    : toSentence(
+        `${campaignIntent.campaignName} should stay tightly aligned to the approved ${projectName} brief and email message`
+      );
+  const targetAudienceDescription = toSentence(
+    `${audienceDescriptor} selected for ${clientName || "the client"}${projectName ? ` around ${projectName}` : ""}`
+  );
+  const successCriteria = toSentence(
+    `Generate qualified replies, clicks, or registrations that show real interest in ${projectName}`
+  );
+  const talkingPoints = [
+    projectName ? `Project focus: ${projectName}` : "",
+    projectDescription ? toSentence(projectDescription) : "",
+    template.subject ? `Subject line theme: ${template.subject}` : "",
+    audienceDescriptor ? `Audience: ${audienceDescriptor}` : "",
+    landingPageUrl ? `Primary CTA URL: ${landingPageUrl}` : "",
+  ].filter(Boolean);
+
+  return {
+    campaignObjective: objective,
+    productServiceInfo,
+    targetAudienceDescription,
+    successCriteria,
+    talkingPoints: talkingPoints.length > 0 ? talkingPoints : undefined,
+    landingPageUrl: landingPageUrl || undefined,
+  };
 }
 
 type BuilderPage = "intent" | "template" | "audience";
@@ -89,6 +164,7 @@ export function SimpleCampaignBuilder({
         projectId: initialCampaign.projectId || "",
         projectName: initialCampaign.projectName || "",
         projectDescription: initialCampaign.projectDescription,
+        projectLandingPageUrl: initialCampaign.landingPageUrl || "",
         campaignOrganizationId: initialCampaign.problemIntelligenceOrgId,
       });
 
@@ -98,6 +174,7 @@ export function SimpleCampaignBuilder({
         preheader: initialCampaign.emailPreheader || "",
         bodyContent: htmlContent,
         htmlContent: htmlContent,
+        ctaUrl: initialCampaign.landingPageUrl || "",
       });
     }
   }, [initialCampaign]);
@@ -117,7 +194,8 @@ export function SimpleCampaignBuilder({
       subject: intent.subject,
       preheader: intent.preheader || prev?.preheader || "",
       bodyContent: prev?.bodyContent || "",
-      htmlContent: prev?.htmlContent || ""
+      htmlContent: prev?.htmlContent || "",
+      ctaUrl: intent.projectLandingPageUrl || prev?.ctaUrl || "",
     }));
     setCurrentPage("template");
   }, []);
@@ -145,7 +223,8 @@ export function SimpleCampaignBuilder({
         to: emails,
         subject: templateData.subject,
         html: templateData.htmlContent,
-        senderProfileId: campaignIntent.senderProfileId
+        senderProfileId: campaignIntent.senderProfileId,
+        replyToEmail: campaignIntent.replyToEmail,
       });
 
       toast({
@@ -184,6 +263,11 @@ export function SimpleCampaignBuilder({
         time: launchData.scheduledTime,
         timezone: launchData.timezone
       } : undefined;
+      const generatedContext = buildCampaignContextFromProject({
+        campaignIntent,
+        template,
+        launchData,
+      });
 
       const campaignPayload = {
         name: campaignIntent.campaignName,
@@ -193,13 +277,25 @@ export function SimpleCampaignBuilder({
         projectId: launchData.projectId,
         // Auto-link org intelligence from project's campaignOrganizationId
         problemIntelligenceOrgId: campaignIntent.campaignOrganizationId || undefined,
+        landingPageUrl: generatedContext.landingPageUrl,
+        campaignObjective: generatedContext.campaignObjective,
+        productServiceInfo: generatedContext.productServiceInfo,
+        targetAudienceDescription: generatedContext.targetAudienceDescription,
+        successCriteria: generatedContext.successCriteria,
+        talkingPoints: generatedContext.talkingPoints,
         audienceRefs,
         emailSubject: template.subject,
         emailHtmlContent: template.htmlContent,
         emailPreheader: template.preheader,
         senderProfileId: campaignIntent.senderProfileId,
         senderName: campaignIntent.senderName,
+        fromEmail: campaignIntent.fromEmail,
         replyToEmail: campaignIntent.replyToEmail,
+        campaignProviderId: campaignIntent.campaignProviderId,
+        campaignProviderName: campaignIntent.campaignProviderName,
+        campaignProviderKey: campaignIntent.campaignProviderKey,
+        domainAuthId: campaignIntent.domainAuthId,
+        domainName: campaignIntent.domainName,
         scheduleJson,
         throttlingLimit: launchData.throttlingLimit || undefined
       };
