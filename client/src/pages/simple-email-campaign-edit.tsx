@@ -629,7 +629,7 @@ interface SimpleEmailCampaignSetupPageProps {
   mode?: "create" | "edit";
 }
 
-export function SimpleEmailCampaignEditPage({ mode = "edit" }: SimpleEmailCampaignSetupPageProps = {}) {
+export default function SimpleEmailCampaignEditPage({ mode = "edit" }: SimpleEmailCampaignSetupPageProps = {}) {
   const [, paramsA] = useRoute("/campaigns/email/:id/edit");
   const [, paramsB] = useRoute("/simple-email-campaigns/:id/edit");
   const search = useSearch();
