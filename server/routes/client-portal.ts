@@ -62,7 +62,7 @@ import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
 import clientPortalEmailRouter, { callbackRouter as clientPortalEmailCallbackRouter } from './client-portal-email';
 import clientCampaignPlannerRouter from './client-campaign-planner-routes';
-import clientJourneyPipelineRouter from './client-journey-pipeline-routes';
+// Old client-journey-pipeline-routes removed — unified pipeline handles this
 import { requireClientFeature, requireAnyClientFeature } from '../middleware/client-feature-gate';
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
 import { buildCanonicalPortalUrl, getCanonicalPortalBaseUrl } from '../lib/canonical-portal-url';
@@ -651,8 +651,7 @@ router.use('/ukef-transcript-qa', requireClientAuth, ukefTranscriptQaRouter);
 // AI Campaign Planner (full-funnel multi-channel planning from OI)
 router.use('/campaign-planner', requireClientAuth, requireClientFeature('ai_campaign_planner'), clientCampaignPlannerRouter);
 
-// Lead Journey Pipeline (follow-up management for campaign leads)
-router.use('/journey-pipeline', requireClientAuth, requireClientFeature('lead_journey_pipeline'), clientJourneyPipelineRouter);
+// Old journey pipeline removed — unified pipeline at /api/unified-pipelines handles this
 
 // Email connection — OAuth callbacks (no auth, redirect landing pages)
 router.use('/email', clientPortalEmailCallbackRouter);
