@@ -3,7 +3,7 @@
  * Shows pipeline list, funnel board, account details, and analytics.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -119,6 +119,65 @@ interface PipelineAccount {
   accountStaffCount: number | null;
 }
 
+interface InboxAnalysisResult {
+  summary: {
+    lookbackMonths: number;
+    linkedCampaigns: number;
+    matchedCampaigns: number;
+    scannedMessages: number;
+    scannedConversations: number;
+    opportunityThreads: number;
+    opportunityAccounts: number;
+    createdAccounts: number;
+    updatedAccounts: number;
+    createdContacts: number;
+    updatedContacts: number;
+    createdPipelineAccounts: number;
+    updatedPipelineAccounts: number;
+    createdPipelineContacts: number;
+    updatedPipelineContacts: number;
+    createdActions: number;
+  };
+  accounts: Array<{
+    accountId: string;
+    accountName: string;
+    accountDomain: string;
+    primaryContact: {
+      id: string;
+      email: string;
+      fullName: string;
+      jobTitle: string | null;
+    };
+    relatedContacts: Array<{
+      id: string;
+      email: string;
+      fullName: string;
+      jobTitle: string | null;
+    }>;
+    funnelStage: string;
+    confidence: number;
+    engagementScore: number;
+    readinessScore: number;
+    priorityScore: number;
+    nextAction: {
+      type: 'callback' | 'email' | 'note';
+      scheduledAt: string;
+    };
+    matchedCampaigns: Array<{
+      id: string;
+      name: string;
+      score: number;
+      reasons: string[];
+    }>;
+    supportingConversationIds: string[];
+    signals: string[];
+    serviceThemes: string[];
+    summary: string;
+    recommendation: string;
+    lastActivityAt: string;
+  }>;
+}
+
 const STAGE_COLORS: Record<string, string> = {
   target: 'bg-gray-100 text-gray-700',
   outreach: 'bg-blue-100 text-blue-700',
@@ -147,8 +206,13 @@ export function UnifiedPipelineTab({ authHeaders, clientAccountId, organizationI
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [activeView, setActiveView] = useState<'board' | 'analytics'>('board');
+  const [latestInboxAnalysis, setLatestInboxAnalysis] = useState<InboxAnalysisResult | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setLatestInboxAnalysis(null);
+  }, [selectedPipelineId]);
 
   // Fetch all pipelines
   const { data: pipelines, isLoading: pipelinesLoading } = useQuery<PipelineSummary[]>({
@@ -247,6 +311,29 @@ export function UnifiedPipelineTab({ authHeaders, clientAccountId, organizationI
       toast({ title: 'Accounts enrolled', description: `${data.enrolled} accounts enrolled from ICP criteria.` });
       queryClient.invalidateQueries({ queryKey: ['unified-pipeline-accounts', selectedPipelineId] });
       queryClient.invalidateQueries({ queryKey: ['unified-pipeline-dashboard', selectedPipelineId] });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const analyzeInbox = useMutation({
+    mutationFn: async (pipelineId: string) => {
+      const res = await apiRequest('POST', `/api/unified-pipelines/${pipelineId}/analyze-inbox`, {
+        lookbackMonths: 6,
+        limitConversations: 200,
+        createFollowUps: true,
+      });
+      return res.json() as Promise<InboxAnalysisResult>;
+    },
+    onSuccess: (data) => {
+      setLatestInboxAnalysis(data);
+      queryClient.invalidateQueries({ queryKey: ['unified-pipeline-dashboard', selectedPipelineId] });
+      queryClient.invalidateQueries({ queryKey: ['unified-pipeline-accounts', selectedPipelineId] });
+      toast({
+        title: 'Inbox analysis complete',
+        description: `${data.summary.opportunityAccounts} opportunity account${data.summary.opportunityAccounts === 1 ? '' : 's'} pushed into the pipeline.`,
+      });
     },
     onError: (error: any) => {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -432,8 +519,158 @@ export function UnifiedPipelineTab({ authHeaders, clientAccountId, organizationI
             )}
             Enroll Accounts
           </Button>
+          <Button
+            size="sm"
+            onClick={() => analyzeInbox.mutate(selectedPipelineId)}
+            disabled={analyzeInbox.isPending}
+          >
+            {analyzeInbox.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Mail className="mr-2 h-4 w-4" />
+            )}
+            Analyze Inbox
+          </Button>
         </div>
       </div>
+
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Inbox Capture
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Scans the last six months of primary two-way inbox threads, creates or updates the right accounts and contacts,
+              moves them into this pipeline, and queues follow-up emails or callbacks against the best matching linked campaign.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+            <span>{dashboard?.campaigns.length || 0} linked campaigns</span>
+            <span>{dashboard?.funnel.totalAccounts || 0} current accounts</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {latestInboxAnalysis && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Inbox Analysis Results</CardTitle>
+            <CardDescription>
+              {latestInboxAnalysis.summary.opportunityAccounts} account{latestInboxAnalysis.summary.opportunityAccounts === 1 ? '' : 's'} detected from {latestInboxAnalysis.summary.scannedConversations} inbox conversation{latestInboxAnalysis.summary.scannedConversations === 1 ? '' : 's'}.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-lg border p-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Messages scanned</div>
+                <div className="mt-1 text-2xl font-semibold">{latestInboxAnalysis.summary.scannedMessages}</div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Pipeline accounts</div>
+                <div className="mt-1 text-2xl font-semibold">{latestInboxAnalysis.summary.createdPipelineAccounts}</div>
+                <div className="text-xs text-muted-foreground">
+                  {latestInboxAnalysis.summary.updatedPipelineAccounts} updated
+                </div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Contacts managed</div>
+                <div className="mt-1 text-2xl font-semibold">
+                  {latestInboxAnalysis.summary.createdContacts + latestInboxAnalysis.summary.updatedContacts}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {latestInboxAnalysis.summary.createdPipelineContacts} added to pipeline contacts
+                </div>
+              </div>
+              <div className="rounded-lg border p-3">
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">Follow-ups queued</div>
+                <div className="mt-1 text-2xl font-semibold">{latestInboxAnalysis.summary.createdActions}</div>
+                <div className="text-xs text-muted-foreground">
+                  {latestInboxAnalysis.summary.matchedCampaigns} campaign matches
+                </div>
+              </div>
+            </div>
+
+            {latestInboxAnalysis.accounts.length > 0 && (
+              <div className="space-y-3">
+                {latestInboxAnalysis.accounts.slice(0, 8).map((account) => (
+                  <div key={account.accountId} className="rounded-xl border p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-semibold">{account.accountName}</div>
+                          <Badge className={STAGE_COLORS[account.funnelStage] || STAGE_COLORS.target}>
+                            {STAGE_LABELS[account.funnelStage] || account.funnelStage}
+                          </Badge>
+                          <Badge variant="outline">{account.accountDomain}</Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {account.primaryContact.fullName} · {account.primaryContact.email}
+                        </div>
+                        <p className="text-sm">{account.summary}</p>
+                        <p className="text-sm text-muted-foreground">{account.recommendation}</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-sm md:min-w-[240px]">
+                        <div className="rounded-lg bg-muted p-2">
+                          <div className="text-xs text-muted-foreground">Confidence</div>
+                          <div className="font-semibold">{account.confidence}</div>
+                        </div>
+                        <div className="rounded-lg bg-muted p-2">
+                          <div className="text-xs text-muted-foreground">Engagement</div>
+                          <div className="font-semibold">{account.engagementScore}</div>
+                        </div>
+                        <div className="rounded-lg bg-muted p-2">
+                          <div className="text-xs text-muted-foreground">Priority</div>
+                          <div className="font-semibold">{account.priorityScore}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Badge variant="secondary">
+                        Next action: {account.nextAction.type} · {new Date(account.nextAction.scheduledAt).toLocaleDateString()}
+                      </Badge>
+                      {account.serviceThemes.map((theme) => (
+                        <Badge key={theme} variant="outline">
+                          {theme.replace(/_/g, ' ')}
+                        </Badge>
+                      ))}
+                      {account.signals.slice(0, 3).map((signal) => (
+                        <Badge key={signal} variant="outline">
+                          {signal.replace(/_/g, ' ')}
+                        </Badge>
+                      ))}
+                    </div>
+
+                    {account.matchedCampaigns.length > 0 && (
+                      <div className="mt-4">
+                        <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Campaign alignment</div>
+                        <div className="flex flex-wrap gap-2">
+                          {account.matchedCampaigns.map((campaign) => (
+                            <Badge key={campaign.id} variant="secondary">
+                              {campaign.name} ({campaign.score})
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {account.relatedContacts.length > 0 && (
+                      <div className="mt-4">
+                        <div className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">Additional contacts</div>
+                        <div className="text-sm text-muted-foreground">
+                          {account.relatedContacts.map((contact) => `${contact.fullName} (${contact.email})`).join(' · ')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Metrics Cards */}
       {dashboard && (

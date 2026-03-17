@@ -52,6 +52,7 @@ interface FieldMapping {
 }
 
 type ImportStage = "upload" | "mapping" | "validate" | "preview" | "importing" | "complete";
+type ImportExecutionMode = "background" | "browser_direct" | null;
 
 const LARGE_FILE_THRESHOLD_BYTES = 5 * 1024 * 1024;
 const PREVIEW_READ_BYTES = 2 * 1024 * 1024;
@@ -83,6 +84,7 @@ export function CSVImportDialog({
   const [isPreviewOnly, setIsPreviewOnly] = useState(false);
   const [backgroundJobId, setBackgroundJobId] = useState<string | null>(null);
   const [importStatusMessage, setImportStatusMessage] = useState("Preparing import...");
+  const [importExecutionMode, setImportExecutionMode] = useState<ImportExecutionMode>(null);
   const { toast } = useToast();
 
   // List selection state
@@ -223,6 +225,7 @@ export function CSVImportDialog({
       setImportResults({ success: 0, created: 0, updated: 0, failed: 0 });
       setBackgroundJobId(null);
       setImportStatusMessage("Preparing import...");
+      setImportExecutionMode(null);
 
       const { parsedHeaders, parsedRows, previewOnly } = await loadParsedCSVFromFile(selectedFile);
       setHeaders(parsedHeaders);
@@ -509,6 +512,7 @@ export function CSVImportDialog({
   }, [backgroundJobId, onImportComplete, stage, toast]);
 
   const runDirectImport = async (targetListId: string | null) => {
+    setImportExecutionMode("browser_direct");
     const effectiveMappings = getEffectiveFieldMappings();
     const { parsedHeaders, parsedRows } = isPreviewOnly
       ? await loadAllRowsForDirectImport()
@@ -625,6 +629,7 @@ export function CSVImportDialog({
     setImportProgress(0);
     setBackgroundJobId(null);
     setImportStatusMessage("Preparing import...");
+    setImportExecutionMode(null);
 
     let resolvedTargetListId: string | null = null;
     let resolvedTargetListName: string | null = null;
@@ -666,6 +671,7 @@ export function CSVImportDialog({
       }
 
       setBackgroundJobId(payload.jobId);
+      setImportExecutionMode("background");
       setImportProgress(5);
       setImportStatusMessage(
         resolvedTargetListName
@@ -678,7 +684,13 @@ export function CSVImportDialog({
         (error instanceof Error && error.message.includes("Redis"));
 
       if (shouldFallback) {
-        setImportStatusMessage("Background queue unavailable. Falling back to direct import...");
+        setImportExecutionMode("browser_direct");
+        setImportStatusMessage("Background queue unavailable. Running import directly in this browser session...");
+        toast({
+          title: "Background queue unavailable",
+          description: "This import is running in your browser. Keep this tab open until it finishes.",
+          variant: "destructive",
+        });
         await runDirectImport(resolvedTargetListId);
         return;
       }
@@ -932,6 +944,7 @@ export function CSVImportDialog({
     setIsPreviewOnly(false);
     setBackgroundJobId(null);
     setImportStatusMessage("Preparing import...");
+    setImportExecutionMode(null);
     setSelectedListId("");
     setIsCreatingNewList(false);
     setNewListName("");
@@ -1168,7 +1181,7 @@ export function CSVImportDialog({
                 <CheckCircle2 className="h-4 w-4" />
                 <AlertDescription>
                   {isPreviewOnly && file
-                    ? `Preview validation passed. Ready to import ${file.name} (${formatFileSize(file.size)}) in the background.`
+                    ? `Preview validation passed. Ready to import ${file.name} (${formatFileSize(file.size)}).`
                     : `Validation passed! Ready to import ${csvData.length} record(s).`}
                 </AlertDescription>
               </Alert>
@@ -1177,7 +1190,7 @@ export function CSVImportDialog({
                 <h4 className="font-medium mb-2">Preview (first 5 row{csvData.length === 1 ? "" : "s"})</h4>
                 {isPreviewOnly && (
                   <p className="text-xs text-muted-foreground mb-3">
-                    Large files are previewed from the first {PREVIEW_ROW_LIMIT} rows only. The complete CSV will be processed server-side after you start the import.
+                    Large files are previewed from the first {PREVIEW_ROW_LIMIT} rows only. The complete CSV will be processed after you start the import.
                   </p>
                 )}
                 <ScrollArea className="h-[200px]">
@@ -1211,6 +1224,15 @@ export function CSVImportDialog({
           {/* Importing Stage */}
           {stage === "importing" && (
             <div className="space-y-4">
+              {importExecutionMode === "browser_direct" && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Background queue is unavailable. This import is running in your browser session only.
+                    Keep this tab open and do not refresh or navigate away until the import finishes.
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="text-center py-8">
                 <p className="text-sm text-muted-foreground mb-4">
                   {importStatusMessage}
@@ -1219,9 +1241,15 @@ export function CSVImportDialog({
                 <p className="text-sm text-muted-foreground mt-2">
                   {importProgress}% complete
                 </p>
-                <p className="text-xs text-muted-foreground mt-3">
-                  You can close this dialog. The import will continue on the server.
-                </p>
+                {importExecutionMode === "background" ? (
+                  <p className="text-xs text-muted-foreground mt-3">
+                    You can close this dialog. The import will continue on the server.
+                  </p>
+                ) : (
+                  <p className="text-xs text-destructive mt-3">
+                    Do not close this dialog or browser tab while this import is running.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -1260,7 +1288,7 @@ export function CSVImportDialog({
                 Cancel
               </Button>
               <Button onClick={handleImport} data-testid="button-start-import">
-                {isPreviewOnly ? "Start Background Import" : "Import Contacts"}
+                Start Import
               </Button>
             </>
           )}

@@ -11,6 +11,7 @@ export interface MediaInfo {
   address?: string;
   rtcpPort?: number;
   codecs: number[];
+  rtpMap?: Record<number, string>;
 }
 
 export interface SessionInfo {
@@ -90,16 +91,31 @@ export function parseSDP(sdpBody: string): SessionInfo {
             port: parseInt(port, 10),
             address: mediaConnectionAddress || result.connectionAddress,
             codecs,
+            rtpMap: {},
           };
         }
         break;
 
       // RTCP port information
       case 'a':
-        if (currentMedia && valueTrimmed.startsWith('rtcp:')) {
+        if (!currentMedia) break;
+
+        if (valueTrimmed.startsWith('rtcp:')) {
           const rtcpMatch = valueTrimmed.match(/rtcp:(\d+)/);
           if (rtcpMatch) {
             currentMedia.rtcpPort = parseInt(rtcpMatch[1], 10);
+          }
+          break;
+        }
+
+        if (valueTrimmed.startsWith('rtpmap:')) {
+          const rtpMapMatch = valueTrimmed.match(/rtpmap:(\d+)\s+([A-Za-z0-9_-]+)\/\d+/);
+          if (rtpMapMatch) {
+            const payloadType = parseInt(rtpMapMatch[1], 10);
+            if (!Number.isNaN(payloadType)) {
+              currentMedia.rtpMap ||= {};
+              currentMedia.rtpMap[payloadType] = rtpMapMatch[2].toUpperCase();
+            }
           }
         }
         break;
@@ -134,6 +150,39 @@ export function getAudioEndpoint(sdpBody: string): { address: string; port: numb
     address: audioMedia.address,
     port: audioMedia.port,
   };
+}
+
+export type G711Format = 'ulaw' | 'alaw';
+
+/**
+ * Detect the negotiated G.711 codec from the remote audio SDP answer.
+ *
+ * We honor the payload order in the remote audio media line first because that
+ * reflects the codec the far end accepted for the session. If we can't infer
+ * from payload ids, fall back to any matching rtpmap entry.
+ */
+export function getAudioG711Format(sdpBody: string): G711Format | null {
+  const session = parseSDP(sdpBody);
+  const audioMedia = session.media.find((media) => media.type === 'audio');
+  if (!audioMedia) {
+    return null;
+  }
+
+  for (const payloadType of audioMedia.codecs) {
+    if (payloadType === 0) return 'ulaw';
+    if (payloadType === 8) return 'alaw';
+
+    const codecName = audioMedia.rtpMap?.[payloadType]?.toUpperCase();
+    if (codecName === 'PCMU') return 'ulaw';
+    if (codecName === 'PCMA') return 'alaw';
+  }
+
+  for (const codecName of Object.values(audioMedia.rtpMap || {})) {
+    if (codecName === 'PCMU') return 'ulaw';
+    if (codecName === 'PCMA') return 'alaw';
+  }
+
+  return null;
 }
 
 /**

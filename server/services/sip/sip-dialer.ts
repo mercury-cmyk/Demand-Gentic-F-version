@@ -86,6 +86,7 @@ export interface CallResult {
   success: boolean;
   callId?: string;
   callControlId?: string; // For compatibility with Telnyx API bridge
+  g711Format?: 'ulaw' | 'alaw';
   error?: string;
 }
 
@@ -224,6 +225,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
         rtpPort: sipResult.rtpPort,
         remoteAddress: sipResult.remoteAddress,
         remotePort: sipResult.remotePort,
+        g711Format: sipResult.g711Format,
         systemPrompt,
         voiceName: params.voiceName,
         toPhoneNumber: params.toNumber,
@@ -292,6 +294,7 @@ export async function initiateAiCall(params: InitiateCallParams): Promise<CallRe
       success: true,
       callId: sipResult.callId,
       callControlId: sipResult.callId, // For compatibility with orchestrator
+      g711Format: sipResult.g711Format,
     };
   } catch (error: any) {
     console.error(`[SIP Dialer] Failed to initiate call ${callId}:`, error);

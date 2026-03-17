@@ -31,6 +31,7 @@ export async function createMediaBridge(params: {
   rtpPort: number;
   remoteAddress: string;
   remotePort: number;
+  g711Format?: 'ulaw' | 'alaw';
   systemPrompt: string;
   voiceName?: string;
   toPhoneNumber?: string;

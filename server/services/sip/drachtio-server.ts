@@ -28,7 +28,7 @@ import { v4 as uuidv4 } from 'uuid';
 // sdp-transform removed — SDP is built as a plain string for maximum Telnyx compatibility
 
 // Media bridging imports
-import { getAudioEndpoint } from './sdp-parser';
+import { getAudioEndpoint, getAudioG711Format, type G711Format } from './sdp-parser';
 // GeminiLiveSIPProvider removed — outbound calls use VM media-bridge for audio
 import * as mediaBridgeClient from './media-bridge-client';
 
@@ -534,7 +534,7 @@ export class DrachtioSIPServer {
     onAudioReceived?: (audio: Buffer) => void;
     onCallStateChanged?: (state: string) => void;
     onCallEnded?: (reason: string) => void;
-  }): Promise<{ callId: string; success: boolean; error?: string; rtpPort?: number; remoteAddress?: string; remotePort?: number }> {
+  }): Promise<{ callId: string; success: boolean; error?: string; rtpPort?: number; remoteAddress?: string; remotePort?: number; g711Format?: G711Format }> {
     if (!this.isConnected || !this.srf) {
       return { callId: '', success: false, error: 'Drachtio not connected' };
     }
@@ -619,6 +619,7 @@ export class DrachtioSIPServer {
       // Extract remote RTP endpoint from 200 OK SDP
       let remoteAddress = '';
       let remoteRtpPort = 0;
+      let negotiatedG711Format: G711Format | undefined;
       try {
         const remoteSdp = uac?.remote?.sdp || '';
         if (remoteSdp) {
@@ -626,8 +627,11 @@ export class DrachtioSIPServer {
           if (endpoint) {
             remoteAddress = endpoint.address;
             remoteRtpPort = endpoint.port;
-            log(`Remote RTP endpoint for ${callId}: ${remoteAddress}:${remoteRtpPort}`);
           }
+          negotiatedG711Format = getAudioG711Format(remoteSdp) || undefined;
+          log(
+            `Remote RTP endpoint for ${callId}: ${remoteAddress}:${remoteRtpPort} (codec=${negotiatedG711Format || 'unknown'})`
+          );
         }
       } catch (e) {
         logError(`Could not parse remote SDP for ${callId}`, e);
@@ -672,7 +676,14 @@ export class DrachtioSIPServer {
       }
 
       log(`Call ${callId} initiated and answered (RTP port ${rtpPort}, remote ${remoteAddress}:${remoteRtpPort})`);
-      return { callId, success: true, rtpPort: rtpPort || undefined, remoteAddress: remoteAddress || undefined, remotePort: remoteRtpPort || undefined };
+      return {
+        callId,
+        success: true,
+        rtpPort: rtpPort || undefined,
+        remoteAddress: remoteAddress || undefined,
+        remotePort: remoteRtpPort || undefined,
+        g711Format: negotiatedG711Format,
+      };
     } catch (error: any) {
       if (rtpPort) rtpPortManager.release(rtpPort);
       logError(`Failed to initiate call ${callId}: ${error.message}`, error);

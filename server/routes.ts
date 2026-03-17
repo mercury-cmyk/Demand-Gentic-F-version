@@ -179,6 +179,7 @@ import {
 } from "./validation/schemas";
 import { db, pool } from "./db";
 import { normalizeName } from "./normalization";
+import { linkContactsToAccountsByDomain } from "./services/contact-account-linking";
 import multer from "multer";
 import { uploadToS3, getPresignedDownloadUrl } from "./lib/storage";
 import { canonicalizeGcsRecordingUrl, resolvePlayableRecordingUrl } from "./lib/recording-url-policy";
@@ -3624,6 +3625,7 @@ export function registerRoutes(app: Express) {
 
       const contactsToCreate: any[] = [];
       const contactsToUpdate: Array<{ id: string; data: any; originalIndex: number }> = [];
+      const processedContactIds: string[] = [];
 
       for (const { validated, originalIndex } of contactsToProcess) {
         const normalizedEmail = validated.email.toLowerCase().trim();
@@ -3648,14 +3650,16 @@ export function registerRoutes(app: Express) {
 
       if (contactsToCreate.length > 0) {
         try {
-          await storage.createContactsBulk(contactsToCreate.map(c => c.contact));
-          createdCount = contactsToCreate.length;
+          const createdContacts = await storage.createContactsBulk(contactsToCreate.map(c => c.contact));
+          createdCount = createdContacts.length;
+          processedContactIds.push(...createdContacts.map(contact => contact.id));
         } catch (error) {
           // If bulk insert fails, fall back to individual inserts to identify specific failures
           for (const { contact, originalIndex } of contactsToCreate) {
             try {
-              await storage.createContact(contact);
+              const createdContact = await storage.createContact(contact);
               createdCount++;
+              processedContactIds.push(createdContact.id);
             } catch (err) {
               results.failed++;
               results.errors.push({
@@ -3670,8 +3674,17 @@ export function registerRoutes(app: Express) {
       // Step 8: Update existing contacts individually
       for (const { id, data, originalIndex } of contactsToUpdate) {
         try {
-          await storage.updateContact(id, data);
-          updatedCount++;
+          const updatedContact = await storage.updateContact(id, data);
+          if (updatedContact) {
+            updatedCount++;
+            processedContactIds.push(updatedContact.id);
+          } else {
+            results.failed++;
+            results.errors.push({
+              index: originalIndex,
+              error: "Contact update returned no record",
+            });
+          }
         } catch (error) {
           results.failed++;
           results.errors.push({
@@ -3685,13 +3698,19 @@ export function registerRoutes(app: Express) {
       results.created = createdCount;
       results.updated = updatedCount;
 
+      if (processedContactIds.length > 0) {
+        const linkStats = await linkContactsToAccountsByDomain(processedContactIds);
+        if (linkStats.linkedToExistingAccounts > 0 || linkStats.linkedToCreatedAccounts > 0) {
+          console.log(
+            `[Batch Import] Linked ${linkStats.linkedToExistingAccounts + linkStats.linkedToCreatedAccounts} contact(s) to accounts (${linkStats.linkedToExistingAccounts} existing, ${linkStats.linkedToCreatedAccounts} via ${linkStats.createdAccounts} new account(s))`,
+          );
+        }
+      }
+
       // Step 9: Add contacts to list if listId is provided
       if (listId && results.success > 0) {
         try {
-          // Collect all contact IDs (newly created and updated)
-          const allProcessedEmails = contactsToProcess.map(c => c.validated.email.toLowerCase().trim());
-          const processedContacts = await storage.getContactsByEmails(allProcessedEmails);
-          const contactIds = processedContacts.map(c => c.id);
+          const contactIds = Array.from(new Set(processedContactIds));
 
           if (contactIds.length > 0) {
             // Get the current list and add contacts to it
