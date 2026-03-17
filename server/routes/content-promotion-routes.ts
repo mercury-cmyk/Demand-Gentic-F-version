@@ -658,21 +658,14 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
 
     const [page] = await db
       .insert(contentPromotionPages)
-<<<<<<< HEAD
-      .values(safeValues as any)
-=======
       .values({
-        ...body,
-        slug,
-        tenantId,
-        createdBy,
+        ...safeValues,
         clientAccountId: resolvedContext.clientAccountId,
         projectId: resolvedContext.projectId,
         campaignId: resolvedContext.campaignId,
         organizationId: resolvedContext.organizationId,
         contextSnapshot: resolvedContext.contextSnapshot,
       } as any)
->>>>>>> 3416f7d5cce7c8fc7f9778caa4ffaf2f55b9af2f
       .returning();
 
     res.json(page);
@@ -696,7 +689,6 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
 // Update page config
 router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => {
   try {
-<<<<<<< HEAD
     const body = req.body;
     // Whitelist only known mutable schema columns
     const updateData: Record<string, any> = {};
@@ -710,15 +702,12 @@ router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
     for (const key of allowedUpdateKeys) {
       if (body[key] !== undefined) updateData[key] = body[key];
     }
-=======
-    const { id, createdAt, updatedAt, tenantId, createdBy, ...updateData } = req.body;
     const resolvedContext = await resolveContentPromotionContextLinkage({
       campaignId: updateData.campaignId,
       projectId: updateData.projectId,
-      clientAccountId: updateData.clientAccountId ?? updateData.clientId,
+      clientAccountId: updateData.clientAccountId ?? body.clientId,
       organizationId: updateData.organizationId,
     });
->>>>>>> 3416f7d5cce7c8fc7f9778caa4ffaf2f55b9af2f
 
     // If slug is being changed, validate uniqueness
     if (updateData.slug) {
