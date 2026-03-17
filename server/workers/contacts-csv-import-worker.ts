@@ -18,6 +18,7 @@ import { from as copyFrom } from 'pg-copy-streams';
 import { pipeline } from 'stream/promises';
 import { detectContactTimezone } from '../utils/business-hours';
 import { getBestPhoneForContact, isValidE164 } from '../lib/phone-utils';
+import { linkContactsToAccountsByDomain } from '../services/contact-account-linking';
 
 /**
  * Contacts CSV Import Job Data
@@ -624,6 +625,15 @@ export async function processContactsCSVImport(
       missingEmailRows += batchResults.missingEmail;
       duplicateEmailRows += batchResults.duplicateEmail;
       successRows += batchResults.created + batchResults.updated;
+
+      if (batchResults.processedIds.length > 0) {
+        const linkStats = await linkContactsToAccountsByDomain(batchResults.processedIds);
+        if (linkStats.linkedToExistingAccounts > 0 || linkStats.linkedToCreatedAccounts > 0) {
+          console.log(
+            `[ContactsCSVImportWorker] Linked ${linkStats.linkedToExistingAccounts + linkStats.linkedToCreatedAccounts} imported contact(s) to accounts (${linkStats.linkedToExistingAccounts} existing, ${linkStats.linkedToCreatedAccounts} via ${linkStats.createdAccounts} new account(s))`,
+          );
+        }
+      }
 
       if (batchResults.processedIds.length > 0) {
         pendingListAssignments.push(...batchResults.processedIds);

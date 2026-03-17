@@ -64,7 +64,8 @@ router.post('/api/contacts-csv-import', requireAuth, upload.single('file'), asyn
     if (!contactsCSVImportQueue) {
       return res.status(503).json({
         error: 'Contacts CSV import queue not available',
-        message: 'Redis connection required for background jobs',
+        message: 'Redis connection required for server-side background jobs. The client may fall back to browser-side direct import.',
+        fallbackMode: 'browser_direct',
         useDirectProcessing: true, // Signal frontend to use direct processing
       });
     }
@@ -96,6 +97,7 @@ router.post('/api/contacts-csv-import', requireAuth, upload.single('file'), asyn
     if (!jobId) {
       return res.status(500).json({
         error: 'Failed to create import job',
+        fallbackMode: 'browser_direct',
         useDirectProcessing: true,
       });
     }
@@ -111,6 +113,7 @@ router.post('/api/contacts-csv-import', requireAuth, upload.single('file'), asyn
     res.status(500).json({
       error: 'Failed to create CSV import job',
       message: error instanceof Error ? error.message : String(error),
+      fallbackMode: 'browser_direct',
       useDirectProcessing: true,
     });
   }

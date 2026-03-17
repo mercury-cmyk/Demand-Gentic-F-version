@@ -27,6 +27,7 @@ import {
   autoCreateCampaignsFromStrategy,
   autoEnrollTargetAccounts,
 } from "../services/ai-unified-pipeline-planner";
+import { analyzePipelineInboxOpportunities } from "../services/unified-pipeline-inbox-analyzer";
 
 const router = Router();
 
@@ -203,6 +204,28 @@ router.post("/:id/create-campaigns", requireAuth, async (req: Request, res: Resp
 });
 
 // ─── Account Enrollment ──────────────────────────────────────────────────────
+
+/**
+ * POST /api/unified-pipelines/:id/analyze-inbox
+ * Analyze recent primary inbox threads and convert opportunity-like email
+ * engagement into pipeline accounts, contacts, and follow-up actions.
+ */
+router.post("/:id/analyze-inbox", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const result = await analyzePipelineInboxOpportunities({
+      pipelineId: req.params.id,
+      userId: (req as any).user?.userId,
+      lookbackMonths: Number(req.body?.lookbackMonths) || 6,
+      limitConversations: Number(req.body?.limitConversations) || 200,
+      createFollowUps: req.body?.createFollowUps !== false,
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error("[UnifiedPipeline] Inbox analysis failed:", error);
+    res.status(500).json({ error: error.message || "Failed to analyze inbox opportunities" });
+  }
+});
 
 /**
  * POST /api/unified-pipelines/:id/enroll-accounts

@@ -267,6 +267,7 @@ async function createSession(params: {
   rtpPort: number;
   remoteAddress: string;
   remotePort: number;
+  g711Format?: G711Format;
   systemPrompt: string;
   voiceName?: string;
   toPhoneNumber?: string;
@@ -288,7 +289,9 @@ async function createSession(params: {
     rtpPort: params.rtpPort,
     remoteAddress: params.remoteAddress,
     remotePort: params.remotePort,
-    g711Format: detectG711Format(params.toPhoneNumber),
+    // Prefer the codec negotiated in the remote SDP answer. The phone-number
+    // heuristic is only a fallback when Cloud Run did not provide a codec.
+    g711Format: params.g711Format || detectG711Format(params.toPhoneNumber),
 
     rtpSocket: null,
     rtpSeqNum: 0,
@@ -1248,14 +1251,31 @@ async function connectToOpenAI(session: BridgeSession): Promise<void> {
 
 // ==================== OPENING FALLBACK ====================
 
+function hasNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function getOpeningFallbackDelayMs(session: BridgeSession): number {
+  const isPreviewSession = hasNonEmptyString(session.context?.previewSessionId);
+  const isProductionQueueCall = hasNonEmptyString(session.context?.queueItemId) && !isPreviewSession;
+
+  // Real outbound prospecting calls should speak promptly. Test/preview flows
+  // can still allow a slightly longer pause for a natural hello-first exchange.
+  return isProductionQueueCall ? 1200 : 2500;
+}
+
+function getOpeningProtectionMs(session: BridgeSession): number {
+  const isPreviewSession = hasNonEmptyString(session.context?.previewSessionId);
+  return isPreviewSession ? 1200 : 1800;
+}
+
 function scheduleOpeningFallback(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   if (session.openingFallbackTimer) return;
 
-  // LISTEN-FIRST: Wait for contact to speak first. Gemini hears their audio
-  // and responds naturally via the system prompt. This fallback only fires if
-  // the contact is completely silent — they may be waiting for us to speak.
-  const OPENING_FALLBACK_DELAY_MS = 6000;
+  // Allow a brief hello-first window, but do not leave outbound calls silent
+  // long enough for prospects to think the line is dead.
+  const OPENING_FALLBACK_DELAY_MS = getOpeningFallbackDelayMs(session);
   session.openingFallbackTimer = setTimeout(() => {
     session.openingFallbackTimer = null;
     if (!session.openingMessageSent) {
@@ -1268,6 +1288,7 @@ function scheduleOpeningFallback(session: BridgeSession): void {
 function trySendOpeningMessage(session: BridgeSession): void {
   if (session.openingMessageSent || !session.setupComplete || !session.callAnswered) return;
   session.openingMessageSent = true;
+  session.openingProtectionUntil = Date.now() + getOpeningProtectionMs(session);
   if (session.openingFallbackTimer) {
     clearTimeout(session.openingFallbackTimer);
     session.openingFallbackTimer = null;
@@ -1474,6 +1495,7 @@ app.post('/bridge', async (req, res) => {
   try {
     const { callId, rtpPort, remoteAddress, remotePort, systemPrompt, voiceName,
       toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds,
+      g711Format,
       provider, openaiApiKey, openaiModel, openaiVoice } = req.body;
 
     if (!callId || !rtpPort || !remoteAddress || !remotePort) {
@@ -1483,6 +1505,7 @@ app.post('/bridge', async (req, res) => {
 
     const result = await createSession({
       callId, rtpPort, remoteAddress, remotePort,
+      g711Format,
       systemPrompt: systemPrompt || 'You are a helpful AI voice assistant.',
       voiceName, toPhoneNumber, contactName, firstMessage, context, maxDurationSeconds,
       provider: provider || 'gemini',
