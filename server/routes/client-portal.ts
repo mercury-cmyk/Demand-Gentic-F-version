@@ -1417,7 +1417,7 @@ router.post('/campaigns/batch-stats', requireClientAuth, async (req, res) => {
       .where(
         and(
           inArray(leads.campaignId, allowedCampaignIds),
-          inArray(leads.qaStatus, ['approved', 'published'])
+          inArray(leads.qaStatus, ['approved', 'published', 'new', 'under_review'])
         )
       )
       .groupBy(leads.campaignId);

@@ -492,7 +492,7 @@ router.get('/', async (req: Request, res: Response) => {
         .where(
           and(
             inArray(leads.campaignId, campaignIdList),
-            inArray(leads.qaStatus, ['approved', 'published']),
+              inArray(leads.qaStatus, ['approved', 'published', 'new', 'under_review']),
           ),
         )
         .groupBy(leads.campaignId),
