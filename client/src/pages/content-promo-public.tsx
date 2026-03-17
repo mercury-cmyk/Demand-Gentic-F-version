@@ -252,7 +252,7 @@ function getThemeClasses(theme: PageConfig["templateTheme"]): ThemeClasses {
     case "modern_gradient":
       return {
         page: "bg-white text-slate-900 min-h-screen",
-        header: "bg-white/80 backdrop-blur-md border-b border-slate-200/50 shadow-sm",
+        header: "bg-transparent absolute top-0 left-0 right-0 z-20",
         heroSection: "relative overflow-hidden",
         heroHeadline: "text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-tight",
         heroSubheadline: "text-lg md:text-xl text-white/90 leading-relaxed",
@@ -823,12 +823,12 @@ export default function ContentPromoPublicPage() {
 
         {/* Header */}
         <header className={`${theme.header} py-4 px-6`}>
-          <div className="max-w-7xl mx-auto flex items-center gap-3">
+          <div className="max-w-7xl mx-auto flex items-center gap-4">
             {pageConfig.brandingConfig.logoUrl && (
               <img
                 src={pageConfig.brandingConfig.logoUrl}
                 alt={pageConfig.brandingConfig.companyName}
-                className="h-8 object-contain"
+                className="h-10 max-w-[200px] object-contain"
               />
             )}
             <span className="font-semibold text-lg">
@@ -1653,13 +1653,13 @@ export default function ContentPromoPublicPage() {
       )}
 
       {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-      <header className={`${theme.header} py-4 px-6 relative z-20`}>
-        <div className="max-w-7xl mx-auto flex items-center gap-3">
+      <header className={`${theme.header} py-4 px-6 ${!theme.header.includes('absolute') ? 'relative' : ''} z-20`}>
+        <div className="max-w-7xl mx-auto flex items-center gap-4">
           {pageConfig.brandingConfig.logoUrl && (
             <img
               src={pageConfig.brandingConfig.logoUrl}
               alt={pageConfig.brandingConfig.companyName}
-              className="h-8 object-contain"
+              className="h-10 max-w-[200px] object-contain"
             />
           )}
           <span className={`font-semibold text-lg ${

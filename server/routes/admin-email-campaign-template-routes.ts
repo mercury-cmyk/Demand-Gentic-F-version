@@ -8,11 +8,11 @@ const router = Router();
 router.use(requireAuth, requireRole('admin', 'campaign_manager'));
 
 const generateTemplateSchema = z.object({
-  campaignId: z.string().optional(),
-  projectId: z.string().optional(),
-  clientAccountId: z.string().optional(),
-  campaignType: z.string().optional(),
-  channel: z.string().optional(),
+  campaignId: z.string().nullable().optional(),
+  projectId: z.string().nullable().optional(),
+  clientAccountId: z.string().nullable().optional(),
+  campaignType: z.string().nullable().optional(),
+  channel: z.string().nullable().optional(),
   tone: z.enum(['professional', 'friendly', 'direct']),
   design: z.enum(['plain', 'branded', 'newsletter', 'argyle-brand']),
   campaignName: z.string().default(''),
