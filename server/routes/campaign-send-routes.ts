@@ -18,6 +18,137 @@ import { campaignEmailProviderService } from "../services/campaign-email-provide
 const router = Router();
 
 /**
+ * POST /api/campaigns/send-test
+ * Send a test email using campaign email provider (Brevo, Mailgun, SMTP)
+ */
+const sendTestSchema = z.object({
+  emails: z.array(z.string().email()).min(1).max(10),
+  subject: z.string().min(1),
+  html: z.string().min(1),
+  senderProfileId: z.string().min(1),
+  preheader: z.string().optional(),
+  sampleContactId: z.string().optional(),
+  personalizationData: z.record(z.string()).optional(),
+});
+
+router.post("/send-test", async (req: Request, res: Response) => {
+  try {
+    const data = sendTestSchema.parse(req.body);
+
+    // Get sender profile
+    const [senderProfile] = await db
+      .select()
+      .from(senderProfiles)
+      .where(eq(senderProfiles.id, data.senderProfileId))
+      .limit(1);
+
+    if (!senderProfile) {
+      return res.status(404).json({ error: "Sender profile not found" });
+    }
+
+    // Resolve provider for this sender profile (Brevo, Mailgun, etc.)
+    const provider = await campaignEmailProviderService.resolveCampaignEmailProviderForSenderProfile(senderProfile);
+
+    // Optionally load sample contact for personalization
+    let mergeData: Record<string, string> = data.personalizationData || {};
+    if (data.sampleContactId) {
+      const [contact] = await db
+        .select()
+        .from(contacts)
+        .where(eq(contacts.id, data.sampleContactId))
+        .limit(1);
+      if (contact) {
+        mergeData = {
+          first_name: contact.firstName || "",
+          last_name: contact.lastName || "",
+          company: contact.company || "",
+          job_title: contact.jobTitle || "",
+          email: contact.email || "",
+          ...mergeData,
+        };
+      }
+    }
+
+    // Apply merge tags to subject and html
+    let finalSubject = data.subject;
+    let finalHtml = data.html;
+
+    for (const [key, value] of Object.entries(mergeData)) {
+      const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, "gi");
+      finalSubject = finalSubject.replace(pattern, value);
+      finalHtml = finalHtml.replace(pattern, value);
+    }
+
+    // Inject preheader if provided
+    if (data.preheader) {
+      const preheaderHtml = `<div style="display:none;font-size:1px;color:#fefefe;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;">${data.preheader}</div>`;
+      const headEnd = finalHtml.indexOf("</head>");
+      if (headEnd !== -1) {
+        finalHtml = finalHtml.slice(0, headEnd) + preheaderHtml + finalHtml.slice(headEnd);
+      } else {
+        finalHtml = preheaderHtml + finalHtml;
+      }
+    }
+
+    // Send to each recipient
+    const results: Array<{ email: string; success: boolean; error?: string }> = [];
+
+    for (const email of data.emails) {
+      try {
+        await campaignEmailProviderService.sendCampaignEmail({
+          providerId: provider?.id || null,
+          providerKey: provider?.providerKey || senderProfile.espProvider || senderProfile.espAdapter || null,
+          options: {
+            to: email,
+            from: senderProfile.fromEmail,
+            fromName: senderProfile.fromName || undefined,
+            replyTo: senderProfile.replyToEmail || senderProfile.fromEmail,
+            subject: finalSubject,
+            html: finalHtml,
+            tags: ["test-email"],
+          },
+        });
+        results.push({ email, success: true });
+      } catch (err: any) {
+        console.error(`[Send Test] Failed to send to ${email}:`, err);
+        results.push({ email, success: false, error: err.message });
+      }
+    }
+
+    const sentCount = results.filter((r) => r.success).length;
+    const failedCount = results.filter((r) => !r.success).length;
+
+    if (sentCount === 0) {
+      return res.status(500).json({
+        success: false,
+        message: `Failed to send test email: ${results[0]?.error || "Unknown error"}`,
+        results,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Test email sent to ${sentCount} recipient(s)${failedCount > 0 ? `, ${failedCount} failed` : ""}`,
+      sentCount,
+      failedCount,
+      results,
+    });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", "),
+      });
+    }
+    console.error("[Send Test] Error:", error);
+    return res.status(500).json({
+      error: "send_failed",
+      message: error.message || "Failed to send test email",
+    });
+  }
+});
+
+/**
  * POST /api/campaigns/:id/send
  * Trigger bulk send of an email campaign
  */
