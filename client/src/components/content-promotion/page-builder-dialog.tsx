@@ -207,6 +207,11 @@ const TEMPLATE_THEMES = [
   { value: "clean_minimal", label: "Clean Minimal", description: "White space, elegant", colors: ["#ffffff", "#f8f9fa", "#e9ecef"] },
   { value: "bold_impact", label: "Bold Impact", description: "High contrast, urgency", colors: ["#ff6b6b", "#feca57", "#48dbfb"] },
   { value: "tech_forward", label: "Tech Forward", description: "Futuristic, geometric", colors: ["#00d2ff", "#3a7bd5", "#0a0e27"] },
+  { value: "nature_organic", label: "Nature Organic", description: "Earthy tones, natural", colors: ["#2d6a4f", "#95d5b2", "#d8f3dc"] },
+  { value: "corporate_trust", label: "Corporate Trust", description: "Navy & gold, professional", colors: ["#1b2a4a", "#2c5282", "#d4a846"] },
+  { value: "sunset_warm", label: "Sunset Warm", description: "Warm gradients, inviting", colors: ["#f97316", "#ef4444", "#fbbf24"] },
+  { value: "ocean_calm", label: "Ocean Calm", description: "Soothing blues & teals", colors: ["#0ea5e9", "#06b6d4", "#e0f2fe"] },
+  { value: "neon_pop", label: "Neon Pop", description: "Electric, edgy, attention-grabbing", colors: ["#a855f7", "#ec4899", "#14b8a6"] },
 ];
 
 const ASSET_TYPES = [
@@ -1001,6 +1006,46 @@ export default function PageBuilderDialog({
                   value={formData.brandingConfig.accentColor}
                   onChange={(v) => updateNested("brandingConfig", "accentColor", v)}
                 />
+              </div>
+
+              {/* Color presets */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Quick Color Presets</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { primary: "#7c3aed", accent: "#3b82f6", label: "Purple & Blue" },
+                    { primary: "#0f172a", accent: "#f59e0b", label: "Navy & Gold" },
+                    { primary: "#dc2626", accent: "#1e293b", label: "Red & Charcoal" },
+                    { primary: "#059669", accent: "#10b981", label: "Emerald" },
+                    { primary: "#2563eb", accent: "#60a5fa", label: "Classic Blue" },
+                    { primary: "#7c2d12", accent: "#ea580c", label: "Burnt Orange" },
+                    { primary: "#be185d", accent: "#f472b6", label: "Rose Pink" },
+                    { primary: "#0d9488", accent: "#2dd4bf", label: "Teal" },
+                    { primary: "#4f46e5", accent: "#818cf8", label: "Indigo" },
+                    { primary: "#0369a1", accent: "#38bdf8", label: "Sky Blue" },
+                    { primary: "#15803d", accent: "#86efac", label: "Green Fresh" },
+                    { primary: "#92400e", accent: "#fbbf24", label: "Amber" },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      title={preset.label}
+                      className={`flex items-center gap-0.5 rounded-md border px-2 py-1 text-[10px] transition-colors hover:ring-1 hover:ring-primary ${
+                        formData.brandingConfig.primaryColor === preset.primary
+                          ? "ring-2 ring-primary border-primary"
+                          : "border-border"
+                      }`}
+                      onClick={() => {
+                        updateNested("brandingConfig", "primaryColor", preset.primary);
+                        updateNested("brandingConfig", "accentColor", preset.accent);
+                      }}
+                    >
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: preset.primary }} />
+                      <span className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: preset.accent }} />
+                      <span className="ml-0.5 text-muted-foreground">{preset.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <ColorInput

@@ -14840,6 +14840,11 @@ export const contentPromoTemplateThemeEnum = pgEnum('content_promo_template_them
   'clean_minimal',
   'bold_impact',
   'tech_forward',
+  'nature_organic',
+  'corporate_trust',
+  'sunset_warm',
+  'ocean_calm',
+  'neon_pop',
 ]);
 
 export const contentPromotionPages = pgTable("content_promotion_pages", {
@@ -14948,8 +14953,6 @@ export const contentPromotionPages = pgTable("content_promotion_pages", {
     noIndex?: boolean;
   }>(),
 
-  clientAccountId: varchar("client_account_id"),
-  campaignId: varchar("campaign_id"),
   confirmationEmailConfig: jsonb("confirmation_email_config").$type<{
     enabled: boolean;
     subject: string;

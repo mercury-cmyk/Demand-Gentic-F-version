@@ -658,7 +658,14 @@ router.post("/api/content-promotion/pages", requireAuth, async (req, res) => {
 
     const [page] = await db
       .insert(contentPromotionPages)
-      .values(safeValues as any)
+      .values({
+        ...safeValues,
+        clientAccountId: resolvedContext.clientAccountId,
+        projectId: resolvedContext.projectId,
+        campaignId: resolvedContext.campaignId,
+        organizationId: resolvedContext.organizationId,
+        contextSnapshot: resolvedContext.contextSnapshot,
+      } as any)
       .returning();
 
     res.json(page);
@@ -695,6 +702,12 @@ router.put("/api/content-promotion/pages/:id", requireAuth, async (req, res) => 
     for (const key of allowedUpdateKeys) {
       if (body[key] !== undefined) updateData[key] = body[key];
     }
+    const resolvedContext = await resolveContentPromotionContextLinkage({
+      campaignId: updateData.campaignId,
+      projectId: updateData.projectId,
+      clientAccountId: updateData.clientAccountId ?? body.clientId,
+      organizationId: updateData.organizationId,
+    });
 
     // If slug is being changed, validate uniqueness
     if (updateData.slug) {
