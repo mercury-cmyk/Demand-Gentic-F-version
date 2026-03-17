@@ -2147,6 +2147,9 @@ export default function InboxPage() {
                                     <span className="text-muted-foreground w-28 flex-shrink-0">
                                       {evt.openedAt ? format(new Date(evt.openedAt), 'MMM d, h:mm a') : '—'}
                                     </span>
+                                    <span className="font-medium text-foreground truncate max-w-[180px]" title={evt.recipientEmail || ''}>
+                                      {evt.recipientEmail || '—'}
+                                    </span>
                                     <span className="flex items-center gap-1 w-16 flex-shrink-0">
                                       {evt.deviceType === 'mobile' ? <Smartphone className="h-3 w-3" /> :
                                        evt.deviceType === 'tablet' ? <Smartphone className="h-3 w-3" /> :
@@ -2176,6 +2179,9 @@ export default function InboxPage() {
                                   <div key={evt.id} className="flex items-center gap-3 text-[11px] py-1.5 px-2.5 rounded-md bg-muted/30">
                                     <span className="text-muted-foreground w-28 flex-shrink-0">
                                       {evt.clickedAt ? format(new Date(evt.clickedAt), 'MMM d, h:mm a') : '—'}
+                                    </span>
+                                    <span className="font-medium text-foreground truncate max-w-[180px]" title={evt.recipientEmail || ''}>
+                                      {evt.recipientEmail || '—'}
                                     </span>
                                     <span className="flex items-center gap-1 w-16 flex-shrink-0">
                                       {evt.deviceType === 'mobile' ? <Smartphone className="h-3 w-3" /> :

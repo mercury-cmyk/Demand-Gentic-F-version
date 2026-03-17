@@ -2374,34 +2374,69 @@ export function registerRoutes(app: Express) {
         importance: "normal",
       });
 
-      // Apply tracking using the dealMessage.id so stats are retrievable in inbox
-      const trackedBody = emailTrackingService.applyTracking(body, {
-        messageId: dealMessage.id,
-        recipientEmail: toEmails[0] || fromEmail,
-      });
+      // Per-recipient tracking: send individual emails so each recipient gets a unique tracking pixel
+      // This ensures we can see exactly WHO opened the email
+      const allRecipients = [...toEmails, ...ccEmails];
 
-      // Send via provider with skipTracking (already tracked above)
-      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
-        const { gmailSyncService } = await import('./services/gmail-sync-service');
-        const result = await gmailSyncService.sendEmail(mailboxAccountId, {
-          to, cc, subject, body: trackedBody, skipTracking: true,
-        });
-        // Update m365MessageId for sync dedup
-        await storage.updateDealMessage(dealMessage.id, {
-          m365MessageId: `google:${mailboxAccountId}:${result.messageId}`,
-          messageStatus: "delivered",
-        });
+      if (allRecipients.length > 1) {
+        // Multiple recipients: send individual emails for per-recipient tracking
+        const sendResults: Array<{ email: string; status: string }> = [];
+
+        for (const recipientEmail of allRecipients) {
+          const trackedBody = emailTrackingService.applyTracking(body, {
+            messageId: dealMessage.id,
+            recipientEmail,
+          });
+
+          try {
+            if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+              const { gmailSyncService } = await import('./services/gmail-sync-service');
+              await gmailSyncService.sendEmail(mailboxAccountId, {
+                to: recipientEmail, cc: '', subject, body: trackedBody, skipTracking: true,
+              });
+            } else {
+              const { m365SyncService } = await import('./services/m365-sync-service');
+              await m365SyncService.sendEmail(mailboxAccountId, {
+                to: recipientEmail, cc: '', subject, body: trackedBody, skipTracking: true,
+              });
+            }
+            sendResults.push({ email: recipientEmail, status: 'delivered' });
+          } catch (err: any) {
+            console.error(`[EMAIL-SEND] Failed to send to ${recipientEmail}:`, err.message);
+            sendResults.push({ email: recipientEmail, status: 'failed' });
+          }
+        }
+
+        await storage.updateDealMessage(dealMessage.id, { messageStatus: "delivered" });
+        res.json({ message: "Email sent successfully", dealMessageId: dealMessage.id, recipients: sendResults });
       } else {
-        const { m365SyncService } = await import('./services/m365-sync-service');
-        await m365SyncService.sendEmail(mailboxAccountId, {
-          to, cc, subject, body: trackedBody, skipTracking: true,
+        // Single recipient: send normally
+        const trackedBody = emailTrackingService.applyTracking(body, {
+          messageId: dealMessage.id,
+          recipientEmail: toEmails[0] || fromEmail,
         });
-        await storage.updateDealMessage(dealMessage.id, {
-          messageStatus: "delivered",
-        });
-      }
 
-      res.json({ message: "Email sent successfully", dealMessageId: dealMessage.id });
+        if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+          const { gmailSyncService } = await import('./services/gmail-sync-service');
+          const result = await gmailSyncService.sendEmail(mailboxAccountId, {
+            to, cc, subject, body: trackedBody, skipTracking: true,
+          });
+          await storage.updateDealMessage(dealMessage.id, {
+            m365MessageId: `google:${mailboxAccountId}:${result.messageId}`,
+            messageStatus: "delivered",
+          });
+        } else {
+          const { m365SyncService } = await import('./services/m365-sync-service');
+          await m365SyncService.sendEmail(mailboxAccountId, {
+            to, cc, subject, body: trackedBody, skipTracking: true,
+          });
+          await storage.updateDealMessage(dealMessage.id, {
+            messageStatus: "delivered",
+          });
+        }
+
+        res.json({ message: "Email sent successfully", dealMessageId: dealMessage.id });
+      }
     } catch (error: any) {
       console.error("Failed to send email:", error);
       res.status(500).json({ message: "Failed to send email", error: error.message });
@@ -2539,34 +2574,56 @@ export function registerRoutes(app: Express) {
         threadId: threadId || undefined
       });
 
-      // Apply tracking with the dealMessage ID so opens/clicks are queryable
-      const trackedBody = emailTrackingService.applyTracking(body, {
-        messageId: result.messageId,
-        recipientEmail: Array.isArray(to) ? to[0] : to,
-      });
+      // Per-recipient tracking: send individual emails so each recipient gets a unique tracking pixel
+      const allRecipients = [...(Array.isArray(to) ? to : [to]), ...(Array.isArray(cc) ? cc : cc ? [cc] : [])];
 
-      if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
-        const { gmailSyncService } = await import('./services/gmail-sync-service');
-        const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
-          to: toAddresses,
-          cc: ccAddresses,
-          subject,
-          body: trackedBody,
-          skipTracking: true,
-        });
-        externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
+      if (allRecipients.length > 1) {
+        // Multiple recipients: send individually for per-recipient open tracking
+        for (const recipientEmail of allRecipients) {
+          const trackedBody = emailTrackingService.applyTracking(body, {
+            messageId: result.messageId,
+            recipientEmail,
+          });
+
+          try {
+            if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+              const { gmailSyncService } = await import('./services/gmail-sync-service');
+              const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
+                to: recipientEmail, cc: '', subject, body: trackedBody, skipTracking: true,
+              });
+              externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
+            } else {
+              const { m365SyncService } = await import('./services/m365-sync-service');
+              await m365SyncService.sendEmail(mailboxAccountId, {
+                to: recipientEmail, cc: '', subject, body: trackedBody, skipTracking: true,
+              });
+            }
+          } catch (err: any) {
+            console.error(`[OPP-EMAIL] Failed to send to ${recipientEmail}:`, err.message);
+          }
+        }
       } else {
-        const { m365SyncService } = await import('./services/m365-sync-service');
-        await m365SyncService.sendEmail(mailboxAccountId, {
-          to: toAddresses,
-          cc: ccAddresses,
-          subject,
-          body: trackedBody,
-          skipTracking: true,
+        // Single recipient: send normally
+        const trackedBody = emailTrackingService.applyTracking(body, {
+          messageId: result.messageId,
+          recipientEmail: Array.isArray(to) ? to[0] : to,
         });
+
+        if (mailboxAccount.provider === GOOGLE_MAILBOX_PROVIDER) {
+          const { gmailSyncService } = await import('./services/gmail-sync-service');
+          const sentMessage = await gmailSyncService.sendEmail(mailboxAccountId, {
+            to: toAddresses, cc: ccAddresses, subject, body: trackedBody, skipTracking: true,
+          });
+          externalMessageId = gmailSyncService.buildExternalMessageId(mailboxAccountId, sentMessage.messageId) as unknown as typeof externalMessageId;
+        } else {
+          const { m365SyncService } = await import('./services/m365-sync-service');
+          await m365SyncService.sendEmail(mailboxAccountId, {
+            to: toAddresses, cc: ccAddresses, subject, body: trackedBody, skipTracking: true,
+          });
+        }
       }
 
-      res.json({ 
+      res.json({
         message: "Email sent successfully",
         conversationId: result.conversationId,
         messageId: result.messageId
@@ -12067,7 +12124,7 @@ export function registerRoutes(app: Express) {
         .from(leads)
         .where(and(
           inArray(leads.campaignId, campaignIds),
-          inArray(leads.qaStatus, ['approved', 'published'])
+          inArray(leads.qaStatus, ['approved', 'published', 'new', 'under_review'])
         ));
 
       res.json({
