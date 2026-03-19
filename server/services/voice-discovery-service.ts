@@ -123,9 +123,46 @@ export async function getVoiceById(voiceId: string, provider: 'openai' | 'gemini
   return providerVoices.find(v => v.id === voiceId) || null;
 }
 
+// Map Gemini voice names to OpenAI TTS voices for fallback
+const GEMINI_TO_OPENAI_FALLBACK: Record<string, string> = {
+  'Puck': 'echo', 'Charon': 'onyx', 'Kore': 'nova', 'Fenrir': 'ash',
+  'Aoede': 'shimmer', 'Leda': 'coral', 'Orus': 'sage', 'Zephyr': 'alloy',
+  'Vega': 'nova', 'Pegasus': 'ash', 'Solaria': 'shimmer',
+};
+
+/**
+ * Generate TTS audio using OpenAI's TTS API as fallback.
+ */
+async function generateOpenAITTSFallback(
+  text: string,
+  voiceId: string,
+  provider: 'openai' | 'gemini'
+): Promise<Buffer> {
+  const openaiVoices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer'];
+  let openaiVoice: string;
+
+  if (provider === 'openai' && openaiVoices.includes(voiceId.toLowerCase())) {
+    openaiVoice = voiceId.toLowerCase();
+  } else {
+    openaiVoice = GEMINI_TO_OPENAI_FALLBACK[voiceId] || 'alloy';
+  }
+
+  console.log(`${LOG_PREFIX} OpenAI TTS fallback: ${voiceId} -> ${openaiVoice}`);
+
+  const openai = new OpenAI();
+  const mp3Response = await openai.audio.speech.create({
+    model: 'tts-1',
+    voice: openaiVoice as any,
+    input: text,
+    response_format: 'mp3',
+  });
+
+  return Buffer.from(await mp3Response.arrayBuffer());
+}
+
 /**
  * Generate TTS audio for any text using the specified voice.
- * Unified audio generation using Google Cloud TTS High Quality voices.
+ * Primary: Google Cloud TTS. Fallback: OpenAI TTS.
  * Returns MP3 audio buffer.
  */
 export async function generateTTSAudio(
@@ -135,20 +172,30 @@ export async function generateTTSAudio(
 ): Promise<Buffer> {
   console.log(`${LOG_PREFIX} Generating unified TTS audio for ${provider}/${voiceId} (${text.length} chars)`);
 
-  // map everything to Google Cloud TTS for consistency and quality
+  // Try Google Cloud TTS first
   const voiceConfig = getGoogleVoiceConfig(voiceId);
   const googleVoiceName = voiceConfig.googleVoiceName;
   
   console.log(`${LOG_PREFIX} Voice mapping: ${voiceId} -> ${googleVoiceName} (${voiceConfig.displayName}, ${voiceConfig.gender})`);
 
   try {
-    // Use rate-limited + cached TTS service (prevents quota exceeded errors)
     const buffer = await synthesizeSpeechRateLimited(text, googleVoiceName, 'en-US', 'MP3');
     console.log(`${LOG_PREFIX} Generated TTS audio: ${buffer.length} bytes (Voice: ${googleVoiceName})`);
     return buffer;
-  } catch (error) {
-    console.error(`${LOG_PREFIX} TTS generation failed for ${voiceId}:`, error);
-    throw new Error(`Failed to generate TTS audio: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  } catch (googleError) {
+    console.warn(`${LOG_PREFIX} Google TTS failed for ${voiceId}, trying OpenAI fallback:`, googleError instanceof Error ? googleError.message : googleError);
+
+    try {
+      const buffer = await generateOpenAITTSFallback(text, voiceId, provider);
+      console.log(`${LOG_PREFIX} OpenAI TTS fallback succeeded: ${buffer.length} bytes`);
+      return buffer;
+    } catch (openaiError) {
+      console.error(`${LOG_PREFIX} Both TTS providers failed for ${voiceId}:`, {
+        google: googleError instanceof Error ? googleError.message : googleError,
+        openai: openaiError instanceof Error ? openaiError.message : openaiError,
+      });
+      throw new Error(`Voice preview unavailable: both Google TTS and OpenAI TTS failed. Check API credentials.`);
+    }
   }
 }
 

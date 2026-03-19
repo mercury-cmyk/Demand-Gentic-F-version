@@ -1025,10 +1025,10 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
   const selectedType = availableCampaignTypes.find(t => t.value === formData.campaignType);
   const selectedVoiceInfo = AI_VOICES.find(v => v.id === formData.selectedVoice);
 
-  const MALE_CORE_NAMES = ['Gabriel', 'Elias', 'Daniel', 'Adam', 'Amir'];
-  const MALE_EXPANDED_NAMES = ['Noah', 'Omar', 'Samuel', 'Isaac', 'Rayyan'];
-  const FEMALE_CORE_NAMES = ['Sophia', 'Miriam', 'Layla', 'Aisha', 'Hannah'];
-  const FEMALE_EXPANDED_NAMES = ['Zara', 'Nadia', 'Leila', 'Sara', 'Maryam'];
+  const MALE_CORE_NAMES = ['Chris'];
+  const MALE_EXPANDED_NAMES: string[] = [];
+  const FEMALE_CORE_NAMES = ['Christine'];
+  const FEMALE_EXPANDED_NAMES: string[] = [];
 
   const hashString = (input: string) => {
     let hash = 0;
