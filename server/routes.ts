@@ -150,6 +150,7 @@ import unifiedPipelineRouter from './routes/unified-pipeline-routes';
 import precisionLeadsRouter from './routes/precision-leads-routes';
 import financeProgramRouter from './routes/finance-program-routes';
 import googleCloudAccountsRouter from './routes/google-cloud-accounts-routes';
+import engagementTriggerRouter from './routes/engagement-trigger-routes';
 import openAiWebrtcRouter from './routes/openai-webrtc';
 // Old journey pipeline auto-enrollment removed — unified pipeline handles this via campaign-pipeline-orchestrator
 import { getArgyleFallbackPalette, resolveBrandPaletteForOrganization } from "./lib/brand-palette-resolver";
@@ -16611,6 +16612,9 @@ Provide JSON response with:
   // ==================== CAMPAIGN-PIPELINE ORCHESTRATOR ====================
   // Old campaign-pipeline routes removed — use /api/unified-pipelines instead
   app.use('/api/unified-pipelines', requireAuth, unifiedPipelineRouter);
+
+  // ==================== ENGAGEMENT TRIGGERS (cross-channel automation) ====================
+  app.use('/api/engagement-triggers', requireAuth, engagementTriggerRouter);
 
   // ==================== PRECISION LEADS (Kimi + DeepSeek dual-model) ====================
   app.use(precisionLeadsRouter);

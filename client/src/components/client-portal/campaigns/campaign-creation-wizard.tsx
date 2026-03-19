@@ -304,12 +304,12 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
       const existingSelectedVoices = Array.isArray(campaign.selectedVoices)
         ? campaign.selectedVoices.filter((v: string) => typeof v === 'string' && v.trim())
         : [];
-      const selectedVoice = campaign.selectedVoice || existingSelectedVoices[0] || 'Fenrir';
-      const selectedVoices = existingSelectedVoices.length > 0 ? existingSelectedVoices : [selectedVoice];
-      const selectedPersonaNames = selectedVoices.reduce<Record<string, string>>((acc, voiceId) => {
-        acc[voiceId] = campaign.selectedPersonaNames?.[voiceId] || resolveContextPersonaName(voiceId);
-        return acc;
-      }, {});
+      const selectedVoice: string = campaign.selectedVoice || existingSelectedVoices[0] || 'Fenrir';
+      const selectedVoices: string[] = existingSelectedVoices.length > 0 ? existingSelectedVoices : [selectedVoice];
+      const selectedPersonaNames: Record<string, string> = {};
+      for (const voiceId of selectedVoices) {
+        selectedPersonaNames[voiceId] = campaign.selectedPersonaNames?.[voiceId] || resolveContextPersonaName(voiceId);
+      }
 
       setFormData(prev => ({
         ...prev,
@@ -2130,7 +2130,7 @@ export function CampaignCreationWizard({ open, onOpenChange, onSuccess, mode = '
                                           {voice.gender}
                                         </Badge>
                                       </div>
-                                      <p className="text-sm text-muted-foreground">{voice.accent} English</p>
+                                      <p className="text-sm text-muted-foreground">{voice.tone}</p>
                                     </div>
                                   </div>
 

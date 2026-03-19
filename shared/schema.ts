@@ -16660,3 +16660,95 @@ export const insertUnifiedPipelineActionSchema = createInsertSchema(unifiedPipel
 export type UnifiedPipelineAction = typeof unifiedPipelineActions.$inferSelect;
 export type InsertUnifiedPipelineAction = typeof unifiedPipelineActions.$inferInsert;
 
+// ==================== ENGAGEMENT TRIGGERS ====================
+
+/**
+ * Engagement Trigger Status
+ */
+export const engagementTriggerStatusEnum = pgEnum('engagement_trigger_status', [
+  'pending',     // Trigger created, waiting to execute
+  'scheduled',   // Scheduled for a specific time
+  'executing',   // Currently being processed
+  'completed',   // Successfully executed
+  'failed',      // Execution failed
+  'cancelled',   // Manually cancelled
+  'skipped',     // Skipped (e.g., duplicate check, DNC)
+]);
+
+/**
+ * Engagement Trigger Channel
+ */
+export const engagementTriggerChannelEnum = pgEnum('engagement_trigger_channel', [
+  'call',
+  'email',
+]);
+
+/**
+ * Account Engagement Triggers — Cross-channel follow-up automation.
+ *
+ * Logic: If last engagement was a call → trigger email follow-up.
+ *        If last engagement was an email → trigger a call follow-up.
+ *
+ * Each row represents a single trigger action that fires based on the
+ * previous engagement channel flip.
+ */
+export const accountEngagementTriggers = pgTable("account_engagement_triggers", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`gen_random_uuid()`),
+  tenantId: varchar("tenant_id", { length: 36 }),
+
+  // Core references
+  accountId: varchar("account_id", { length: 36 })
+    .notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  contactId: varchar("contact_id", { length: 36 })
+    .notNull()
+    .references(() => contacts.id, { onDelete: 'cascade' }),
+  campaignId: varchar("campaign_id", { length: 36 })
+    .references(() => campaigns.id, { onDelete: 'set null' }),
+  pipelineId: varchar("pipeline_id", { length: 36 })
+    .references(() => pipelines.id, { onDelete: 'set null' }),
+
+  // Source engagement that triggered this action
+  sourceChannel: engagementTriggerChannelEnum("source_channel").notNull(),
+  sourceEntityId: varchar("source_entity_id", { length: 36 }), // call_attempt_id or email_message_id
+  sourceEngagedAt: timestamp("source_engaged_at", { withTimezone: true }).notNull(),
+
+  // Target action
+  targetChannel: engagementTriggerChannelEnum("target_channel").notNull(), // The opposite channel
+  status: engagementTriggerStatusEnum("status").default('pending').notNull(),
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }), // When to execute (null = ASAP)
+  executedAt: timestamp("executed_at", { withTimezone: true }),
+
+  // Execution result
+  resultEntityId: varchar("result_entity_id", { length: 36 }), // Created call_attempt_id or email_message_id
+  resultNotes: text("result_notes"),
+  errorMessage: text("error_message"),
+
+  // Context payload (email subject/body for email triggers, script for call triggers)
+  triggerPayload: jsonb("trigger_payload").$type<{
+    emailSubject?: string;
+    emailBody?: string;
+    emailTemplateId?: string;
+    callScript?: string;
+    callObjective?: string;
+    priority?: 'low' | 'normal' | 'high';
+    delayMinutes?: number;
+  }>().default({}),
+
+  createdBy: varchar("created_by", { length: 36 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  accountIdx: index("aet_account_idx").on(table.accountId),
+  contactIdx: index("aet_contact_idx").on(table.contactId),
+  campaignIdx: index("aet_campaign_idx").on(table.campaignId),
+  statusIdx: index("aet_status_idx").on(table.status),
+  scheduledIdx: index("aet_scheduled_idx").on(table.scheduledAt),
+  sourceChannelIdx: index("aet_source_channel_idx").on(table.sourceChannel),
+  targetChannelIdx: index("aet_target_channel_idx").on(table.targetChannel),
+}));
+
+export const insertAccountEngagementTriggerSchema = createInsertSchema(accountEngagementTriggers);
+export type AccountEngagementTrigger = typeof accountEngagementTriggers.$inferSelect;
+export type InsertAccountEngagementTrigger = typeof accountEngagementTriggers.$inferInsert;
+
