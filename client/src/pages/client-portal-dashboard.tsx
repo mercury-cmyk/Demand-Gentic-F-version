@@ -61,7 +61,6 @@ import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
 import { UnifiedPipelineTab } from '@/components/unified-pipeline';
-import { EngagementTriggersTab } from '@/components/client-portal/engagement-triggers';
 
 interface ClientUser {
   id: string;
@@ -274,6 +273,7 @@ const TAB_ALIASES: Record<string, string> = {
   'activations': 'campaigns',
   'analytics': 'overview',
   'leads': 'journey-pipeline',
+  'engagement-triggers': 'unified-pipelines',
 };
 
 function resolveTab(tab: string | null): string {
@@ -3007,17 +3007,7 @@ export default function ClientPortalDashboard() {
           </div>
         )}
 
-        {/* ==================== ENGAGEMENT TRIGGERS TAB ==================== */}
-        {activeTab === 'engagement-triggers' && user?.clientAccountId && (
-          <div className="space-y-6">
-            <EngagementTriggersTab
-              authHeaders={authHeaders}
-              clientAccountId={user.clientAccountId}
-            />
-          </div>
-        )}
-
-        {/* ==================== BILLING TAB ==================== */}
+{/* ==================== BILLING TAB ==================== */}
         {activeTab === 'billing' && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

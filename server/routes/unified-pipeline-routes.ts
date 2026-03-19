@@ -21,6 +21,7 @@ import {
   getPipelineDashboard,
   createPipelineAction,
   getPipelineAnalytics,
+  listPipelineActions,
 } from "../services/unified-pipeline-engine";
 import {
   generatePipelineStrategy,
@@ -344,6 +345,27 @@ router.post("/:id/accounts/:accountId/actions", requireAuth, async (req: Request
   } catch (error: any) {
     console.error("[UnifiedPipeline] Create action failed:", error);
     res.status(500).json({ error: error.message || "Failed to create action" });
+  }
+});
+
+// ─── Pipeline Actions List ────────────────────────────────────────────────────
+
+/**
+ * GET /api/unified-pipelines/:id/actions
+ * List all actions for this pipeline with status filtering and pagination
+ */
+router.get("/:id/actions", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { status, page, pageSize } = req.query;
+    const result = await listPipelineActions(req.params.id, {
+      status: status as string,
+      page: page ? parseInt(page as string, 10) : 1,
+      pageSize: pageSize ? Math.min(parseInt(pageSize as string, 10), 100) : 20,
+    });
+    res.json(result);
+  } catch (error: any) {
+    console.error("[UnifiedPipeline] List actions failed:", error);
+    res.status(500).json({ error: error.message || "Failed to list actions" });
   }
 });
 

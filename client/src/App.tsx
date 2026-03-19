@@ -140,6 +140,7 @@ const ClientPortalCostTracking = lazy(() => import("@/pages/client-portal-cost-t
 const ClientPortalLeadsExport = lazy(() => import("@/pages/client-portal-leads-export"));
 const ClientPortalRecordings = lazy(() => import("@/pages/client-portal-recordings"));
 const ClientPortalReportsExport = lazy(() => import("@/pages/client-portal-reports-export"));
+const ClientPortalUnifiedReports = lazy(() => import("@/pages/client-portal-unified-reports"));
 const ClientPortalEmailInbox = lazy(() => import("@/pages/client-portal-email-inbox"));
 import ClientPortalEmailCampaigns from "@/pages/client-portal-email-campaigns";
 import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
@@ -768,6 +769,11 @@ function Router() {
       <Route path="/client-portal/campaign-queue/:id">
         <ClientPortalProtectedRoute>
           <ClientPortalCampaignQueue />
+        </ClientPortalProtectedRoute>
+      </Route>
+      <Route path="/client-portal/reports">
+        <ClientPortalProtectedRoute>
+          <ClientPortalUnifiedReports />
         </ClientPortalProtectedRoute>
       </Route>
       <Route path="/client-portal/call-reports">

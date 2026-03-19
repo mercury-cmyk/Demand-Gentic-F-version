@@ -563,6 +563,38 @@ export async function createPipelineAction(params: {
   return action;
 }
 
+// ─── Pipeline Actions List ────────────────────────────────────────────────────
+
+export async function listPipelineActions(
+  pipelineId: string,
+  options: { status?: string; page?: number; pageSize?: number }
+) {
+  const page = options.page ?? 1;
+  const pageSize = Math.min(options.pageSize ?? 20, 100);
+  const offset = (page - 1) * pageSize;
+
+  const conditions = [eq(unifiedPipelineActions.pipelineId, pipelineId)];
+  if (options.status) {
+    conditions.push(eq(unifiedPipelineActions.status, options.status as any));
+  }
+
+  const [actions, [countRow]] = await Promise.all([
+    db
+      .select()
+      .from(unifiedPipelineActions)
+      .where(and(...conditions))
+      .orderBy(desc(unifiedPipelineActions.scheduledAt))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({ total: count() })
+      .from(unifiedPipelineActions)
+      .where(and(...conditions)),
+  ]);
+
+  return { actions, total: countRow?.total ?? 0 };
+}
+
 // ─── Pipeline Analytics ──────────────────────────────────────────────────────
 
 export async function getPipelineAnalytics(pipelineId: string) {

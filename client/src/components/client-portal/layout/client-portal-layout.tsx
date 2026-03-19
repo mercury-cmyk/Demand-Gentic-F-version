@@ -72,7 +72,6 @@ import {
   DollarSign,
   Download,
   Inbox,
-  Zap,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
@@ -134,6 +133,7 @@ const NAV_FEATURE_MAP: Record<string, string> = {
   '/client-portal/dashboard?tab=campaign-planner': 'ai_campaign_planner',
   '/client-portal/generative-studio': 'ai_studio_dashboard',
   '/client-portal/preview-studio': 'voice_simulation',
+  '/client-portal/reports': 'analytics_dashboard',
   '/client-portal/analytics': 'analytics_dashboard',
   '/client-portal/conversation-quality': 'analytics_dashboard',
   '/client-portal/showcase-calls': 'analytics_dashboard',
@@ -164,8 +164,7 @@ const baseNavigationGroups: NavGroup[] = [
     items: [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
       { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
-      { name: 'Pipelines', href: '/client-portal/dashboard?tab=unified-pipelines', icon: Workflow, highlighted: true },
-      { name: 'Engagement Triggers', href: '/client-portal/dashboard?tab=engagement-triggers', icon: Zap, highlighted: true },
+      { name: 'Pipeline & Engagement', href: '/client-portal/dashboard?tab=unified-pipelines', icon: Workflow, highlighted: true },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
       // { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
       // { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
@@ -189,13 +188,9 @@ const baseNavigationGroups: NavGroup[] = [
     id: 'analytics',
     label: 'Analytics & Insights',
     items: [
-      { name: 'Analytics', href: '/client-portal/analytics', icon: BarChart3 },
-      { name: 'Conversation Quality', href: '/client-portal/conversation-quality', icon: MessageSquareText },
+      { name: 'Reports & Analytics', href: '/client-portal/reports', icon: BarChart3, highlighted: true },
       { name: 'Showcase Calls', href: '/client-portal/showcase-calls', icon: Trophy },
       { name: 'Disposition Intelligence', href: '/client-portal/disposition-intelligence', icon: Target },
-      { name: 'Call Reports', href: '/client-portal/call-reports', icon: Phone },
-      { name: 'Recordings', href: '/client-portal/recordings', icon: Mic },
-      { name: 'Reports & Export', href: '/client-portal/reports-export', icon: FileText },
     ],
   },
   {
@@ -203,7 +198,6 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'Billing',
     items: [
       { name: 'Billing & Invoices', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
-      { name: 'Cost Tracking', href: '/client-portal/cost-tracking', icon: DollarSign },
     ],
   },
   {
@@ -476,8 +470,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         overview: 'Overview',
         campaigns: 'All Campaigns',
         leads: 'Lead Pipeline',
-        'unified-pipelines': 'Pipelines',
-        'engagement-triggers': 'Engagement Triggers',
+        'unified-pipelines': 'Pipeline & Engagement',
         'work-orders': 'Work Orders',
         bookings: 'Bookings',
         'target-markets': 'Target Markets',
@@ -492,6 +485,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     if (location.startsWith('/client-portal/generative-studio')) return 'Creative Studio';
     if (location.startsWith('/client-portal/intelligence')) return 'Organization Intelligence';
     if (location.startsWith('/client-portal/analytics')) return 'Analytics';
+    if (location.startsWith('/client-portal/reports')) return 'Reports & Analytics';
     if (location.startsWith('/client-portal/conversation-quality')) return 'Conversation Quality';
     if (location.startsWith('/client-portal/showcase-calls')) return 'Showcase Calls';
     if (location.startsWith('/client-portal/agents')) return 'The Agentic Council';
