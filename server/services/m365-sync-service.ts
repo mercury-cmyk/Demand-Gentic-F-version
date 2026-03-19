@@ -437,7 +437,16 @@ export class M365SyncService {
       trackingMessageId = `sent-${Date.now()}`;
     } else {
       trackingMessageId = `sent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const trackingEmail = toRecipients.length > 0 ? toRecipients[0].emailAddress.address : mailboxAccount.mailboxEmail || '';
+      // When sending to multiple recipients in a single email (To + CC), we cannot attribute
+      // opens to a specific person — use empty string so opens are recorded as unattributed
+      // rather than incorrectly attributed to the first To address.
+      const allRecipientAddresses = [
+        ...toRecipients.map(r => r.emailAddress.address),
+        ...ccRecipients.map(r => r.emailAddress.address),
+      ].filter(Boolean);
+      const trackingEmail = allRecipientAddresses.length === 1
+        ? allRecipientAddresses[0]
+        : '';
       trackedBody = emailTrackingService.applyTracking(emailData.body, {
         messageId: trackingMessageId,
         recipientEmail: trackingEmail,

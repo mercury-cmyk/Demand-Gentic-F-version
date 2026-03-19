@@ -367,7 +367,8 @@ export class EmailTrackingService {
     try {
       const opens = await db.select({
         totalOpens: sql<number>`COUNT(*)::int`,
-        uniqueOpens: sql<number>`COUNT(DISTINCT ${emailOpens.recipientEmail})::int`,
+        // Only count non-empty recipient emails as distinct openers; empty = group-send unattributed
+        uniqueOpens: sql<number>`COUNT(DISTINCT CASE WHEN ${emailOpens.recipientEmail} != '' THEN ${emailOpens.recipientEmail} END)::int`,
         lastOpened: sql<Date | null>`MAX(${emailOpens.openedAt})`,
       })
         .from(emailOpens)
@@ -422,7 +423,8 @@ export class EmailTrackingService {
       const opensData = await db.select({
         messageId: emailOpens.messageId,
         totalOpens: sql<number>`COUNT(*)::int`,
-        uniqueOpens: sql<number>`COUNT(DISTINCT ${emailOpens.recipientEmail})::int`,
+        // Only count non-empty recipient emails as distinct openers; empty = group-send unattributed
+        uniqueOpens: sql<number>`COUNT(DISTINCT CASE WHEN ${emailOpens.recipientEmail} != '' THEN ${emailOpens.recipientEmail} END)::int`,
         lastOpened: sql<Date | null>`MAX(${emailOpens.openedAt})`,
       })
         .from(emailOpens)

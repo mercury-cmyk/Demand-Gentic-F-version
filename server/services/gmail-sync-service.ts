@@ -441,9 +441,16 @@ export class GmailSyncService {
       trackedBody = emailData.body;
     } else {
       const trackingMessageId = `sent-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      // When sending to multiple recipients in a single email (To + CC), we cannot attribute
+      // opens to a specific person — use empty string so opens are recorded as unattributed
+      // rather than incorrectly attributed to the first To address.
+      const toAddresses = emailData.to.split(",").map(e => e.trim()).filter(Boolean);
+      const ccAddresses = emailData.cc ? emailData.cc.split(",").map(e => e.trim()).filter(Boolean) : [];
+      const allAddresses = [...toAddresses, ...ccAddresses];
+      const trackingEmail = allAddresses.length === 1 ? allAddresses[0] : '';
       trackedBody = emailTrackingService.applyTracking(emailData.body, {
         messageId: trackingMessageId,
-        recipientEmail: emailData.to.split(",")[0]?.trim() || mailboxAccount.mailboxEmail || "",
+        recipientEmail: trackingEmail,
       });
     }
 

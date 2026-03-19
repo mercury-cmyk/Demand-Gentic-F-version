@@ -1923,7 +1923,7 @@ export default function InboxPage() {
         </div>
 
         {/* Email Detail Panel */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {selectedEmail ? (
             <>
               {/* Email Header */}
@@ -2017,6 +2017,9 @@ export default function InboxPage() {
                   )}
                 </div>
               </div>
+
+              {/* Scrollable content: engagement panels + email body */}
+              <div className="flex-1 min-h-0 overflow-y-auto">
 
               {/* Email Engagement Tracking Panel */}
               {trackingStats && (
@@ -2148,7 +2151,7 @@ export default function InboxPage() {
                                       {evt.openedAt ? format(new Date(evt.openedAt), 'MMM d, h:mm a') : '—'}
                                     </span>
                                     <span className="font-medium text-foreground truncate max-w-[180px]" title={evt.recipientEmail || ''}>
-                                      {evt.recipientEmail || '—'}
+                                      {evt.recipientEmail || <span className="text-muted-foreground italic">unknown (group send)</span>}
                                     </span>
                                     <span className="flex items-center gap-1 w-16 flex-shrink-0">
                                       {evt.deviceType === 'mobile' ? <Smartphone className="h-3 w-3" /> :
@@ -2181,7 +2184,7 @@ export default function InboxPage() {
                                       {evt.clickedAt ? format(new Date(evt.clickedAt), 'MMM d, h:mm a') : '—'}
                                     </span>
                                     <span className="font-medium text-foreground truncate max-w-[180px]" title={evt.recipientEmail || ''}>
-                                      {evt.recipientEmail || '—'}
+                                      {evt.recipientEmail || <span className="text-muted-foreground italic">unknown (group send)</span>}
                                     </span>
                                     <span className="flex items-center gap-1 w-16 flex-shrink-0">
                                       {evt.deviceType === 'mobile' ? <Smartphone className="h-3 w-3" /> :
@@ -2212,7 +2215,7 @@ export default function InboxPage() {
               )}
 
               {/* Email Body */}
-              <div className="flex-1 min-h-0 overflow-y-auto p-6">
+              <div className="p-6">
                 {selectedEmail.bodyHtml ? (
                   <div
                     className="prose prose-sm dark:prose-invert max-w-none"
@@ -2224,6 +2227,8 @@ export default function InboxPage() {
                   </div>
                 )}
               </div>
+
+              </div>{/* end scrollable content */}
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center">
