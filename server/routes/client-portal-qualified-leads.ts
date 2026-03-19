@@ -4,7 +4,7 @@ import { leads, campaigns, callSessions, clientCampaignAccess, contacts, account
 import { eq, and, isNotNull, desc, asc, inArray, like, or, sql } from 'drizzle-orm';
 import { requireAuth } from '../auth';
 import jwt from 'jsonwebtoken';
-import { resolvePlayableRecordingUrl } from '../lib/recording-url-policy';
+import { resolvePlayableRecordingUrl, buildCanonicalGcsUrlFromKey, canonicalizeGcsRecordingUrl } from '../lib/recording-url-policy';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "development-secret-key-change-in-production";
@@ -121,12 +121,18 @@ router.get('/', requireAuth, async (req, res) => {
           recordingS3Key: l.recordingS3Key,
           recordingUrl: l.recordingUrl,
         });
+        // Canonical GCS URL (permanent, non-presigned) — always available when storage key exists
+        const gcsRecordingUrl =
+          buildCanonicalGcsUrlFromKey(l.recordingS3Key) ||
+          canonicalizeGcsRecordingUrl({ recordingUrl: l.recordingUrl, recordingS3Key: l.recordingS3Key });
+        const hasRecording = !!(playableRecordingUrl || gcsRecordingUrl);
         return {
           ...l,
-          recordingUrl: playableRecordingUrl,
-          hasRecording: !!playableRecordingUrl,
+          recordingUrl: playableRecordingUrl || gcsRecordingUrl,
+          gcsRecordingUrl,
+          hasRecording,
           hasTranscript: !!l.hasTranscript,
-          recordingAvailable: !!playableRecordingUrl,
+          recordingAvailable: hasRecording,
         };
       }),
       total,

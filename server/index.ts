@@ -639,6 +639,11 @@ if (isMainModule) {
       } else {
         console.log("[BackgroundJobs] Skipped - Redis not configured (set REDIS_URL or REDIS_URL_PROD)");
       }
+
+      // Start Action Executor Worker — polls and executes scheduled engagement
+      // triggers and unified pipeline actions (no Redis required)
+      const { startActionExecutorWorker } = await import("./services/action-executor-worker");
+      startActionExecutorWorker();
       
       // Initialize CSV import queue and worker (BullMQ)
       if (hasRedis) {

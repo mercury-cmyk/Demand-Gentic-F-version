@@ -4104,10 +4104,12 @@ export class DatabaseStorage implements IStorage {
   async approveLead(id: string, approvedById: string): Promise<Lead | undefined> {
     const [lead] = await db
       .update(leads)
-      .set({ 
-        qaStatus: 'approved', 
+      .set({
+        qaStatus: 'approved',
         approvedAt: new Date(),
         approvedById,
+        submittedToClient: true,
+        submittedAt: new Date(),
         updatedAt: new Date()
       })
       .where(eq(leads.id, id))

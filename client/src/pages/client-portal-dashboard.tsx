@@ -61,6 +61,7 @@ import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
 import { UnifiedPipelineTab } from '@/components/unified-pipeline';
+import { EngagementTriggersTab } from '@/components/client-portal/engagement-triggers';
 
 interface ClientUser {
   id: string;
@@ -3000,6 +3001,16 @@ export default function ClientPortalDashboard() {
         {activeTab === 'unified-pipelines' && user?.clientAccountId && (
           <div className="space-y-6">
             <UnifiedPipelineTab
+              authHeaders={authHeaders}
+              clientAccountId={user.clientAccountId}
+            />
+          </div>
+        )}
+
+        {/* ==================== ENGAGEMENT TRIGGERS TAB ==================== */}
+        {activeTab === 'engagement-triggers' && user?.clientAccountId && (
+          <div className="space-y-6">
+            <EngagementTriggersTab
               authHeaders={authHeaders}
               clientAccountId={user.clientAccountId}
             />

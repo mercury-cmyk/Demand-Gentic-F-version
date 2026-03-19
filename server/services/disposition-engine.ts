@@ -41,6 +41,7 @@ import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recordin
 import callQualityTracker from "./call-quality-tracker";
 import { telnyxNumbers } from "@shared/number-pool-schema";
 import { processEmailEngagement, type EngagementSignal } from "./campaign-pipeline-orchestrator";
+import { processEngagementEvent } from "./engagement-trigger-service";
 
 // Campaign rules interface (stored in campaign.config)
 interface CampaignRules {
@@ -608,6 +609,43 @@ export async function processDisposition(
         }
       });
       result.actions.push(`Pipeline engagement signal emitted: ${engagementSignal}`);
+    }
+
+    // ── Engagement Trigger: auto-create cross-channel follow-up ──
+    // After a call disposition, create an email follow-up trigger.
+    // This runs async to avoid blocking disposition processing.
+    if (callAttempt.contactId && callAttempt.campaignId) {
+      setImmediate(async () => {
+        try {
+          // Look up the contact's accountId
+          const [contact] = await db
+            .select({ accountId: contacts.accountId })
+            .from(contacts)
+            .where(eq(contacts.id, callAttempt.contactId!))
+            .limit(1);
+
+          if (contact?.accountId) {
+            const triggerResult = await processEngagementEvent({
+              accountId: contact.accountId,
+              contactId: callAttempt.contactId!,
+              campaignId: callAttempt.campaignId!,
+              channel: 'call',
+              entityId: callAttemptId,
+              engagedAt: new Date(),
+              metadata: {
+                disposition: finalDisposition,
+                callDuration: callAttempt.callDurationSeconds ?? undefined,
+              },
+            });
+            if (triggerResult) {
+              console.log(`[DispositionEngine] Engagement trigger created: ${triggerResult.triggerId} (${triggerResult.targetChannel} scheduled at ${triggerResult.scheduledAt?.toISOString()})`);
+            }
+          }
+        } catch (triggerErr) {
+          console.warn(`[DispositionEngine] Engagement trigger creation failed:`, triggerErr);
+        }
+      });
+      result.actions.push(`Engagement trigger queued: call→email follow-up`);
     }
 
     result.success = result.errors.length === 0;

@@ -2,6 +2,7 @@ import { db } from "../db";
 import { leads, campaigns, contacts, accounts, orderCampaignLinks, campaignOrders, exportTemplates } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { applyExportTemplate } from "../lib/apply-export-template";
+import { buildCanonicalGcsUrlFromKey, canonicalizeGcsRecordingUrl } from "../lib/recording-url-policy";
 
 interface LeadDeliveryResult {
   success: boolean;
@@ -96,6 +97,11 @@ export async function triggerLeadDelivery(leadId: string): Promise<LeadDeliveryR
       ? await db.select().from(accounts).where(eq(accounts.id, contact.accountId)).limit(1)
       : [];
 
+    // Resolve GCS recording URL for delivery payload
+    const gcsRecordingUrl =
+      buildCanonicalGcsUrlFromKey(lead.recordingS3Key) ||
+      canonicalizeGcsRecordingUrl({ recordingUrl: lead.recordingUrl, recordingS3Key: lead.recordingS3Key });
+
     // Get export template if configured in campaign
     let formattedData: any = {
       leadId: lead.id,
@@ -103,6 +109,7 @@ export async function triggerLeadDelivery(leadId: string): Promise<LeadDeliveryR
       campaignName: campaign.name,
       qaStatus: lead.qaStatus,
       approvedAt: lead.approvedAt,
+      gcsRecordingUrl: gcsRecordingUrl || null,
       contact: contact || null,
       account: account || null,
       lead: lead

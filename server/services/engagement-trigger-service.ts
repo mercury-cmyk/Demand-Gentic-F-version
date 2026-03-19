@@ -18,10 +18,11 @@ import {
   callFollowupEmails,
   dealActivities,
   pipelineAccounts,
+  unifiedPipelineAccounts,
   type AccountEngagementTrigger,
   type InsertAccountEngagementTrigger,
 } from '@shared/schema';
-import { eq, and, desc, sql, or, inArray, isNotNull, count } from 'drizzle-orm';
+import { eq, and, desc, sql, or, inArray, isNotNull, count, gte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 const LOG_PREFIX = '[EngagementTrigger]';
@@ -70,23 +71,137 @@ export interface PipelineLeadView {
   createdAt: string | null;
 }
 
+// ==================== STAGE-AWARE DELAY RULES ====================
+
+type FunnelStage = 'target' | 'outreach' | 'engaged' | 'qualifying' | 'qualified' | 'appointment_set';
+
+/**
+ * Stage-aware delays (minutes) for cross-channel follow-ups.
+ * Higher-intent stages get faster follow-up to capitalize on momentum.
+ */
+const STAGE_DELAY_MATRIX: Record<FunnelStage, { emailDelayMin: number; callDelayMin: number }> = {
+  target:          { emailDelayMin: 120,  callDelayMin: 240 },  // Cold — slow drip
+  outreach:        { emailDelayMin: 30,   callDelayMin: 120 },  // Active outreach — standard pace
+  engaged:         { emailDelayMin: 15,   callDelayMin: 60 },   // Responding — move faster
+  qualifying:      { emailDelayMin: 10,   callDelayMin: 30 },   // In qualification — strike while hot
+  qualified:       { emailDelayMin: 5,    callDelayMin: 15 },   // High intent — immediate follow-up
+  appointment_set: { emailDelayMin: 5,    callDelayMin: 10 },   // Pre-meeting — rapid confirmation
+};
+
+const DEFAULT_STAGE_DELAYS = STAGE_DELAY_MATRIX.outreach;
+
+// ==================== GOVERNANCE CONTROLS ====================
+
+/** Max engagement touches per account per day across all channels */
+const MAX_DAILY_TOUCHES_PER_ACCOUNT = 4;
+
+/** Business hours (UTC). Triggers outside this window are deferred to next business morning. */
+const BUSINESS_HOURS = { startHour: 13, endHour: 22 }; // 8 AM - 5 PM ET (UTC-5)
+
+/** Days of week allowed (0=Sun, 6=Sat). Mon-Fri only. */
+const BUSINESS_DAYS = [1, 2, 3, 4, 5];
+
+/**
+ * Check if a given time falls within business hours.
+ * If not, return the next available business hour.
+ */
+function adjustToBusinessHours(scheduledAt: Date): Date {
+  const dt = new Date(scheduledAt);
+  const hour = dt.getUTCHours();
+  const day = dt.getUTCDay();
+
+  // Check if within business hours and business days
+  if (BUSINESS_DAYS.includes(day) && hour >= BUSINESS_HOURS.startHour && hour < BUSINESS_HOURS.endHour) {
+    return dt;
+  }
+
+  // Advance to next business day at start hour
+  const next = new Date(dt);
+  if (hour >= BUSINESS_HOURS.endHour || !BUSINESS_DAYS.includes(day)) {
+    // Move to next day
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  // Skip weekends
+  while (!BUSINESS_DAYS.includes(next.getUTCDay())) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  next.setUTCHours(BUSINESS_HOURS.startHour, 0, 0, 0);
+  return next;
+}
+
+/**
+ * Check daily touch count for an account.
+ * Returns true if the account has NOT exceeded the daily limit.
+ */
+async function canTouchAccount(accountId: string): Promise<boolean> {
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const [result] = await db
+    .select({ total: count() })
+    .from(accountEngagementTriggers)
+    .where(and(
+      eq(accountEngagementTriggers.accountId, accountId),
+      inArray(accountEngagementTriggers.status, ['scheduled', 'executing', 'completed']),
+      gte(accountEngagementTriggers.createdAt, todayStart),
+    ));
+
+  return (result?.total ?? 0) < MAX_DAILY_TOUCHES_PER_ACCOUNT;
+}
+
+/**
+ * Look up the current funnel stage for an account.
+ */
+async function getAccountFunnelStage(accountId: string): Promise<FunnelStage> {
+  const [pipelineAccount] = await db
+    .select({ funnelStage: unifiedPipelineAccounts.funnelStage })
+    .from(unifiedPipelineAccounts)
+    .where(eq(unifiedPipelineAccounts.accountId, accountId))
+    .orderBy(desc(unifiedPipelineAccounts.updatedAt))
+    .limit(1);
+
+  return (pipelineAccount?.funnelStage as FunnelStage) ?? 'outreach';
+}
+
 // ==================== CORE TRIGGER LOGIC ====================
 
 /**
  * Process an engagement event and create the cross-channel trigger.
  * Call → Email follow-up | Email → Call follow-up.
+ *
+ * Applies:
+ * - Stage-aware delay rules (higher-intent stages = faster follow-up)
+ * - Governance: max daily touches per account
+ * - Business hours enforcement (defers to next business morning if OOB)
  */
 export async function processEngagementEvent(event: EngagementEvent): Promise<TriggerResult | null> {
   const targetChannel = event.channel === 'call' ? 'email' : 'call';
 
   console.log(`${LOG_PREFIX} Processing ${event.channel} engagement for account=${event.accountId}, contact=${event.contactId} → trigger ${targetChannel}`);
 
+  // GOVERNANCE: Check daily touch limit
+  const allowed = await canTouchAccount(event.accountId);
+  if (!allowed) {
+    console.log(`${LOG_PREFIX} ⏭️ Skipped — account ${event.accountId} exceeded max daily touches (${MAX_DAILY_TOUCHES_PER_ACCOUNT})`);
+    return null;
+  }
+
+  // Stage-aware delay lookup
+  const stage = await getAccountFunnelStage(event.accountId);
+  const stageDelays = STAGE_DELAY_MATRIX[stage] ?? DEFAULT_STAGE_DELAYS;
+
   // Build trigger payload based on target channel
   const triggerPayload = buildTriggerPayload(event, targetChannel);
 
-  // Default delay: 30 min for email after call, 2 hours for call after email
-  const delayMinutes = triggerPayload.delayMinutes ?? (targetChannel === 'email' ? 30 : 120);
-  const scheduledAt = new Date(Date.now() + delayMinutes * 60_000);
+  // Priority override: high-priority dispositions use shorter delay
+  const dispositionOverride = triggerPayload.delayMinutes;
+  const baseDelay = targetChannel === 'email' ? stageDelays.emailDelayMin : stageDelays.callDelayMin;
+  const delayMinutes = dispositionOverride != null ? Math.min(dispositionOverride, baseDelay) : baseDelay;
+
+  let scheduledAt = new Date(Date.now() + delayMinutes * 60_000);
+
+  // GOVERNANCE: Enforce business hours
+  scheduledAt = adjustToBusinessHours(scheduledAt);
 
   const triggerId = uuidv4();
 
@@ -105,7 +220,7 @@ export async function processEngagementEvent(event: EngagementEvent): Promise<Tr
     triggerPayload,
   }).returning();
 
-  console.log(`${LOG_PREFIX} Created trigger ${triggerId}: ${event.channel}→${targetChannel}, scheduled for ${scheduledAt.toISOString()}`);
+  console.log(`${LOG_PREFIX} Created trigger ${triggerId}: ${event.channel}→${targetChannel}, stage=${stage}, delay=${delayMinutes}min, scheduled=${scheduledAt.toISOString()}`);
 
   return {
     triggerId: trigger.id,
@@ -187,7 +302,7 @@ export async function getPipelineQualifiedLeads(options: {
       campaignId: leads.campaignId,
       campaignName: campaigns.name,
       aiScore: leads.aiScore,
-      disposition: leads.disposition,
+      qualificationStatus: leads.aiQualificationStatus,
       createdAt: leads.createdAt,
       // Latest trigger info via lateral subquery
       lastTriggerId: accountEngagementTriggers.id,
@@ -226,7 +341,7 @@ export async function getPipelineQualifiedLeads(options: {
     campaignId: row.campaignId,
     campaignName: row.campaignName,
     aiScore: row.aiScore,
-    disposition: row.disposition,
+    disposition: row.qualificationStatus,
     lastEngagementChannel: row.lastTriggerSourceChannel,
     lastEngagementAt: row.lastTriggerSourceEngagedAt?.toISOString() ?? null,
     nextAction: row.lastTriggerTargetChannel,

@@ -351,11 +351,14 @@ function formatPhoneForTelnyx(value: string | null | undefined): string | undefi
 }
 
 export function resolveQualifiedLeadRecordingUrl(
-  _recordingUrl: string | null | undefined,
-  _recordingS3Key: string | null | undefined,
+  recordingUrl: string | null | undefined,
+  recordingS3Key: string | null | undefined,
 ): string | null {
-  // Client portal must not expose raw storage URLs to browsers.
-  return null;
+  // Prefer canonical GCS URL built from S3 key (permanent storage)
+  const fromKey = buildCanonicalGcsUrlFromKey(recordingS3Key);
+  if (fromKey) return fromKey;
+  // Fall back to canonicalized recording URL only if it is a GCS URL
+  return canonicalizeGcsRecordingUrl({ recordingUrl, recordingS3Key });
 }
 
 declare global {
@@ -2843,7 +2846,10 @@ router.get('/qualified-leads/:id', requireClientAuth, async (req, res) => {
     // Include recording URL only if visibility is enabled
     if (visibilitySettings.showRecordings !== false) {
       // Always prefer canonical GCS URL when a storage key exists.
-      response.recordingUrl = resolveQualifiedLeadRecordingUrl(lead.recordingUrl, lead.recordingS3Key);
+      const resolvedRecordingUrl = resolveQualifiedLeadRecordingUrl(lead.recordingUrl, lead.recordingS3Key);
+      response.recordingUrl = resolvedRecordingUrl;
+      // Expose the canonical GCS URL explicitly so clients can store/link directly
+      response.gcsRecordingUrl = resolvedRecordingUrl;
       response.recordingS3Key = lead.recordingS3Key;
       response.transcript = lead.transcript;
       response.structuredTranscript = lead.structuredTranscript;
