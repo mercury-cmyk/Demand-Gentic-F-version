@@ -9,11 +9,11 @@ export interface GeminiPersonaProfile {
   prompt: string;
 }
 
-const MALE_CORE = ['Gabriel', 'Elias', 'Daniel', 'Adam', 'Amir'] as const;
-const MALE_EXPANDED = ['Noah', 'Omar', 'Samuel', 'Isaac', 'Rayyan'] as const;
+const MALE_CORE = ['Chris'] as const;
+const MALE_EXPANDED = [] as const;
 
-const FEMALE_CORE = ['Sophia', 'Miriam', 'Layla', 'Aisha', 'Hannah'] as const;
-const FEMALE_EXPANDED = ['Zara', 'Nadia', 'Leila', 'Sara', 'Maryam'] as const;
+const FEMALE_CORE = ['Christine'] as const;
+const FEMALE_EXPANDED = [] as const;
 
 function hashString(input: string): number {
   let hash = 0;
