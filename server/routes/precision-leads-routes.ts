@@ -106,29 +106,32 @@ router.get("/api/precision-leads", requireAuth, async (req: Request, res: Respon
 
     const total = Number(countRow?.count || 0);
 
-    // Sort
+    // Sort — always fall back to processedAt desc so nulls in priorityRank don't hide rows
     let orderClause: any;
     switch (sortBy) {
       case "confidence":
         orderClause = sortOrder === "asc"
-          ? asc(precisionLeadAnalyses.consensusConfidence)
-          : desc(precisionLeadAnalyses.consensusConfidence);
+          ? [asc(precisionLeadAnalyses.consensusConfidence), desc(precisionLeadAnalyses.processedAt)]
+          : [desc(precisionLeadAnalyses.consensusConfidence), desc(precisionLeadAnalyses.processedAt)];
         break;
       case "intent":
         orderClause = sortOrder === "asc"
-          ? asc(precisionLeadAnalyses.consensusIntentScore)
-          : desc(precisionLeadAnalyses.consensusIntentScore);
+          ? [asc(precisionLeadAnalyses.consensusIntentScore), desc(precisionLeadAnalyses.processedAt)]
+          : [desc(precisionLeadAnalyses.consensusIntentScore), desc(precisionLeadAnalyses.processedAt)];
         break;
       case "date":
         orderClause = sortOrder === "asc"
-          ? asc(precisionLeadAnalyses.processedAt)
-          : desc(precisionLeadAnalyses.processedAt);
+          ? [asc(precisionLeadAnalyses.processedAt)]
+          : [desc(precisionLeadAnalyses.processedAt)];
         break;
       case "priority":
       default:
-        orderClause = sortOrder === "asc"
-          ? asc(precisionLeadAnalyses.priorityRank)
-          : desc(precisionLeadAnalyses.priorityRank);
+        // priorityRank may be null — sort nulls last, fall back to intent score desc
+        orderClause = [
+          sql`${precisionLeadAnalyses.priorityRank} asc nulls last`,
+          desc(precisionLeadAnalyses.consensusIntentScore),
+          desc(precisionLeadAnalyses.processedAt),
+        ];
         break;
     }
 
@@ -178,7 +181,7 @@ router.get("/api/precision-leads", requireAuth, async (req: Request, res: Respon
       .leftJoin(campaigns, eq(precisionLeadAnalyses.campaignId, campaigns.id))
       .leftJoin(callSessions, eq(precisionLeadAnalyses.callSessionId, callSessions.id))
       .where(whereClause)
-      .orderBy(orderClause)
+      .orderBy(...(Array.isArray(orderClause) ? orderClause : [orderClause]))
       .limit(limitNum)
       .offset(offset);
 

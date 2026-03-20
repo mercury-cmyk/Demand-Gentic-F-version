@@ -196,12 +196,12 @@ export default function PrecisionLeadsPanel() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({
     campaignId: 'all',
-    verdict: 'high_potential,likely_potential,review',
+    verdict: 'all',
     search: '',
     minConfidence: '',
     recommendedAction: 'all',
-    sortBy: 'priority',
-    sortOrder: 'asc',
+    sortBy: 'intent',
+    sortOrder: 'desc',
   });
 
   // Fetch campaigns
@@ -343,19 +343,45 @@ export default function PrecisionLeadsPanel() {
       {/* Stats Cards */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          {/* "All" card */}
+          <Card
+            className={cn('cursor-pointer hover:shadow-md transition-all border-2',
+              filters.verdict === 'all' ? 'border-primary shadow-md' : 'border-transparent'
+            )}
+            onClick={() => { setFilters(f => ({ ...f, verdict: 'all' })); setPage(1); setSelectedId(null); }}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Target className="h-4 w-4 text-primary" />
+                <span className="text-xs font-medium text-primary">All Analyzed</span>
+              </div>
+              <div className="text-2xl font-bold">{stats.total}</div>
+              <div className="text-xs text-muted-foreground">Click to view all</div>
+            </CardContent>
+          </Card>
+
           {stats.verdictBreakdown.map((v) => {
             const config = VERDICT_CONFIG[v.verdict] || VERDICT_CONFIG.review;
             const Icon = config.icon;
+            const isActive = filters.verdict === v.verdict;
             return (
-              <Card key={v.verdict} className={cn('cursor-pointer hover:shadow-md transition-shadow', config.bg)}
-                onClick={() => { setFilters(f => ({ ...f, verdict: v.verdict })); setPage(1); }}>
+              <Card
+                key={v.verdict}
+                className={cn(
+                  'cursor-pointer hover:shadow-md transition-all border-2',
+                  config.bg,
+                  isActive ? 'border-current shadow-md ring-2 ring-offset-1' : 'border-transparent',
+                )}
+                onClick={() => { setFilters(f => ({ ...f, verdict: v.verdict })); setPage(1); setSelectedId(null); }}
+              >
                 <CardContent className="p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <Icon className={cn('h-4 w-4', config.color)} />
                     <span className={cn('text-xs font-medium', config.color)}>{config.label}</span>
                   </div>
-                  <div className="text-2xl font-bold">{v.count}</div>
+                  <div className={cn('text-2xl font-bold', config.color)}>{v.count}</div>
                   <div className="text-xs text-muted-foreground">Avg intent: {v.avgIntent}%</div>
+                  {isActive && <div className="text-[10px] font-medium text-muted-foreground mt-0.5">▼ showing below</div>}
                 </CardContent>
               </Card>
             );
@@ -397,13 +423,13 @@ export default function PrecisionLeadsPanel() {
           </SelectContent>
         </Select>
 
-        <Select value={filters.verdict} onValueChange={(v) => { setFilters(f => ({ ...f, verdict: v })); setPage(1); }}>
+        <Select value={filters.verdict} onValueChange={(v) => { setFilters(f => ({ ...f, verdict: v })); setPage(1); setSelectedId(null); }}>
           <SelectTrigger className="w-[180px] h-9">
             <SelectValue placeholder="Verdict" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Verdicts</SelectItem>
-            <SelectItem value="high_potential,likely_potential,review">Actionable Only</SelectItem>
+            <SelectItem value="high_potential,likely_potential">High + Likely</SelectItem>
             <SelectItem value="high_potential">High Potential</SelectItem>
             <SelectItem value="likely_potential">Likely Potential</SelectItem>
             <SelectItem value="review">Needs Review</SelectItem>
@@ -428,10 +454,10 @@ export default function PrecisionLeadsPanel() {
             <SelectValue placeholder="Sort by" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="priority">Priority</SelectItem>
-            <SelectItem value="confidence">Confidence</SelectItem>
-            <SelectItem value="intent">Intent</SelectItem>
-            <SelectItem value="date">Date</SelectItem>
+            <SelectItem value="intent">Intent Score ↓</SelectItem>
+            <SelectItem value="confidence">Confidence ↓</SelectItem>
+            <SelectItem value="priority">Priority Rank</SelectItem>
+            <SelectItem value="date">Date ↓</SelectItem>
           </SelectContent>
         </Select>
 
