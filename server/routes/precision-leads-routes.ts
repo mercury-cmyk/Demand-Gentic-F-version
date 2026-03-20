@@ -126,9 +126,9 @@ router.get("/api/precision-leads", requireAuth, async (req: Request, res: Respon
         break;
       case "priority":
       default:
-        // priorityRank may be null — sort nulls last, fall back to intent score desc
+        // priorityRank may be null — COALESCE to high value so nulls sort last
         orderClause = [
-          sql`${precisionLeadAnalyses.priorityRank} asc nulls last`,
+          asc(sql`COALESCE(${precisionLeadAnalyses.priorityRank}, 99999)`),
           desc(precisionLeadAnalyses.consensusIntentScore),
           desc(precisionLeadAnalyses.processedAt),
         ];
