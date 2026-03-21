@@ -269,6 +269,7 @@ function buildTriggerPayload(
  */
 export async function getPipelineQualifiedLeads(options: {
   campaignId?: string;
+  campaignIds?: string[];
   accountId?: string;
   status?: string;
   page?: number;
@@ -280,6 +281,11 @@ export async function getPipelineQualifiedLeads(options: {
   const pageSize = Math.min(options.pageSize ?? 25, 200);
   const offset = (page - 1) * pageSize;
 
+  // If client-scoped but has no campaigns, return empty
+  if (options.campaignIds && options.campaignIds.length === 0) {
+    return { leads: [], total: 0 };
+  }
+
   // Build filters for qualified leads
   const filters = [
     inArray(leads.qaStatus, ['approved', 'published']),
@@ -289,6 +295,11 @@ export async function getPipelineQualifiedLeads(options: {
 
   if (options.campaignId) {
     filters.push(eq(leads.campaignId, options.campaignId));
+  }
+
+  // Client-scoped: only show leads from client's campaigns
+  if (options.campaignIds) {
+    filters.push(inArray(leads.campaignId, options.campaignIds));
   }
 
   // Fetch leads with latest trigger info
@@ -365,10 +376,16 @@ export async function listEngagementTriggers(options: {
   accountId?: string;
   contactId?: string;
   campaignId?: string;
+  campaignIds?: string[];
   status?: string;
   page?: number;
   pageSize?: number;
 }): Promise<{ triggers: AccountEngagementTrigger[]; total: number }> {
+  // Client-scoped with no campaigns → empty
+  if (options.campaignIds && options.campaignIds.length === 0) {
+    return { triggers: [], total: 0 };
+  }
+
   const page = options.page ?? 1;
   const pageSize = Math.min(options.pageSize ?? 25, 200);
   const offset = (page - 1) * pageSize;
@@ -377,6 +394,7 @@ export async function listEngagementTriggers(options: {
   if (options.accountId) filters.push(eq(accountEngagementTriggers.accountId, options.accountId));
   if (options.contactId) filters.push(eq(accountEngagementTriggers.contactId, options.contactId));
   if (options.campaignId) filters.push(eq(accountEngagementTriggers.campaignId, options.campaignId));
+  if (options.campaignIds) filters.push(inArray(accountEngagementTriggers.campaignId, options.campaignIds));
   if (options.status) filters.push(eq(accountEngagementTriggers.status, options.status as any));
 
   const whereClause = filters.length > 0 ? and(...filters) : undefined;
@@ -457,6 +475,7 @@ export async function createManualTrigger(params: {
 export async function getEngagementStats(options: {
   campaignId?: string;
   accountId?: string;
+  campaignIds?: string[];
 }): Promise<{
   totalTriggers: number;
   pending: number;
@@ -467,9 +486,15 @@ export async function getEngagementStats(options: {
   callToEmail: number;
   emailToCall: number;
 }> {
+  // Client-scoped with no campaigns → return zeros
+  if (options.campaignIds && options.campaignIds.length === 0) {
+    return { totalTriggers: 0, pending: 0, scheduled: 0, completed: 0, failed: 0, cancelled: 0, callToEmail: 0, emailToCall: 0 };
+  }
+
   const filters = [];
   if (options.campaignId) filters.push(eq(accountEngagementTriggers.campaignId, options.campaignId));
   if (options.accountId) filters.push(eq(accountEngagementTriggers.accountId, options.accountId));
+  if (options.campaignIds) filters.push(inArray(accountEngagementTriggers.campaignId, options.campaignIds));
 
   const whereClause = filters.length > 0 ? and(...filters) : undefined;
 

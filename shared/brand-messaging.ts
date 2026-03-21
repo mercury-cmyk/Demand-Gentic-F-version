@@ -57,8 +57,6 @@ export const TAGLINE = {
   full: 'DemandGentic\u2014Human-Led Strategy. AI-Powered Execution.',
   /** Our identity statement */
   identity: 'Demand Problem Solvers',
-  /** The agentic identity for the agent council */
-  agenticIdentity: 'The Agentic Demand Council',
   /** Mission statement */
   mission: 'Systematized Sincerity',
   /** Philosophy statement */
@@ -179,7 +177,7 @@ export const SOLUTION_PILLARS = [
     color: 'violet',
   },
   {
-    badge: 'The Agentic Demand Council',
+    badge: 'Agentic Intelligence',
     title: 'Agentic Intelligence',
     description: 'Purpose-built agents powered by organization intelligence \u2014 reasoning first, compliance first, and never forgetting a single interaction at contact or account level.',
     quote: 'No interaction happens without reasoning first.',
@@ -299,7 +297,7 @@ export const SERVICES = [
   },
 ] as const;
 
-// ==================== THE AGENTIC DEMAND COUNCIL ====================
+// ==================== AI AGENTS ====================
 
 export const AGENTS = [
   {
@@ -977,7 +975,7 @@ export const HOMEPAGE_GOVERNANCE = {
 // ==================== FOUNDER QUOTES ====================
 
 export const FOUNDER_QUOTES = {
-  landing: 'Starting DemandGentic in Afghanistan in 2017 taught me that every interaction counts and every mistake is public. We built DemandGentic.ai to power The Agentic Demand Council \u2014 a system that reasons before it acts, remembers every interaction, and puts truth, human connection, and compliance above everything else.',
+  landing: 'Starting DemandGentic in Afghanistan in 2017 taught me that every interaction counts and every mistake is public. We built DemandGentic.ai to power a system that reasons before it acts, remembers every interaction, and puts truth, human connection, and compliance above everything else.',
   about: 'The machine is the map; the human spirit is the compass. We use both to build a world where technology solves more than it consumes.',
   technology: 'Technology is only as valuable as the integrity behind it.',
 } as const;

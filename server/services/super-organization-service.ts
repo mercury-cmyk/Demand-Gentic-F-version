@@ -104,7 +104,7 @@ export async function initializeSuperOrganization(): Promise<CampaignOrganizatio
             `Reasoning-first AI — every interaction reasoned before execution (Problem Intelligence → Solution Mapping → Pinpoint Context)`,
             `Nothing-forgotten architecture — every conversation remembered at contact and account level`,
             `${STATS.yearsExperience} years of real front-line B2B experience, not theory`,
-            `The Agentic Demand Council — 6 purpose-built AI agents working in concert`,
+            `6 purpose-built AI agents working in concert — each specialized, each reasoning, each compliant`,
             `Unified platform replacing 5-7 tools — voice, email, content, pipeline, data, analytics`,
             `${STATS.verifiedContacts} verified contacts across ${STATS.countriesCovered} countries with ${STATS.emailAccuracy} accuracy`,
             `Compliance-first by design — TCPA, GDPR, CCPA woven into every layer`,

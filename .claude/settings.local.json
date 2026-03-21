@@ -112,7 +112,8 @@
       "Bash(cmd.exe /c \"ipconfig /flushdns\")",
       "Bash(wmic process:*)",
       "Bash(export PUBLIC_WEBSOCKET_URL=\"wss://steve-unbalking-guessingly.ngrok-free.dev/openai-realtime-dialer\")",
-      "Bash(npm run dev:local:*)"
+      "Bash(npm run dev:local:*)",
+      "Bash(powershell.exe -Command \"gcloud compute scp --zone=us-central1-a --project=demandgentic ''c:\\\\Users\\\\Zahid\\\\Downloads\\\\DemandGentic_AI\\\\scripts\\\\_grant-inbox.mjs'' demandgentic-vm:/tmp/_grant-inbox.mjs\")"
     ],
     "additionalDirectories": [
       "C:\\Windows\\System32\\drivers\\etc"

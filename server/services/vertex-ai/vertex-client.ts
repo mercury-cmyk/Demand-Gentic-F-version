@@ -38,8 +38,15 @@ export interface VertexAIConfig {
 // Use centralized GCP config for project/location defaults
 import { getGcpProjectId, getGcpLocation } from "../../lib/gcp-config";
 
+// VERTEX_AI_PROJECT overrides the main GCP project for Vertex AI API calls.
+// Needed when the service account / model access lives in a different project
+// than the primary GCP project identity (e.g. GCS, billing).
+function getVertexProjectId(): string {
+  return process.env.VERTEX_AI_PROJECT || getGcpProjectId();
+}
+
 const defaultConfig: VertexAIConfig = {
-  projectId: getGcpProjectId(),
+  projectId: getVertexProjectId(),
   location: getGcpLocation(),
   models: {
     chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash-001",
@@ -249,17 +256,19 @@ export function reinitializeVertexClient(opts: {
   location: string;
   keyFilename?: string;
 }): void {
+  // VERTEX_AI_PROJECT takes precedence over the account's projectId
+  const effectiveProject = process.env.VERTEX_AI_PROJECT || opts.projectId;
   vertexAIInstance = null; // drop old singleton
   currentConfig = {
     ...defaultConfig,
-    projectId: opts.projectId,
+    projectId: effectiveProject,
     location: opts.location,
   };
   // Force immediate init so the new project is applied now
-  const initOpts: any = { project: opts.projectId, location: opts.location };
+  const initOpts: any = { project: effectiveProject, location: opts.location };
   if (opts.keyFilename) initOpts.keyFilename = opts.keyFilename;
   vertexAIInstance = new VertexAI(initOpts);
-  console.log(`[VertexAI] ♻️  Reinitialized for project: ${opts.projectId}, location: ${opts.location}`);
+  console.log(`[VertexAI] ♻️  Reinitialized for project: ${effectiveProject}, location: ${opts.location}`);
 }
 
 /**

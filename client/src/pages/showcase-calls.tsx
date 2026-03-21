@@ -126,7 +126,6 @@ const CATEGORY_ICONS: Record<string, any> = {
   perfect_flow: BarChart3,
   empathetic_response: Heart,
 };
-const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 function dedupeById<T extends { id?: string | number | null }>(items: T[]): T[] {
   const seen = new Set<string>();
@@ -165,7 +164,11 @@ function dedupeCalls<T extends { id?: string | null; callSessionId?: string | nu
 // Main Page Component
 // ============================================================================
 
-export default function ShowcaseCallsPage() {
+interface ShowcaseCallsPageProps {
+  campaigns?: Array<{ id: string; name: string }>;
+}
+
+export default function ShowcaseCallsPage({ campaigns: externalCampaigns }: ShowcaseCallsPageProps = {}) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -208,10 +211,7 @@ export default function ShowcaseCallsPage() {
       const res = await apiRequest("GET", "/api/showcase-calls/stats");
       return res.json();
     },
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchInterval: SIX_HOURS_MS,
-    refetchIntervalInBackground: true,
+    staleTime: 5 * 60 * 1000, // 5 min — stats change slowly
   });
 
   const { data: showcasedData, isLoading: showcasedLoading } = useQuery<ShowcaseListResponse>({
@@ -221,10 +221,7 @@ export default function ShowcaseCallsPage() {
       return res.json();
     },
     enabled: tab === "showcased",
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchInterval: SIX_HOURS_MS,
-    refetchIntervalInBackground: true,
+    staleTime: 2 * 60 * 1000, // 2 min
   });
 
   const { data: discoverData, isLoading: discoverLoading } = useQuery<AutoDetectResponse>({
@@ -238,10 +235,7 @@ export default function ShowcaseCallsPage() {
       return res.json();
     },
     enabled: tab === "discover",
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchInterval: SIX_HOURS_MS,
-    refetchIntervalInBackground: true,
+    staleTime: 2 * 60 * 1000, // 2 min
   });
 
   const { data: detailData, isLoading: detailLoading } = useQuery<CallDetails>({
@@ -253,19 +247,20 @@ export default function ShowcaseCallsPage() {
     enabled: !!detailCallId,
   });
 
-  // Campaigns list for filter
+  // Campaigns list for filter — skip fetch when parent provides campaigns
   const { data: campaignsList } = useQuery<Array<{ id: string; name: string }>>({
-    queryKey: ["/api/campaigns-list"],
+    queryKey: ["/api/campaigns"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/campaigns");
       const data = await res.json();
       return Array.isArray(data) ? data : data.campaigns || [];
     },
+    enabled: !externalCampaigns,
   });
 
   const uniqueCampaigns = useMemo(
-    () => dedupeById(campaignsList || []),
-    [campaignsList]
+    () => dedupeById(externalCampaigns || campaignsList || []),
+    [externalCampaigns, campaignsList]
   );
   const showcasedCalls = useMemo(
     () => dedupeCalls(showcasedData?.calls || []),

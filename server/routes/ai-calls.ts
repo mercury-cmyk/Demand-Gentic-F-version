@@ -100,7 +100,7 @@ Generate professional, natural-sounding scripts that will be used by an AI voice
     }
 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-001", systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash", systemInstruction: systemPrompt });
     const response = await model.generateContent(userPrompt);
 
     const content = response.response.text();

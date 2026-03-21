@@ -134,7 +134,7 @@ export const AI_MODEL_SUGGESTIONS: Record<
   },
   analysis_standard: {
     vertex: [
-      "gemini-2.0-flash-001",
+      "gemini-2.0-flash",
       "gemini-2.5-flash",
     ],
     claude: [
@@ -170,7 +170,7 @@ export const AI_MODEL_SUGGESTIONS: Record<
   },
   content_generation: {
     vertex: [
-      "gemini-2.0-flash-001",
+      "gemini-2.0-flash",
       "gemini-2.5-flash",
     ],
     claude: [
@@ -191,7 +191,7 @@ export const AI_MODEL_SUGGESTIONS: Record<
       "claude-sonnet-4-20250514",
     ],
     vertex: [
-      "gemini-2.0-flash-001",
+      "gemini-2.0-flash",
       "gemini-3-pro-preview",
     ],
     openai: [
@@ -223,7 +223,7 @@ export const DEFAULT_AI_MODEL_POLICIES: AiModelPolicyMap = {
     primaryModel: "deepseek-chat",
     allowFallback: true,
     fallbackProvider: "vertex",
-    fallbackModel: "gemini-2.0-flash-001",
+    fallbackModel: "gemini-2.0-flash",
     notes: "Cost-efficient structured analysis.",
   },
   analysis_deep: {
@@ -238,7 +238,7 @@ export const DEFAULT_AI_MODEL_POLICIES: AiModelPolicyMap = {
   content_generation: {
     enabled: true,
     primaryProvider: "vertex",
-    primaryModel: "gemini-2.0-flash-001",
+    primaryModel: "gemini-2.0-flash",
     allowFallback: true,
     fallbackProvider: "openai",
     fallbackModel: "gpt-4o-mini",
@@ -250,7 +250,7 @@ export const DEFAULT_AI_MODEL_POLICIES: AiModelPolicyMap = {
     primaryModel: "claude-3-5-sonnet-20241022",
     allowFallback: true,
     fallbackProvider: "vertex",
-    fallbackModel: "gemini-2.0-flash-001",
+    fallbackModel: "gemini-2.0-flash",
     notes: "General-purpose reasoning and orchestration.",
   },
 };

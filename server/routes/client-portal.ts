@@ -1024,7 +1024,11 @@ router.get('/auth/me', requireClientAuth, async (req, res) => {
 // Paths that skip the analytics_dashboard feature gate because they have their
 // own auth/feature gates.  /admin uses requireAuth; /orders uses requireClientAuth
 // directly; /cost-tracking uses requireClientFeature('billing_cost_tracking').
-const ANALYTICS_GATE_BYPASS = ['/admin', '/orders', '/cost-tracking'];
+const ANALYTICS_GATE_BYPASS = [
+  '/admin', '/orders', '/cost-tracking',
+  '/activity', '/leads', '/qualified-leads', '/tutorial-videos',
+  '/campaigns', '/simulations', '/mock-calls', '/reports', '/approved-content',
+];
 
 router.use((req: Request, res: Response, next: NextFunction) => {
   // /admin routes use requireAuth (internal), not client auth

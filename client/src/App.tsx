@@ -147,7 +147,6 @@ import ArgyleEventsPage from "@/pages/client-portal/argyle-events";
 import ClientHierarchyManager from "@/pages/client-hierarchy-manager";
 const OrganizationIntelligencePage = lazy(() => import("@/pages/ai-studio/intelligence"));
 const AIAgentsPage = lazy(() => import("@/pages/ai-studio/agents"));
-const AgenticCRMOperatorPage = lazy(() => import("@/pages/ai-studio/operator"));
 // AgentPromptsPage moved into Unified Agent Architecture — old route redirects
 const IntelligenceStudioDashboard = lazy(() => import("@/pages/ai-studio/dashboard"));
 const CampaignIntelligencePage = lazy(() => import("@/pages/ai-studio/campaign-intelligence"));
@@ -567,7 +566,6 @@ function AuthenticatedApp() {
               <Route path="/ai-studio/agents">
                 <Redirect to="/unified-agent-architecture" />
               </Route>
-              <Route path="/ai-studio/operator" component={AgenticCRMOperatorPage} />
               <Route path="/ai-studio/agent-prompts">
                 <Redirect to="/unified-agent-architecture" />
               </Route>

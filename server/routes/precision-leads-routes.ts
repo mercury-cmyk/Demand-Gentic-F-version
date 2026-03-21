@@ -169,7 +169,7 @@ router.get("/api/precision-leads", requireAuth, async (req: Request, res: Respon
         contactFirstName: contacts.firstName,
         contactLastName: contacts.lastName,
         contactEmail: contacts.email,
-        contactPhone: contacts.phone,
+        contactPhone: contacts.dialingPhoneE164,
         companyName: accounts.name,
         campaignName: campaigns.name,
         callDuration: callSessions.durationSec,

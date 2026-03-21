@@ -137,13 +137,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
             description: 'Test and preview AI agent behavior',
           },
-          {
-            id: 'agentic-operator',
-            title: 'Agentic Demand Council',
-            url: '/ai-studio/operator',
-            roles: MANAGEMENT_ROLES,
-            description: 'Unified agentic operations panel',
-          },
           // Agent Prompts moved inside Unified Agent Architecture (AgentX)
           {
             id: 'campaign-manager',
@@ -163,15 +156,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         roles: MANAGEMENT_ROLES,
         badge: { text: 'New', variant: 'new' as BadgeVariant },
         description: 'AI-powered content creation hub for images, pages, emails, blogs, and more',
-      },
-      {
-        id: 'content-governance',
-        title: 'Content Governance',
-        url: '/content-governance',
-        icon: 'ShieldCheck',
-        roles: MANAGEMENT_ROLES,
-        badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'Govern landing pages with product feature registry, AI-powered refresh, and design control',
       },
     ],
   },
@@ -261,21 +245,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         description: 'Unified campaign management for email and phone',
       },
       {
-        id: 'agent-console',
-        title: 'Agent Console',
-        url: '/agent-console',
-        icon: 'Headphones',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.AGENT],
-        description: 'Dialer and call execution interface',
-      },
-      {
         id: 'content-promotion',
-        title: 'Content Promotion',
+        title: 'Landing Pages',
         url: '/content-promotion',
         icon: 'PanelTop',
         roles: MANAGEMENT_ROLES,
         badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'Create and manage content promotion landing pages',
+        description: 'Create and manage landing pages',
       },
     ],
   },
@@ -293,54 +269,18 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       {
         id: 'disposition-intelligence',
         title: 'Disposition Intelligence',
+        url: '/disposition-intelligence',
         icon: 'BarChart3',
         roles: [...QA_ROLES, USER_ROLES.AGENT],
-        description: 'Central hub for disposition intelligence, conversation quality, showcase calls, and reanalysis',
-        badge: { text: 'Updated', variant: 'updated' },
-        items: [
-          {
-            id: 'disposition-overview',
-            title: 'Disposition Overview',
-            url: '/disposition-intelligence',
-            roles: QA_ROLES,
-            description: 'Disposition intelligence dashboard',
-          },
-          {
-            id: 'conversation-quality',
-            title: 'Conversation Quality',
-            url: '/disposition-intelligence?tab=conversation-quality',
-            roles: QA_ROLES,
-            description: 'Conversation quality analysis and scoring',
-          },
-          {
-            id: 'showcase-calls',
-            title: 'Showcase Calls',
-            url: '/disposition-intelligence?tab=showcase-calls',
-            roles: [...QA_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.AGENT],
-            description: 'Top meaningful call conversations with recordings, transcript, issues, and recommendations',
-          },
-          {
-            id: 'transcription-health',
-            title: 'Transcription Health',
-            url: '/disposition-intelligence?tab=transcription-health',
-            roles: QA_ROLES,
-            description: 'Track transcription coverage, identify gaps, and regenerate missing transcripts',
-          },
-          {
-            id: 'reanalysis',
-            title: 'Reanalysis',
-            url: '/disposition-intelligence?tab=reanalysis',
-            roles: QA_ROLES,
-            description: 'Deep AI reanalysis for disposition corrections',
-          },
-          {
-            id: 'potential-leads',
-            title: 'Potential Leads',
-            url: '/disposition-intelligence/potential-leads',
-            roles: QA_ROLES,
-            description: 'AI-identified leads with qualification signals',
-          },
-        ],
+        description: 'Dispositions, conversation quality, showcase calls, transcription health, and reanalysis',
+      },
+      {
+        id: 'potential-leads',
+        title: 'Potential Leads',
+        url: '/disposition-intelligence/potential-leads',
+        icon: 'Target',
+        roles: QA_ROLES,
+        description: 'AI-identified leads with qualification signals',
       },
       {
         id: 'qa-lead-review',
@@ -437,7 +377,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         title: 'Administration',
         icon: 'Building',
         roles: [USER_ROLES.ADMIN],
-        description: 'Organization and client management',
+        description: 'Organization, client, and access management',
         items: [
           {
             id: 'organization-manager',
@@ -452,6 +392,13 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/client-portal-admin',
             roles: [USER_ROLES.ADMIN],
             description: 'Manage clients, client users, and portal access',
+          },
+          {
+            id: 'iam-overview',
+            title: 'Access Control',
+            url: '/iam',
+            roles: [USER_ROLES.ADMIN],
+            description: 'IAM dashboard — users, roles, policies, and audit',
           },
         ],
       },
@@ -511,96 +458,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     ],
   },
 
-  // ============================================
-  // IAM - IDENTITY & ACCESS MANAGEMENT
-  // ============================================
-  {
-    id: 'iam',
-    label: 'Access Control',
-    domain: NAVIGATION_DOMAINS.IAM,
-    roles: [USER_ROLES.ADMIN],
-    description: 'Identity & access management, permissions, and audit',
-    items: [
-      {
-        id: 'iam-hub',
-        title: 'IAM',
-        icon: 'ShieldCheck',
-        roles: [USER_ROLES.ADMIN],
-        items: [
-          {
-            id: 'iam-overview',
-            title: 'Overview',
-            url: '/iam',
-            roles: [USER_ROLES.ADMIN],
-            description: 'IAM dashboard and quick actions',
-          },
-          {
-            id: 'iam-users',
-            title: 'Users',
-            url: '/iam/users',
-            roles: [USER_ROLES.ADMIN],
-            description: 'User access management',
-          },
-          {
-            id: 'iam-teams',
-            title: 'Teams',
-            url: '/iam/teams',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Team management',
-          },
-          {
-            id: 'iam-roles',
-            title: 'Roles',
-            url: '/iam/roles',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Role configuration',
-          },
-          {
-            id: 'iam-policies',
-            title: 'Policies',
-            url: '/iam/policies',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Permission policies',
-          },
-          {
-            id: 'iam-grants',
-            title: 'Access Grants',
-            url: '/iam/grants',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Direct access grants',
-          },
-          {
-            id: 'iam-requests',
-            title: 'Access Requests',
-            url: '/iam/requests',
-            roles: ALL_ROLES,
-            description: 'Request and approve access',
-          },
-          {
-            id: 'iam-audit',
-            title: 'Audit Log',
-            url: '/iam/audit',
-            roles: [USER_ROLES.ADMIN],
-            description: 'IAM audit trail',
-          },
-          {
-            id: 'iam-secrets',
-            title: 'Secrets',
-            url: '/iam/secrets',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Central secret manager',
-          },
-          {
-            id: 'iam-client-access',
-            title: 'Client Access',
-            url: '/iam/client-access',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Per-client feature permissions',
-          },
-        ],
-      },
-    ],
-  },
 
   // ============================================
   // SETTINGS DOMAIN

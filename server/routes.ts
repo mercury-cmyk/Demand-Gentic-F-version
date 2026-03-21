@@ -5603,16 +5603,14 @@ export function registerRoutes(app: Express) {
       const callsMade = (humanCallStats?.callsMade || 0) + (Number(aiCallStats.callsMade) || 0);
       const callsConnected = (humanCallStats?.callsConnected || 0) + (Number(aiCallStats.callsConnected) || 0);
 
-      // Leads Qualified: query the leads table directly so manual QA overrides are included.
-      // callSessions.aiDisposition never changes when a reviewer manually approves a needs_review lead,
-      // so counting from call dispositions alone would under-count.
+      // Leads Qualified: count ALL leads for the campaign — a lead record is only created
+      // when a call gets a qualified disposition, so every lead row = 1 qualified call.
+      // QA status (approved/rejected/under_review) is an internal review workflow,
+      // not a qualification filter.
       const [leadsQualifiedResult] = await db
         .select({ count: sql<number>`COUNT(*)::int` })
         .from(leads)
-        .where(and(
-          eq(leads.campaignId, campaignId),
-          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
-        ));
+        .where(eq(leads.campaignId, campaignId));
       const leadsQualified = leadsQualifiedResult?.count || 0;
 
       const dncRequests = (humanCallStats?.dncRequests || 0) + (Number(aiCallStats.dncRequests) || 0);
@@ -5653,18 +5651,16 @@ export function registerRoutes(app: Express) {
 
       const results: Record<string, any> = {};
 
-      // Bulk query: leads qualified per campaign from leads table (includes manual QA overrides).
-      // Done once before the per-campaign loop to avoid N+1 queries.
+      // Bulk query: leads qualified per campaign — count ALL leads since a lead record
+      // is only created when a call gets a qualified disposition. QA status is an internal
+      // review workflow, not a qualification filter.
       const leadsQualifiedRows = await db
         .select({
           campaignId: leads.campaignId,
           count: sql<number>`COUNT(*)::int`,
         })
         .from(leads)
-        .where(and(
-          inArray(leads.campaignId, campaignIds),
-          inArray(leads.qaStatus, ['approved', 'pending_pm_review', 'published'])
-        ))
+        .where(inArray(leads.campaignId, campaignIds))
         .groupBy(leads.campaignId);
       const leadsQualifiedByCampaign: Record<string, number> = Object.fromEntries(
         leadsQualifiedRows.map((r) => [r.campaignId, r.count])

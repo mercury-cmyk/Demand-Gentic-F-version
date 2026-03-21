@@ -39,6 +39,8 @@ services:
       - DRACHTIO_PORT=9022
       - DRACHTIO_SECRET=cymru
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-service-account.json
+      # Vertex AI uses the service account's project for model access
+      - VERTEX_AI_PROJECT=gen-lang-client-0789558283
     volumes:
       - ../gcp-service-account.json:/app/gcp-service-account.json:ro
     healthcheck:

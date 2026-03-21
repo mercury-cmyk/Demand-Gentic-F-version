@@ -364,7 +364,11 @@ function formatDate(iso: string): string {
 
 // ==================== MAIN COMPONENT ====================
 
-export default function DispositionReanalysisPage() {
+interface DispositionReanalysisPageProps {
+  campaigns?: Array<{ id: string; name: string }>;
+}
+
+export default function DispositionReanalysisPage({ campaigns: externalCampaigns }: DispositionReanalysisPageProps = {}) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -427,6 +431,7 @@ export default function DispositionReanalysisPage() {
 
   // ==================== QUERIES ====================
 
+  // Skip fetch when parent provides campaigns
   const { data: campaignsData } = useQuery<Campaign[]>({
     queryKey: ['/api/campaigns'],
     queryFn: async () => {
@@ -434,7 +439,9 @@ export default function DispositionReanalysisPage() {
       const data = await res.json();
       return Array.isArray(data) ? data : data?.campaigns || [];
     },
+    enabled: !externalCampaigns,
   });
+  const campaigns = externalCampaigns || campaignsData || [];
 
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<StatsResponse>({
     queryKey: ['/api/disposition-reanalysis/stats', campaignId, dateFrom, dateTo],
@@ -1191,7 +1198,7 @@ export default function DispositionReanalysisPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All campaigns</SelectItem>
-                      {campaignsData?.map((c) => (
+                      {campaigns.map((c) => (
                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                       ))}
                     </SelectContent>

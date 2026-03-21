@@ -7,11 +7,17 @@
  * Cross-channel automation:
  *   Call engagement → Email follow-up
  *   Email engagement → Call follow-up
+ *
+ * Client-scoped: when clientAccountId is provided, results are
+ * filtered to only campaigns the client has access to.
  */
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth';
+import { db } from '../db';
+import { clientCampaignAccess } from '@shared/schema';
+import { eq, isNotNull } from 'drizzle-orm';
 import {
   processEngagementEvent,
   listEngagementTriggers,
@@ -23,6 +29,25 @@ import {
 } from '../services/engagement-trigger-service';
 
 const router = Router();
+
+// ==================== HELPERS ====================
+
+/**
+ * Resolve campaign IDs that a client account has access to.
+ * Returns undefined if no clientAccountId (admin — no scoping).
+ */
+async function getClientCampaignIds(clientAccountId?: string): Promise<string[] | undefined> {
+  if (!clientAccountId) return undefined;
+
+  const rows = await db
+    .select({ campaignId: clientCampaignAccess.regularCampaignId })
+    .from(clientCampaignAccess)
+    .where(eq(clientCampaignAccess.clientAccountId, clientAccountId));
+
+  return rows
+    .map(r => r.campaignId)
+    .filter((id): id is string => id != null);
+}
 
 // ==================== VALIDATION SCHEMAS ====================
 
@@ -60,6 +85,7 @@ const manualTriggerSchema = z.object({
 
 const listQuerySchema = z.object({
   accountId: z.string().uuid().optional(),
+  clientAccountId: z.string().uuid().optional(),
   contactId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   status: z.enum(['pending', 'scheduled', 'executing', 'completed', 'failed', 'cancelled', 'skipped']).optional(),
@@ -69,6 +95,7 @@ const listQuerySchema = z.object({
 
 const pipelineLeadsQuerySchema = z.object({
   campaignId: z.string().uuid().optional(),
+  clientAccountId: z.string().uuid().optional(),
   accountId: z.string().uuid().optional(),
   status: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
@@ -128,6 +155,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 /**
  * GET /api/engagement-triggers
  * List engagement triggers with filtering.
+ * Pass clientAccountId to scope to client's campaigns only.
  */
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -136,7 +164,10 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid query', details: parseResult.error.errors });
     }
 
-    const result = await listEngagementTriggers(parseResult.data);
+    const { clientAccountId, ...rest } = parseResult.data;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    const result = await listEngagementTriggers({ ...rest, campaignIds });
     res.json(result);
   } catch (error: any) {
     console.error('[EngagementTriggerRoutes] List failed:', error);
@@ -147,13 +178,17 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 /**
  * GET /api/engagement-triggers/stats
  * Get engagement trigger statistics.
+ * Pass clientAccountId to scope to client's campaigns only.
  */
 router.get('/stats', requireAuth, async (req: Request, res: Response) => {
   try {
     const campaignId = typeof req.query.campaignId === 'string' ? req.query.campaignId : undefined;
     const accountId = typeof req.query.accountId === 'string' ? req.query.accountId : undefined;
+    const clientAccountId = typeof req.query.clientAccountId === 'string' ? req.query.clientAccountId : undefined;
 
-    const stats = await getEngagementStats({ campaignId, accountId });
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    const stats = await getEngagementStats({ campaignId, accountId, campaignIds });
     res.json(stats);
   } catch (error: any) {
     console.error('[EngagementTriggerRoutes] Stats failed:', error);
@@ -164,6 +199,7 @@ router.get('/stats', requireAuth, async (req: Request, res: Response) => {
 /**
  * GET /api/engagement-triggers/pipeline-leads
  * Get qualified leads with engagement trigger context for client pipeline.
+ * Pass clientAccountId to scope to client's campaigns only.
  */
 router.get('/pipeline-leads', requireAuth, async (req: Request, res: Response) => {
   try {
@@ -172,7 +208,10 @@ router.get('/pipeline-leads', requireAuth, async (req: Request, res: Response) =
       return res.status(400).json({ error: 'Invalid query', details: parseResult.error.errors });
     }
 
-    const result = await getPipelineQualifiedLeads(parseResult.data);
+    const { clientAccountId, ...rest } = parseResult.data;
+    const campaignIds = await getClientCampaignIds(clientAccountId);
+
+    const result = await getPipelineQualifiedLeads({ ...rest, campaignIds });
     res.json(result);
   } catch (error: any) {
     console.error('[EngagementTriggerRoutes] Pipeline leads failed:', error);

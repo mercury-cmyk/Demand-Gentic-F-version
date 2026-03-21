@@ -106,7 +106,7 @@ export interface LandingPageStructuredResult {
 // VERTEX AI MODEL CONFIG
 // ============================================================================
 
-const VERTEX_LP_MODEL = 'gemini-2.0-flash-001';
+const VERTEX_LP_MODEL = 'gemini-2.0-flash';
 const GENERIC_TONE_GUIDELINES: Record<string, string> = {
   authoritative: "Lead with clarity, confidence, and credibility.",
   bold: "Use decisive language and direct calls to action.",

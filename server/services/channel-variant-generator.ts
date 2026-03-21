@@ -84,7 +84,7 @@ export async function generateVoiceVariant(
   campaignType?: string
 ): Promise<VoiceVariantGenerationResult> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-001',
+    model: 'gemini-2.0-flash',
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.4,
@@ -147,7 +147,7 @@ ${JSON.stringify(callFlow.steps.map(s => ({ id: s.id, name: s.name, description:
 Generate a comprehensive system prompt for the AI voice agent. Return as plain text, not JSON.`;
 
   const promptModel = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-001',
+    model: 'gemini-2.0-flash',
     generationConfig: {
       temperature: 0.3,
     },
@@ -260,7 +260,7 @@ export async function generateEmailVariant(
   campaignType?: string
 ): Promise<EmailVariantGenerationResult> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-001',
+    model: 'gemini-2.0-flash',
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.5,

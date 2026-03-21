@@ -114,16 +114,19 @@ const UK_COUNTRIES = new Set([
 ]);
 
 /**
- * Temporary one-day exception to allow UK Saturday calling.
- * This is intentionally date-bound to avoid enabling all future Saturdays.
+ * Temporary weekend override dates to allow UK Sunday calling.
+ * Saturday is already in DEFAULT_BUSINESS_HOURS; only Sunday needs an override.
+ * Date-bound to avoid enabling all future Sundays.
  */
-const UK_SATURDAY_OVERRIDE_DATE = '2026-02-21';
+const UK_WEEKEND_OVERRIDE_DATES = new Set([
+  '2026-03-22', // Saturday (already included, but listed for clarity)
+  '2026-03-23', // Sunday — weekend calling enabled
+]);
 
-function isUkSaturdayOverrideActive(referenceTime: Date = new Date()): boolean {
+function isUkWeekendOverrideActive(referenceTime: Date = new Date()): boolean {
   const londonNow = toZonedTime(referenceTime, 'Europe/London');
   const londonDate = format(londonNow, 'yyyy-MM-dd');
-  const londonDay = format(londonNow, 'EEEE').toLowerCase();
-  return londonDate === UK_SATURDAY_OVERRIDE_DATE && londonDay === 'saturday';
+  return UK_WEEKEND_OVERRIDE_DATES.has(londonDate);
 }
 
 /**
@@ -147,8 +150,8 @@ export function getBusinessHoursForCountry(
       timezone: 'Europe/London',
     };
 
-    if (isUkSaturdayOverrideActive(referenceTime) && !ukConfig.operatingDays.includes('saturday')) {
-      ukConfig.operatingDays = [...ukConfig.operatingDays, 'saturday'];
+    if (isUkWeekendOverrideActive(referenceTime) && !ukConfig.operatingDays.includes('sunday')) {
+      ukConfig.operatingDays = [...ukConfig.operatingDays, 'sunday'];
     }
 
     return ukConfig;

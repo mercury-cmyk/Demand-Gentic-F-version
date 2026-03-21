@@ -247,12 +247,12 @@ export default function PrecisionLeadsPanel() {
     refetchInterval: 60000,
   });
 
-  // Autopilot mutation
+  // Autopilot mutation — AI-heavy, needs generous timeout
   const autopilotMutation = useMutation({
     mutationFn: async () => {
       const body: any = {};
       if (filters.campaignId !== 'all') body.campaignId = filters.campaignId;
-      const response = await apiRequest('POST', '/api/precision-leads/autopilot', body);
+      const response = await apiRequest('POST', '/api/precision-leads/autopilot', body, { timeout: 300000 });
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -273,7 +273,7 @@ export default function PrecisionLeadsPanel() {
     mutationFn: async () => {
       const body: any = {};
       if (filters.campaignId !== 'all') body.campaignId = filters.campaignId;
-      const response = await apiRequest('POST', '/api/precision-leads/qualify', body);
+      const response = await apiRequest('POST', '/api/precision-leads/qualify', body, { timeout: 300000 });
       return response.json();
     },
     onSuccess: (data: any) => {
@@ -292,7 +292,7 @@ export default function PrecisionLeadsPanel() {
   // Analyze single call mutation
   const analyzeMutation = useMutation({
     mutationFn: async (callSessionId: string) => {
-      const response = await apiRequest('POST', '/api/precision-leads/analyze', { callSessionId });
+      const response = await apiRequest('POST', '/api/precision-leads/analyze', { callSessionId }, { timeout: 120000 });
       return response.json();
     },
     onSuccess: (data: any) => {

@@ -739,10 +739,10 @@ async function processQualifiedLead(
   const contactName = contact?.fullName ||
     (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` :
      contact?.firstName || contact?.lastName || 'Unknown');
-  const qaStatus = isShortDurationCall ? 'under_review' : 'new';
+  const qaStatus = isShortDurationCall ? 'under_review' : 'approved';
   const qaDecision = isShortDurationCall
     ? `⚠️ SHORT DURATION ALERT: Call was only ${callDuration}s (minimum: ${QA_REVIEW_THRESHOLD_AI}s). AI marked as qualified but requires manual verification.`
-    : null;
+    : `✅ Auto-approved: AI disposition qualified_lead, call duration ${callDuration}s meets threshold (${QA_REVIEW_THRESHOLD_AI}s).`;
 
   // Determine source based on agent type for full auditability
   const agentSource = callAttempt.agentType === 'ai' 
@@ -763,7 +763,7 @@ async function processQualifiedLead(
     accountId: contact?.accountId || undefined,
     accountName: contact?.companyName || undefined,
     accountIndustry: contact?.accountIndustry || undefined,
-    qaStatus: qaStatus as 'new' | 'under_review',
+    qaStatus: qaStatus as 'new' | 'under_review' | 'approved',
     qaDecision: qaDecision,
     agentId: callAttempt.humanAgentId,
     dialedNumber: callAttempt.phoneDialed,
@@ -1951,10 +1951,10 @@ export async function createFallbackLead(params: {
 
     const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 20;
     const isShortDuration = params.callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
-    const qaStatus = isShortDuration ? 'under_review' : 'new';
+    const qaStatus = isShortDuration ? 'under_review' : 'approved';
     const qaDecision = isShortDuration
       ? `⚠️ SHORT DURATION ALERT: Call was only ${params.callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Requires manual verification.`
-      : null;
+      : `✅ Auto-approved: qualified disposition, call duration ${params.callDuration}s meets threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s).`;
 
     const [newLead] = await db
       .insert(leads)
@@ -1967,7 +1967,7 @@ export async function createFallbackLead(params: {
         accountId: contact?.accountId || undefined,
         accountName: contact?.companyName || undefined,
         accountIndustry: contact?.accountIndustry || undefined,
-        qaStatus: qaStatus as 'new' | 'under_review',
+        qaStatus: qaStatus as 'new' | 'under_review' | 'approved',
         qaDecision,
         dialedNumber: params.dialedNumber,
         recordingUrl: params.recordingUrl,

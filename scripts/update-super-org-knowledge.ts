@@ -99,7 +99,7 @@ async function main() {
         'REASONING-FIRST AI: Unlike every other AI sales tool that just automates blindly, our agents reason before every interaction. Problem Intelligence → Solution Mapping → Pinpoint Context. No interaction without reasoning.',
         'NOTHING-FORGOTTEN ARCHITECTURE: Every conversation, every signal, every response is remembered and reasoned upon at the contact and account level. Other tools treat each interaction as isolated — we build cumulative intelligence.',
         '11+ YEARS OF REAL FRONT-LINE EXPERIENCE: Not theory, not academic research. Built on actual experience from 100+ global campaigns, 2M+ leads generated, and 50+ enterprise clients. The AI carries the judgment of a decade of real B2B demand work.',
-        'THE AGENTIC DEMAND COUNCIL: 6 purpose-built AI agents (Research, Voice, Email, Content, Pipeline, QA) working in concert — each specialized, each reasoning, each compliant. Not one generic AI — a council of experts.',
+        '6 PURPOSE-BUILT AI AGENTS: Research, Voice, Email, Content, Pipeline, QA — each specialized, each reasoning, each compliant. Not one generic AI — a team of experts working in concert.',
         'UNIFIED PLATFORM (REPLACES 5-7 TOOLS): Voice calling, email marketing, content creation, pipeline management, data enrichment, analytics, and CRM — all in one. No integrations to break, no data silos to manage.',
         '70M+ VERIFIED CONTACTS / 195+ COUNTRIES: The most accurate B2B database available. 98% email accuracy. Weekly refresh. Multi-source verification. Every fact tagged as verified, inferred, or unknown with full source attribution.',
         'COMPLIANCE-FIRST BY DESIGN: TCPA, GDPR, CCPA compliance isn\'t a feature — it\'s foundational. Built into every agent, every workflow, every data operation. Trust is earned through transparency.',
@@ -396,7 +396,7 @@ We combine three forces no other platform delivers together:
 - **Quality Control**: AI-powered QA, conversation quality scoring, lead quality assessment, disposition reanalysis
 - **Client Portal**: White-label portal with full campaign visibility, analytics, generative studio, and billing
 
-## THE AGENTIC DEMAND COUNCIL (6 Agents)
+## AI AGENTS (6 Specialized Agents)
 1. **Research Agent** — Autonomous fact-gathering, multi-source verification, problem-to-account matching
 2. **Voice Agent** — Live phone conversations, gatekeeper navigation, real-time BANT qualification
 3. **Email Agent** — Persona-specific copy, sequence optimization, reply sentiment analysis
@@ -482,7 +482,7 @@ In a market saturated with fabricated engagement, bot-driven clicks, and budget-
 - Always: reasoning, intelligence, stewardship, problem-solving, human connection
 
 ## ORIGIN STORY
-"Starting DemandGentic in Afghanistan in 2017 taught me that every interaction counts and every mistake is public. We built DemandGentic.ai to power The Agentic Demand Council — a system that reasons before it acts, remembers every interaction, and puts truth, human connection, and compliance above everything else." — Zahid Mohammadi, CEO & The Architect
+"Starting DemandGentic in Afghanistan in 2017 taught me that every interaction counts and every mistake is public. We built DemandGentic.ai to power a system that reasons before it acts, remembers every interaction, and puts truth, human connection, and compliance above everything else." — Zahid Mohammadi, CEO & The Architect
 `;
 
   try {

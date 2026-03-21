@@ -579,7 +579,7 @@ Return ONLY a valid JSON object matching this exact schema (no markdown, no code
         temperature: 0.4,
         maxTokens: 16384,
       });
-      modelUsed = 'gemini-2.0-flash-001 (fallback)';
+      modelUsed = 'gemini-2.0-flash (fallback)';
       const durationMs = Date.now() - startMs;
       return { plan: fallbackPlan, thinking: '[fallback: rate-limited, used gemini-flash]', oiSummary, model: modelUsed, durationMs };
     }

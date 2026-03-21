@@ -293,13 +293,14 @@ export default function UnifiedIntelligencePage() {
     );
   }, []);
 
-  // Fetch campaigns for filter dropdown
+  // Fetch campaigns for filter dropdowns — shared with child tabs
   const { data: campaigns = [] } = useQuery<Campaign[]>({
     queryKey: ['/api/campaigns'],
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/campaigns');
       return response.json();
     },
+    staleTime: 5 * 60 * 1000, // 5 min — campaign list rarely changes
   });
 
   // Build query params for the existing /api/qa/conversations endpoint
@@ -313,7 +314,7 @@ export default function UnifiedIntelligencePage() {
     return params.toString();
   }, [filters]);
 
-  // Fetch conversations using existing endpoint
+  // Fetch conversations — only when conversation-quality tab is active
   const {
     data: conversationsData,
     isLoading: conversationsLoading,
@@ -324,6 +325,8 @@ export default function UnifiedIntelligencePage() {
       const response = await apiRequest('GET', `/api/qa/conversations?${buildQaQueryParams()}`);
       return response.json();
     },
+    enabled: pageTab === 'conversation-quality',
+    staleTime: 60 * 1000, // 1 min — avoid refetching on every tab switch
   });
 
   // Transform and filter conversations
@@ -399,7 +402,7 @@ export default function UnifiedIntelligencePage() {
   // ===== ANALYZE MUTATION =====
   const analyzeMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const response = await apiRequest('POST', `/api/call-sessions/${sessionId}/analyze`);
+      const response = await apiRequest('POST', `/api/call-sessions/${sessionId}/analyze`, undefined, { timeout: 120000 });
       return response.json();
     },
     onSuccess: (data) => {
@@ -418,7 +421,7 @@ export default function UnifiedIntelligencePage() {
   // ===== TRANSCRIBE MUTATION =====
   const transcribeMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const response = await apiRequest('POST', `/api/qa/transcribe/${sessionId}`, { analyze: true });
+      const response = await apiRequest('POST', `/api/qa/transcribe/${sessionId}`, { analyze: true }, { timeout: 120000 });
       return response.json();
     },
     onSuccess: () => {
@@ -546,13 +549,13 @@ export default function UnifiedIntelligencePage() {
       ) : pageTab === 'showcase-calls' ? (
         <div className="flex-1 overflow-hidden">
           <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-            <ShowcaseCallsPage />
+            <ShowcaseCallsPage campaigns={campaigns} />
           </Suspense>
         </div>
       ) : pageTab === 'reanalysis' ? (
         <div className="flex-1 overflow-auto">
           <Suspense fallback={<div className="flex items-center justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" /></div>}>
-            <DispositionReanalysisPage />
+            <DispositionReanalysisPage campaigns={campaigns} />
           </Suspense>
         </div>
       ) : (

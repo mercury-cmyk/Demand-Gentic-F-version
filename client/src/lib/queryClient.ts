@@ -116,8 +116,9 @@ export async function apiRequest(
     ...(data ? { "Content-Type": "application/json" } : {}),
   };
 
-  // Default 30s timeout, but allow 60s for AI endpoints
-  const timeout = options?.timeout || 30000;
+  // Auto-detect AI-heavy endpoints and give them a longer default timeout
+  const isAiEndpoint = method !== 'GET' && /\/(analyze|autopilot|bulk-analyze|qualify|reanalysis|transcribe|generate)/.test(url);
+  const timeout = options?.timeout || (isAiEndpoint ? 120000 : 30000);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();

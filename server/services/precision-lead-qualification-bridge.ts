@@ -472,8 +472,12 @@ export async function runQualificationBridge(options?: {
   //   c) Have LQA outcome in (qualified_lead, mql, sql, follow_up) + strong/moderate intent
   // AND do NOT already have a lead in the leads table
 
-  const campaignFilter = options?.campaignId
-    ? eq(callSessions.campaignId, options.campaignId)
+  // Per-table campaign filters — each query references its own table's campaignId
+  const precisionCampaignFilter = options?.campaignId
+    ? eq(precisionLeadAnalyses.campaignId, options.campaignId)
+    : sql`1=1`;
+  const lqaCampaignFilter = options?.campaignId
+    ? eq(leadQualityAssessments.campaignId, options.campaignId)
     : sql`1=1`;
 
   // Find via precision analysis (high_potential or likely_potential with engage/nurture action)
@@ -493,7 +497,7 @@ export async function runQualificationBridge(options?: {
     .where(and(
       inArray(precisionLeadAnalyses.verdict, ['high_potential', 'likely_potential']),
       inArray(precisionLeadAnalyses.recommendedAction, ['engage', 'nurture']),
-      campaignFilter,
+      precisionCampaignFilter,
     ))
     .orderBy(desc(precisionLeadAnalyses.consensusConfidence))
     .limit(batchSize);
@@ -512,7 +516,7 @@ export async function runQualificationBridge(options?: {
           inArray(leadQualityAssessments.intentStrength, ['strong', 'moderate']),
         ),
       ),
-      campaignFilter,
+      lqaCampaignFilter,
     ))
     .limit(batchSize);
 

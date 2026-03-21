@@ -258,6 +258,7 @@ export default function PotentialLeadsPage() {
       const response = await apiRequest('GET', '/api/campaigns');
       return response.json();
     },
+    staleTime: 5 * 60 * 1000, // 5 min — campaign list rarely changes
   });
 
   // Build query params for potential leads API
@@ -311,7 +312,7 @@ export default function PotentialLeadsPage() {
   // Analyze mutation
   const analyzeMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const response = await apiRequest('POST', `/api/call-sessions/${sessionId}/analyze`);
+      const response = await apiRequest('POST', `/api/call-sessions/${sessionId}/analyze`, undefined, { timeout: 120000 });
       return response.json();
     },
     onSuccess: () => {
@@ -341,7 +342,7 @@ export default function PotentialLeadsPage() {
   // Bulk analysis mutation - analyzes calls without AI analysis
   const bulkAnalyzeMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/qa/bulk-analyze', {});
+      const response = await apiRequest('POST', '/api/qa/bulk-analyze', {}, { timeout: 180000 });
       return response.json();
     },
     onSuccess: (data: any) => {

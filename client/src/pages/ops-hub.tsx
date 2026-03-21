@@ -1205,41 +1205,38 @@ export default function OpsHub() {
     : 'bg-slate-300';
 
   return (
-    <div className="h-screen flex flex-col bg-white text-slate-900 overflow-hidden font-sans">
+    <div className="h-screen flex flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
       {/* ── Header ── */}
-      <header className="h-[56px] border-b border-slate-200 bg-white flex items-center px-5 shrink-0 z-50 shadow-sm">
+      <header className="h-12 border-b border-slate-200 bg-white flex items-center px-4 shrink-0 z-50">
         {/* Logo */}
-        <div className="flex items-center gap-3 mr-6">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Zap className="w-4.5 h-4.5 text-white" />
+        <div className="flex items-center gap-2.5 mr-5">
+          <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
+            <Zap className="w-3.5 h-3.5 text-white" />
           </div>
-          <div>
-            <span className="text-[15px] font-bold text-slate-900 tracking-tight">
-              Operations Hub
-            </span>
-          </div>
+          <span className="text-sm font-semibold text-slate-900 tracking-tight">Ops Hub</span>
         </div>
 
+        {/* Separator */}
+        <div className="h-5 w-px bg-slate-200 mr-4" />
+
         {/* Project Switcher */}
-        <div className="relative mr-6">
+        <div className="relative mr-5">
           <button
             onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
-            className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 transition-colors border border-slate-200"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-slate-50 transition-colors text-sm"
           >
-            <span className="text-lg">{activeProject.icon}</span>
-            <div className="text-left">
-              <div className="text-sm font-semibold text-slate-800">{activeProject.name}</div>
-              <div className="text-[10px] text-slate-500">{activeProject.environment}</div>
-            </div>
-            <ChevronDown className="w-4 h-4 text-slate-400 ml-1" />
+            <div className={`w-2 h-2 rounded-full ${statusColor}`} />
+            <span className="font-medium text-slate-700">{activeProject.name}</span>
+            <span className="text-[10px] text-slate-400 uppercase font-medium">{activeProject.environment}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
           </button>
 
           {projectDropdownOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setProjectDropdownOpen(false)} />
-              <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-2">
-                <div className="px-3 py-1.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Projects</span>
+              <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1">
+                <div className="px-3 py-2">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Projects</span>
                 </div>
                 {PROJECTS.map((project) => (
                   <button
@@ -1248,53 +1245,41 @@ export default function OpsHub() {
                       setActiveProject(project);
                       setProjectDropdownOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 transition-colors ${
-                      activeProject.id === project.id ? 'bg-indigo-50' : ''
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 transition-colors ${
+                      activeProject.id === project.id ? 'bg-slate-50' : ''
                     }`}
                   >
-                    <span className="text-xl">{project.icon}</span>
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${
+                      project.status === 'running' ? 'bg-emerald-400' : project.status === 'deploying' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'
+                    }`} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-slate-800 truncate">{project.name}</div>
                       <div className="text-xs text-slate-500 truncate">{project.description}</div>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <div className={`w-2 h-2 rounded-full ${
-                          project.status === 'running' ? 'bg-emerald-400' : project.status === 'deploying' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'
-                        }`} />
-                        <span className="text-[10px] text-slate-500 capitalize">{project.status}</span>
-                      </div>
-                      <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                        project.deployTarget === 'cloud-run'
-                          ? 'bg-blue-100 text-blue-600'
-                          : 'bg-indigo-100 text-indigo-600'
-                      }`}>
-                        {project.deployTarget === 'cloud-run' ? 'Cloud Run' : 'VM'}
-                      </span>
-                    </div>
+                    <span className={`text-[10px] font-medium uppercase px-1.5 py-0.5 rounded ${
+                      project.deployTarget === 'cloud-run'
+                        ? 'bg-blue-50 text-blue-600'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {project.deployTarget === 'cloud-run' ? 'Cloud Run' : 'VM'}
+                    </span>
                   </button>
                 ))}
-                <div className="border-t border-slate-100 mt-1 pt-1">
-                  <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 transition-colors">
-                    <Plus className="w-4 h-4" />
-                    Add Project
-                  </button>
-                </div>
               </div>
             </>
           )}
         </div>
 
         {/* Top Tabs */}
-        <nav className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+        <nav className="flex items-center gap-0.5">
           {TOP_TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => goToTab(tab.id)}
-              className={`flex items-center gap-1.5 px-4 py-1.5 text-[13px] font-medium rounded-md transition-all duration-200 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-md transition-colors ${
                 activeTopTab === tab.id
-                  ? 'text-slate-900 bg-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
+                  ? 'text-slate-900 bg-slate-100'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
               }`}
             >
               {tab.icon}
@@ -1304,65 +1289,44 @@ export default function OpsHub() {
         </nav>
 
         {/* Right side */}
-        <div className="ml-auto flex items-center gap-1.5">
-          <Badge className={`${statusColor.replace('bg-', 'bg-').replace('-400', '-100')} text-xs px-2.5 py-0.5 rounded-full border-0`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${statusColor} mr-1.5`} />
-            <span className={statusColor.includes('emerald') ? 'text-emerald-700' : statusColor.includes('amber') ? 'text-amber-700' : 'text-slate-600'}>
-              {activeProject.status === 'running' ? 'Online' : activeProject.status === 'deploying' ? 'Deploying' : 'Offline'}
-            </span>
-          </Badge>
-          <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
-            <Search className="w-4 h-4" />
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={toggleSidePanel}
+            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              sidePanelOpen
+                ? 'bg-slate-900 text-white'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Brain className="h-3.5 w-3.5" />
+            Agent C
           </button>
-          <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all relative">
-            <Bell className="w-4 h-4" />
-            <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-indigo-500 rounded-full" />
-          </button>
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center ml-1 shadow-sm cursor-pointer">
-            <User className="w-4 h-4 text-white" />
+          <div className="h-5 w-px bg-slate-200" />
+          <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center cursor-pointer hover:bg-slate-300 transition-colors">
+            <User className="w-3.5 h-3.5 text-slate-600" />
           </div>
         </div>
       </header>
 
-      <div className="shrink-0 border-b border-slate-200 bg-slate-50/70 px-5 py-3">
-        <div className="flex items-center gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {secondaryNavSections.map((section, sectionIndex) => (
-                <React.Fragment key={section.label}>
-                  {sectionIndex > 0 && <div className="mx-1 h-6 w-px shrink-0 bg-slate-200" />}
-                  {section.items.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => goToPage(item.id)}
-                      className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
-                        activePage === item.id
-                          ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
-                          : 'border-transparent bg-transparent text-slate-500 hover:border-slate-200 hover:bg-white hover:text-slate-700'
-                      }`}
-                    >
-                      <span className={activePage === item.id ? 'text-indigo-500' : 'text-slate-400'}>{item.icon}</span>
-                      <span>{item.label}</span>
-                    </button>
-                  ))}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2 border-l border-slate-200 pl-4">
-            <button
-              onClick={toggleSidePanel}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
-                sidePanelOpen
-                  ? 'border-indigo-200 bg-white text-indigo-600 shadow-sm'
-                  : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600'
-              }`}
-            >
-              <Brain className="h-4 w-4" />
-              Coding Agent
-            </button>
-          </div>
+      {/* ── Secondary Navigation ── */}
+      <div className="shrink-0 border-b border-slate-200 bg-white px-4">
+        <div className="flex items-center gap-0 overflow-x-auto -mb-px">
+          {secondaryNavSections.map((section) =>
+            section.items.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => goToPage(item.id)}
+                className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+                  activePage === item.id
+                    ? 'border-slate-900 text-slate-900'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <span className={activePage === item.id ? 'text-slate-700' : 'text-slate-400'}>{item.icon}</span>
+                {item.label}
+              </button>
+            ))
+          )}
         </div>
       </div>
 
@@ -1372,51 +1336,42 @@ export default function OpsHub() {
           {activePage === 'logs' || activePage === 'vm-logs' ? (
             renderContent()
           ) : (
-            <div className={activePage === 'workstations' ? 'flex-1 min-h-0 overflow-hidden p-6' : 'flex-1 overflow-y-auto p-6'}>
+            <div className={activePage === 'workstations' ? 'flex-1 min-h-0 overflow-hidden p-5' : 'flex-1 overflow-y-auto p-5'}>
               {renderContent()}
             </div>
           )}
         </main>
 
         {sidePanelOpen && (
-          <aside className="flex h-full w-[420px] shrink-0 flex-col border-l border-slate-200 bg-white">
+          <aside className="flex h-full w-[400px] shrink-0 flex-col border-l border-slate-200 bg-white">
             {/* ── Panel Header ── */}
-            <div className="border-b border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#fbfaf6_100%)] px-4 py-3.5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 shadow-sm">
-                    <Code2 className="h-4.5 w-4.5 text-white" />
+            <div className="border-b border-slate-200 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900">
+                    <Code2 className="h-3.5 w-3.5 text-white" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">Coding Agent</p>
-                    <p className="text-[11px] text-slate-500">
-                      <span className="mr-1">{activeProject.icon}</span>
-                      {activeProject.name} · {activeProject.environment}
-                    </p>
+                    <p className="text-sm font-semibold text-slate-900">Agent C</p>
+                    <p className="text-[11px] text-slate-500">{activeProject.name}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1">
-                    <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-700">Ready</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSidePanelOpen(false)}
-                    className="h-8 w-8 rounded-xl p-0 text-slate-400 hover:bg-slate-100"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSidePanelOpen(false)}
+                  className="h-7 w-7 rounded-md p-0 text-slate-400 hover:bg-slate-100"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
               </div>
 
               {/* Mode & Provider Controls */}
-              <div className="mt-3 flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1 rounded-full bg-slate-100 p-0.5">
+              <div className="mt-2.5 flex items-center gap-1.5">
+                <div className="flex items-center rounded-md bg-slate-100 p-0.5">
                   <button
                     onClick={() => setCodingAgentMode('agent')}
-                    className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
                       codingAgentMode === 'agent'
                         ? 'bg-white text-slate-900 shadow-sm'
                         : 'text-slate-500 hover:text-slate-700'
@@ -1426,7 +1381,7 @@ export default function OpsHub() {
                   </button>
                   <button
                     onClick={() => setCodingAgentMode('plan')}
-                    className={`rounded-full px-3 py-1.5 text-[11px] font-medium transition-all ${
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
                       codingAgentMode === 'plan'
                         ? 'bg-white text-slate-900 shadow-sm'
                         : 'text-slate-500 hover:text-slate-700'
@@ -1441,7 +1396,7 @@ export default function OpsHub() {
                     value={modelSelector}
                     onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
                   >
-                    <SelectTrigger className="h-7 w-[100px] rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
+                    <SelectTrigger className="h-7 w-[90px] rounded-md border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-700">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1455,29 +1410,20 @@ export default function OpsHub() {
                   value={selectedProvider}
                   onValueChange={(value) => setSelectedProvider(value as CodingAgentProvider)}
                 >
-                  <SelectTrigger className="h-7 w-[110px] rounded-full border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-700">
+                  <SelectTrigger className="h-7 w-[100px] rounded-md border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-700">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(PROVIDER_ROUTING).map(([key, info]) => (
                       <SelectItem key={key} value={key}>
                         <span className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${info.color}`} />
+                          <span className={`h-1.5 w-1.5 rounded-full ${info.color}`} />
                           {info.label}
                         </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-
-              {/* Agent Routing Display */}
-              <div className="mt-2 flex items-center gap-1 text-[10px] text-slate-400">
-                <GitBranch className="h-3 w-3" />
-                <span>Routing: </span>
-                <span className="font-medium text-slate-600">
-                  {PROVIDER_ROUTING[selectedProvider]?.desc || 'Auto-route'}
-                </span>
               </div>
             </div>
 
@@ -1516,10 +1462,10 @@ export default function OpsHub() {
 
             {/* ── Architect Pipeline View ── */}
             {showArchitect && architectSteps.length > 0 && (
-              <div className="border-b border-slate-200 bg-gradient-to-b from-indigo-50/50 to-white px-4 py-3">
-                <div className="flex items-center gap-2 mb-2">
-                  <Wand2 className="h-3.5 w-3.5 text-indigo-500" />
-                  <span className="text-[11px] font-semibold text-indigo-700">Architect Pipeline</span>
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Wand2 className="h-3 w-3 text-slate-500" />
+                  <span className="text-[11px] font-medium text-slate-600">Pipeline</span>
                 </div>
                 <div className="space-y-1.5">
                   {architectSteps.map((step, i) => (
@@ -1551,43 +1497,40 @@ export default function OpsHub() {
             )}
 
             {/* ── Chat Messages ── */}
-            <div className="flex-1 overflow-y-auto bg-slate-50/60 px-4 py-4">
+            <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-4">
               {chatMessages.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center text-center">
-                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl border border-slate-200 bg-white">
-                    <Brain className="h-7 w-7 text-slate-500" />
+                <div className="flex h-full flex-col items-center justify-center text-center px-4">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
+                    <Brain className="h-5 w-5 text-slate-400" />
                   </div>
-                  <p className="text-sm font-medium text-slate-800">Coding Agent</p>
-                  <p className="mt-2 max-w-xs text-[13px] text-slate-500">
-                    Working in <strong>{activeProject.name}</strong> ({activeProject.environment}).
-                    Ask about code, request edits, or plan features — the agent knows your project context automatically.
+                  <p className="text-sm font-medium text-slate-700">What would you like to build?</p>
+                  <p className="mt-1.5 max-w-[260px] text-xs text-slate-400 leading-relaxed">
+                    Agent C is scoped to <strong className="text-slate-500">{activeProject.name}</strong>. Select a file in the workspace, then ask for edits, analysis, or planning.
                   </p>
 
-                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  <div className="mt-4 grid grid-cols-2 gap-1.5 w-full max-w-[280px]">
                     {[
                       { label: 'Analyze code', prompt: `Analyze the key files in the ${activeProject.name} project for issues and improvements.` },
                       { label: 'Fix a bug', prompt: selectedFile ? 'Fix a bug in the currently selected file.' : `Help me debug an issue in the ${activeProject.name} project.` },
                       { label: 'Refactor', prompt: selectedFile ? 'Refactor the selected file for clarity and maintainability.' : `Suggest refactoring targets in ${activeProject.name}.` },
-                      { label: 'Add feature', prompt: `Plan a new feature for the ${activeProject.name} project and explain the implementation steps.` },
-                      { label: 'Deploy check', prompt: `Review the ${activeProject.deployTarget === 'vm' ? 'VM' : 'Cloud Run'} deployment configuration for ${activeProject.name} and suggest improvements.` },
+                      { label: 'Plan feature', prompt: `Plan a new feature for the ${activeProject.name} project and explain the implementation steps.` },
                     ].map((action) => (
                       <button
                         key={action.label}
                         onClick={() => setChatInput(action.prompt)}
-                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                        className="rounded-md border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 text-left"
                       >
                         {action.label}
                       </button>
                     ))}
                   </div>
 
-                  {/* Browse workspace files inline */}
                   <button
                     onClick={() => goToPage('files')}
-                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-2 text-[12px] text-slate-500 transition hover:border-indigo-300 hover:text-indigo-600"
+                    className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-slate-400 transition hover:text-slate-600"
                   >
-                    <FolderOpen className="h-4 w-4" />
-                    Browse workspace files
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    Open workspace
                   </button>
                 </div>
               ) : (
@@ -1598,13 +1541,13 @@ export default function OpsHub() {
                       : message.provider;
 
                   return (
-                    <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-4 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                      <div className={`max-w-[90%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                    <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-3 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
+                      <div className={`max-w-[90%] rounded-lg px-3 py-2.5 text-[13px] leading-relaxed ${
                         message.role === 'user'
-                          ? 'bg-indigo-500 text-white shadow-sm'
+                          ? 'bg-slate-900 text-white'
                           : message.isError
-                          ? 'border border-red-200 bg-red-50 text-red-700 shadow-sm'
-                          : 'border border-slate-200 bg-white text-slate-700 shadow-sm'
+                          ? 'border border-red-200 bg-red-50 text-red-700'
+                          : 'border border-slate-200 bg-white text-slate-700'
                       }`}>
                         <p className="whitespace-pre-wrap">{message.content}</p>
                         <div className="mt-2 flex items-center gap-2 text-[10px] opacity-60">
@@ -1637,11 +1580,11 @@ export default function OpsHub() {
             </div>
 
             {/* ── Input Area ── */}
-            <div className="border-t border-slate-200 bg-white px-3.5 py-3">
+            <div className="border-t border-slate-200 bg-white px-3 py-2.5">
               {promptOptimizing && (
-                <div className="mb-2 flex items-center gap-2 rounded-lg bg-indigo-50 px-3 py-1.5 text-[11px] text-indigo-700">
-                  <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-                  Optimizing your prompt for better results...
+                <div className="mb-2 flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">
+                  <Sparkles className="h-3 w-3 animate-pulse text-slate-400" />
+                  Optimizing prompt...
                 </div>
               )}
               <div className="relative">
@@ -1649,34 +1592,28 @@ export default function OpsHub() {
                   value={chatInput}
                   onChange={(event) => setChatInput(event.target.value)}
                   onKeyDown={handleChatKeyDown}
-                  placeholder={voiceListening ? 'Listening... speak your prompt' : 'Describe what you need - code fix, analysis, feature...'}
-                  className={`min-h-[72px] max-h-[140px] resize-none rounded-2xl border-slate-200 bg-slate-50 pr-24 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-slate-200 ${
+                  placeholder={voiceListening ? 'Listening...' : 'Describe what you need...'}
+                  className={`min-h-[64px] max-h-[120px] resize-none rounded-lg border-slate-200 bg-slate-50 pr-20 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-0 ${
                     voiceListening ? 'border-red-300 bg-red-50/30' : ''
                   }`}
-                  rows={3}
+                  rows={2}
                 />
-                <div className="absolute bottom-2.5 right-2.5 flex items-center gap-1.5">
-                  {/* Voice button */}
+                <div className="absolute bottom-2 right-2 flex items-center gap-1">
                   <button
                     onClick={toggleVoiceInput}
-                    className={`rounded-xl p-2 transition-all ${
+                    className={`rounded-md p-1.5 transition-colors ${
                       voiceListening
-                        ? 'bg-red-500 shadow-sm shadow-red-200 animate-pulse'
-                        : 'bg-slate-200 hover:bg-slate-300'
+                        ? 'bg-red-500 text-white animate-pulse'
+                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
                     }`}
                     title={voiceListening ? 'Stop listening' : 'Voice input'}
                   >
-                    {voiceListening ? (
-                      <MicOff className="h-3.5 w-3.5 text-white" />
-                    ) : (
-                      <Mic className="h-3.5 w-3.5 text-slate-600" />
-                    )}
+                    {voiceListening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
                   </button>
-                  {/* Send button */}
                   <button
                     onClick={() => handleChatSend()}
                     disabled={chatSending || !chatInput.trim()}
-                    className="rounded-xl bg-slate-900 p-2 shadow-sm transition-all hover:bg-slate-800 disabled:opacity-30"
+                    className="rounded-md bg-slate-900 p-1.5 transition-colors hover:bg-slate-800 disabled:opacity-30"
                   >
                     {chatSending ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
@@ -1686,8 +1623,8 @@ export default function OpsHub() {
                   </button>
                 </div>
               </div>
-              <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                <span>Enter sends · Shift+Enter new line · Mic for voice</span>
+              <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+                <span>Enter to send</span>
                 <span className="flex items-center gap-1">
                   <span className={`h-1.5 w-1.5 rounded-full ${PROVIDER_ROUTING[selectedProvider]?.color || 'bg-slate-400'}`} />
                   {PROVIDER_ROUTING[selectedProvider]?.label || selectedProvider}
@@ -1699,22 +1636,17 @@ export default function OpsHub() {
       </div>
 
       {/* ── Footer ── */}
-      <footer className="h-8 border-t border-slate-200 bg-white flex items-center px-5 shrink-0 text-[11px]">
-        <span className="text-slate-400 font-medium">v1.0.5-stable</span>
-        <div className="ml-5 flex items-center gap-2 bg-slate-100 px-2.5 py-0.5 rounded-full">
-          <div className={`w-[6px] h-[6px] rounded-full ${platformOnline ? 'bg-emerald-400' : 'bg-red-400'}`} />
-          <span className={`font-medium ${platformOnline ? 'text-emerald-600' : 'text-red-600'}`}>
-            {platformOnline ? 'Platform Online' : 'Platform Offline'}
-          </span>
+      <footer className="h-7 border-t border-slate-200 bg-white flex items-center px-4 shrink-0 text-[10px] text-slate-400">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full ${platformOnline ? 'bg-emerald-400' : 'bg-red-400'}`} />
+          <span>{platformOnline ? 'Online' : 'Offline'}</span>
         </div>
         {overview?.currentBranch && (
-          <div className="ml-3 text-slate-400 font-medium truncate">
-            {overview.currentBranch}{overview.currentCommit ? ` @ ${overview.currentCommit}` : ''}
-          </div>
+          <span className="ml-3 truncate">
+            {overview.currentBranch}{overview.currentCommit ? ` · ${overview.currentCommit.slice(0, 7)}` : ''}
+          </span>
         )}
-        <div className="ml-auto text-slate-400 font-medium">
-          {activeProject.name} · {activeProject.environment}
-        </div>
+        <span className="ml-auto">{activeProject.deployTarget === 'vm' ? 'VM' : 'Cloud Run'} · {activeProject.environment}</span>
       </footer>
     </div>
   );

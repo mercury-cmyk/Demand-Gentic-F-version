@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-RUN apk add --no-cache bash docker-cli git
+RUN apk add --no-cache bash docker-cli docker-cli-compose git
 
 WORKDIR /workspace
 

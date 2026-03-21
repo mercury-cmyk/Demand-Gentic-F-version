@@ -235,7 +235,7 @@ export default function AgenticCRMOperatorPage() {
               <Crown className="h-7 w-7 text-white" />
             </div>
             <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white">
-              The Agentic Demand Council
+              Agentic Operations
             </h1>
           </div>
 

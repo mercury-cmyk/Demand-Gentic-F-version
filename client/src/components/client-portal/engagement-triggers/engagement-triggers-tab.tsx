@@ -133,7 +133,7 @@ export function EngagementTriggersTab({ authHeaders, clientAccountId }: Engageme
     queryKey: ['engagement-stats', clientAccountId],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (clientAccountId) params.set('accountId', clientAccountId);
+      if (clientAccountId) params.set('clientAccountId', clientAccountId);
       const res = await fetch(`/api/engagement-triggers/stats?${params}`, authHeaders);
       if (!res.ok) throw new Error('Failed to fetch stats');
       return res.json();
@@ -145,7 +145,7 @@ export function EngagementTriggersTab({ authHeaders, clientAccountId }: Engageme
     queryKey: ['engagement-pipeline-leads', clientAccountId, page],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-      if (clientAccountId) params.set('accountId', clientAccountId);
+      if (clientAccountId) params.set('clientAccountId', clientAccountId);
       const res = await fetch(`/api/engagement-triggers/pipeline-leads?${params}`, authHeaders);
       if (!res.ok) throw new Error('Failed to fetch leads');
       return res.json();
@@ -157,7 +157,7 @@ export function EngagementTriggersTab({ authHeaders, clientAccountId }: Engageme
     queryKey: ['engagement-triggers-list', clientAccountId, triggerPage, statusFilter],
     queryFn: async () => {
       const params = new URLSearchParams({ page: String(triggerPage), pageSize: String(pageSize) });
-      if (clientAccountId) params.set('accountId', clientAccountId);
+      if (clientAccountId) params.set('clientAccountId', clientAccountId);
       if (statusFilter !== 'all') params.set('status', statusFilter);
       const res = await fetch(`/api/engagement-triggers?${params}`, authHeaders);
       if (!res.ok) throw new Error('Failed to fetch triggers');
