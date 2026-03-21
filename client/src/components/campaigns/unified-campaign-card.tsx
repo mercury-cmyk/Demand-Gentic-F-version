@@ -121,7 +121,7 @@ export function UnifiedCampaignCard({
         setLocation(`/campaigns/${campaign.id}/config`);
         break;
       case 'analytics':
-        setLocation(`/call-reports?campaignId=${campaign.id}`);
+        setLocation(`/reports?campaignId=${campaign.id}`);
         break;
     }
   };

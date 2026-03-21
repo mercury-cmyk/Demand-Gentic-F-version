@@ -72,10 +72,8 @@ const ContentGovernancePage = lazy(() => import("@/pages/content-governance"));
 const AIContentGeneratorPage = lazy(() => import("@/pages/ai-content-generator"));
 const SocialMediaPublisherPage = lazy(() => import("@/pages/social-media-publisher"));
 const ReportsPage = lazy(() => import("@/pages/reports"));
-const CallReportsPage = lazy(() => import("@/pages/call-reports"));
 const DispositionIntelligenceHubPage = lazy(() => import("@/pages/unified-intelligence"));
 const PotentialLeadsPage = lazy(() => import("@/pages/potential-leads"));
-import CallReportsDetailsPage from "@/pages/call-reports-details";
 const EngagementAnalyticsPage = lazy(() => import("@/pages/engagement-analytics"));
 import UnifiedAgentConsolePage from "@/pages/unified-agent-console";
 import SettingsPage from "@/pages/settings";
@@ -435,8 +433,6 @@ function AuthenticatedApp() {
               
               {/* Reports & Analytics */}
               <Route path="/reports" component={ReportsPage} />
-              <Route path="/call-reports" component={CallReportsPage} />
-              <Route path="/call-reports/:id" component={CallReportsDetailsPage} />
               {/* /call-intelligence route removed - page deprecated */}
               <Route path="/unified-intelligence">
                 <Redirect to="/disposition-intelligence" />
@@ -474,9 +470,6 @@ function AuthenticatedApp() {
                 <Redirect to="/disposition-intelligence?tab=showcase-calls" />
               </Route>
               <Route path="/engagement-analytics" component={EngagementAnalyticsPage} />
-              <Route path="/ai-call-analytics">
-                <Redirect to="/call-reports?tab=ai" />
-              </Route>
               <Route path="/agent-reports-dashboard" component={AgentReportsDashboard} />
               
               {/* Agent Console & Virtual Agents */}

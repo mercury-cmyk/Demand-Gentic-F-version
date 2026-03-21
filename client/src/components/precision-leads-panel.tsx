@@ -339,10 +339,10 @@ export default function PrecisionLeadsPanel() {
   } : null;
 
   return (
-    <div className="h-full flex flex-col gap-4 p-4">
+    <div className="h-full flex flex-col gap-3 p-4 overflow-hidden">
       {/* Stats Cards */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 shrink-0">
           {/* "All" card */}
           <Card
             className={cn('cursor-pointer hover:shadow-md transition-all border-2',
@@ -400,7 +400,7 @@ export default function PrecisionLeadsPanel() {
       )}
 
       {/* Filters Bar */}
-      <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border bg-background">
+      <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border bg-background shrink-0">
         <div className="relative flex-1 min-w-[200px] max-w-[300px]">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -486,7 +486,7 @@ export default function PrecisionLeadsPanel() {
       </div>
 
       {/* Total Count + Legend */}
-      <div className="flex items-center justify-between text-sm">
+      <div className="flex items-center justify-between text-sm shrink-0">
         <div className="flex items-center gap-2">
           <Target className="h-4 w-4 text-primary" />
           <span className="font-semibold">{total} precision-analyzed leads</span>
@@ -506,9 +506,9 @@ export default function PrecisionLeadsPanel() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex gap-4 min-h-0">
+      <div className="flex-1 flex gap-4 min-h-0 overflow-hidden">
         {/* Lead List */}
-        <ScrollArea className="flex-1 rounded-lg border bg-background">
+        <ScrollArea className="flex-1 min-w-0 rounded-lg border bg-background">
           {isLoading ? (
             <div className="p-4 space-y-3">
               {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}
@@ -619,7 +619,7 @@ export default function PrecisionLeadsPanel() {
 
         {/* Detail Panel */}
         {selectedLead ? (
-          <div className="w-[480px] shrink-0 rounded-lg border bg-background overflow-hidden flex flex-col">
+          <div className="w-[480px] max-w-[50%] shrink-0 rounded-lg border bg-background overflow-hidden flex flex-col">
             {/* Fixed Header */}
             <div className="p-4 border-b bg-muted/30 space-y-3">
               <div className="flex items-start justify-between">
@@ -1022,7 +1022,7 @@ export default function PrecisionLeadsPanel() {
             </Tabs>
           </div>
         ) : (
-          <div className="w-[480px] shrink-0 rounded-lg border bg-background flex items-center justify-center">
+          <div className="w-[480px] max-w-[50%] shrink-0 rounded-lg border bg-background flex items-center justify-center">
             <div className="text-center text-muted-foreground p-8">
               <Target className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-sm font-medium">Select a lead to view details</p>
@@ -1034,7 +1034,7 @@ export default function PrecisionLeadsPanel() {
 
       {/* Pagination */}
       {meta.totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
+        <div className="flex items-center justify-between px-2 shrink-0">
           <span className="text-sm text-muted-foreground">
             Page {meta.page} of {meta.totalPages} ({total} results)
           </span>

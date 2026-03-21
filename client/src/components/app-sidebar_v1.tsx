@@ -166,7 +166,6 @@ const getNavSections = (): NavSection[] => [
         roles: ["admin", "campaign_manager", "agent"],
         items: [
           { title: "Overview", url: "/reports", roles: ["admin", "campaign_manager"] },
-          { title: "Call Reports", url: "/call-reports", roles: ["admin", "campaign_manager", "agent"] },
         ],
       },
       {

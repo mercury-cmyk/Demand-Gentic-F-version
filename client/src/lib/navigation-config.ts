@@ -88,138 +88,122 @@ const VOICE_TRAINING_ROLES: string[] = [...QA_ROLES, USER_ROLES.VOICE_TRAINER];
 
 /**
  * Main navigation configuration
- * Organized by domain-bounded contexts
+ * Simplified, flat structure: Overview + 5 groups + Settings (admin)
  */
 export const NAVIGATION_SECTIONS: NavSection[] = [
   // ============================================
-  // AI & INTELLIGENCE DOMAIN
+  // OVERVIEW (pinned)
   // ============================================
   {
-    id: 'ai-intelligence',
-    label: 'AI & Intelligence',
-    domain: NAVIGATION_DOMAINS.AI_INTELLIGENCE,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST, USER_ROLES.VOICE_TRAINER],
-    description: 'AI agents, organization intelligence, and prompt configuration',
+    id: 'overview',
+    label: '',
+    domain: NAVIGATION_DOMAINS.CORE_CRM,
+    roles: ALL_ROLES,
     items: [
       {
-        id: 'ai-studio',
-        title: 'AI Studio',
-        icon: 'Sparkles',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.QUALITY_ANALYST, USER_ROLES.VOICE_TRAINER],
-        items: [
-          {
-            id: 'ai-dashboard',
-            title: 'Intelligence Dashboard',
-            url: '/ai-studio',
-            roles: MANAGEMENT_ROLES,
-            badge: { text: 'New', variant: 'new' },
-            description: 'Overview of all AI configurations',
-          },
-          {
-            id: 'org-intelligence',
-            title: 'Organization Intelligence',
-            url: '/ai-studio/intelligence',
-            roles: MANAGEMENT_ROLES,
-            description: 'Configure organization context and service catalog',
-          },
-          {
-            id: 'foundational-agents',
-            title: 'Foundational Agents',
-            url: '/unified-agent-architecture',
-            roles: MANAGEMENT_ROLES,
-            badge: { text: 'New', variant: 'new' as BadgeVariant },
-            description: 'Unified agent architecture — prompt sections, capabilities, learning pipeline',
-          },
-          {
-            id: 'preview-studio',
-            title: 'Preview Studio',
-            url: '/preview-studio',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
-            description: 'Test and preview AI agent behavior',
-          },
-          // Agent Prompts moved inside Unified Agent Architecture (AgentX)
-          {
-            id: 'campaign-manager',
-            title: 'Campaign Manager',
-            url: '/ai-studio/campaign-manager',
-            roles: MANAGEMENT_ROLES,
-            badge: { text: 'New', variant: 'new' as BadgeVariant },
-            description: 'AI quarterly planning, approvals, and channel orchestration',
-          },
-        ],
-      },
-      {
-        id: 'generative-studio',
-        title: 'Creative Studio',
-        url: '/generative-studio',
-        icon: 'Wand2',
-        roles: MANAGEMENT_ROLES,
-        badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'AI-powered content creation hub for images, pages, emails, blogs, and more',
+        id: 'overview',
+        title: 'Overview',
+        url: '/',
+        icon: 'LayoutDashboard',
+        roles: ALL_ROLES,
       },
     ],
   },
 
   // ============================================
-  // CORE CRM DOMAIN
+  // CAMPAIGNS
   // ============================================
   {
-    id: 'core-crm',
-    label: 'Core CRM',
-    domain: NAVIGATION_DOMAINS.CORE_CRM,
-    roles: ALL_ROLES,
-    description: 'Accounts, contacts, pipeline, and core CRM functionality',
+    id: 'campaigns',
+    label: 'Campaigns',
+    domain: NAVIGATION_DOMAINS.CAMPAIGNS,
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.AGENT, USER_ROLES.CLIENT_USER],
     items: [
       {
-        id: 'dashboard',
-        title: 'Dashboard',
-        icon: 'LayoutDashboard',
-        roles: ALL_ROLES,
+        id: 'campaigns-group',
+        title: 'Campaigns',
+        icon: 'Megaphone',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         items: [
           {
-            id: 'overview',
-            title: 'Overview',
-            url: '/',
-            roles: ALL_ROLES,
+            id: 'all-campaigns',
+            title: 'All Campaigns',
+            url: '/campaigns',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
+          },
+          {
+            id: 'create-campaign',
+            title: 'Create Campaign',
+            url: '/campaigns/create',
+            roles: MANAGEMENT_ROLES,
+          },
+          {
+            id: 'pipeline-engagement',
+            title: 'Pipeline & Engagement',
+            url: '/pipeline',
+            roles: MANAGEMENT_ROLES,
+          },
+          {
+            id: 'work-orders',
+            title: 'Work Orders',
+            url: '/admin/project-requests',
+            roles: MANAGEMENT_ROLES,
           },
           {
             id: 'bookings',
             title: 'Bookings',
             url: '/admin/bookings',
             roles: MANAGEMENT_ROLES,
-            badge: { text: "New", variant: "new" }
+          },
+          {
+            id: 'upcoming-events',
+            title: 'Upcoming Events',
+            url: '/events',
+            roles: MANAGEMENT_ROLES,
           },
         ],
       },
+    ],
+  },
+
+  // ============================================
+  // ARGYLE AI STUDIO
+  // ============================================
+  {
+    id: 'ai-intelligence',
+    label: 'Argyle AI Studio',
+    domain: NAVIGATION_DOMAINS.AI_INTELLIGENCE,
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
+    items: [
       {
-        id: 'revenue-pipeline',
-        title: 'Revenue & Pipeline',
-        icon: 'KanbanSquare',
-        roles: MANAGEMENT_ROLES,
+        id: 'ai-studio-group',
+        title: 'AI Studio',
+        icon: 'Sparkles',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         items: [
           {
-            id: 'pipeline',
-            title: 'Pipeline',
-            url: '/pipeline',
+            id: 'org-intelligence',
+            title: 'Org Intelligence',
+            url: '/ai-studio/intelligence',
             roles: MANAGEMENT_ROLES,
           },
           {
-            id: 'import-opportunities',
-            title: 'Import Opportunities',
-            url: '/pipeline/import',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'revenue-inbox',
-            title: 'Revenue Inbox',
-            url: '/inbox',
+            id: 'target-markets',
+            title: 'Target Markets',
+            url: '/domain-sets',
             roles: MANAGEMENT_ROLES,
           },
           {
-            id: 'email-sequences',
-            title: 'Email Sequences',
-            url: '/email-sequences',
+            id: 'creative-studio',
+            title: 'Creative Studio',
+            url: '/generative-studio',
             roles: MANAGEMENT_ROLES,
+          },
+          {
+            id: 'preview-studio',
+            title: 'Preview Studio',
+            url: '/preview-studio',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
           },
         ],
       },
@@ -227,240 +211,79 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
   },
 
   // ============================================
-  // CAMPAIGNS DOMAIN (UNIFIED)
+  // COMMUNICATIONS
   // ============================================
   {
-    id: 'campaigns',
-    label: 'Campaigns & Execution',
-    domain: NAVIGATION_DOMAINS.CAMPAIGNS,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.AGENT, USER_ROLES.CLIENT_USER],
-    description: 'Campaign management, agent console, and lead review',
+    id: 'communications',
+    label: 'Communications',
+    domain: NAVIGATION_DOMAINS.CORE_CRM,
+    roles: MANAGEMENT_ROLES,
     items: [
       {
-        id: 'campaigns-hub',
-        title: 'Campaigns',
-        url: '/campaigns',
-        icon: 'Megaphone',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Unified campaign management for email and phone',
-      },
-      {
-        id: 'content-promotion',
-        title: 'Landing Pages',
-        url: '/content-promotion',
-        icon: 'PanelTop',
+        id: 'shared-inbox',
+        title: 'Shared Inbox',
+        url: '/inbox',
+        icon: 'Inbox',
         roles: MANAGEMENT_ROLES,
         badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'Create and manage landing pages',
+        description: 'Unified shared inbox for all communications',
       },
     ],
   },
 
   // ============================================
-  // QUALITY CONTROL CENTER
-  // ============================================
-  {
-    id: 'quality-control',
-    label: 'Quality Control Center',
-    domain: NAVIGATION_DOMAINS.QUALITY_CONTROL,
-    roles: [...QA_ROLES, USER_ROLES.AGENT],
-    description: 'Unified quality control, data integrity, and lead review',
-    items: [
-      {
-        id: 'disposition-intelligence',
-        title: 'Disposition Intelligence',
-        url: '/disposition-intelligence',
-        icon: 'BarChart3',
-        roles: [...QA_ROLES, USER_ROLES.AGENT],
-        description: 'Dispositions, conversation quality, showcase calls, transcription health, and reanalysis',
-      },
-      {
-        id: 'potential-leads',
-        title: 'Potential Leads',
-        url: '/disposition-intelligence/potential-leads',
-        icon: 'Target',
-        roles: QA_ROLES,
-        description: 'AI-identified leads with qualification signals',
-      },
-      {
-        id: 'qa-lead-review',
-        title: 'QA & Lead Review',
-        url: '/leads',
-        icon: 'CheckCircle',
-        roles: [...QA_ROLES, USER_ROLES.AGENT],
-        description: 'Review and qualify leads',
-      },
-    ],
-  },
-
-  // ============================================
-  // ANALYTICS DOMAIN
+  // ANALYTICS
   // ============================================
   {
     id: 'analytics',
-    label: 'Analytics & Insights',
+    label: 'Analytics',
     domain: NAVIGATION_DOMAINS.ANALYTICS,
-    roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-    description: 'Campaign analytics, call reports, and performance insights',
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST, USER_ROLES.CLIENT_USER],
     items: [
       {
-        id: 'engagement-analytics',
-        title: 'Analytics',
+        id: 'reports-analytics',
+        title: 'Reports & Analytics',
         url: '/engagement-analytics',
         icon: 'BarChart3',
-        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Campaign engagement metrics',
-      },
-      {
-        id: 'call-reports',
-        title: 'Call Reports',
-        url: '/call-reports',
-        icon: 'FileText',
-        roles: [...QA_ROLES, USER_ROLES.CLIENT_USER],
-        description: 'Call disposition reports, agent performance, and AI call analytics',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.QUALITY_ANALYST, USER_ROLES.CLIENT_USER],
       },
     ],
   },
 
   // ============================================
-  // OPERATIONS DOMAIN
+  // ACCOUNT
   // ============================================
   {
-    id: 'operations',
-    label: 'Projects & Operations',
+    id: 'account',
+    label: 'Account',
     domain: NAVIGATION_DOMAINS.OPERATIONS,
-    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER, USER_ROLES.DATA_OPS, USER_ROLES.QUALITY_ANALYST, USER_ROLES.AGENT],
-    description: 'Project management and operational workflows',
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
     items: [
       {
-        id: 'project-management',
-        title: 'Project Management',
-        icon: 'FolderKanban',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS, USER_ROLES.QUALITY_ANALYST, USER_ROLES.AGENT],
-        description: 'Project requests, task board, and PM review',
-        items: [
-          {
-            id: 'project-requests',
-            title: 'Project Requests',
-            url: '/admin/project-requests',
-            roles: MANAGEMENT_ROLES,
-            description: 'Review and approve client project requests',
-            badge: { text: 'New', variant: 'new' },
-          },
-          {
-            id: 'todo-board',
-            title: 'Strategic Tasks',
-            url: '/admin/todo-board',
-            roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER, USER_ROLES.DATA_OPS, USER_ROLES.QUALITY_ANALYST, USER_ROLES.AGENT],
-            description: 'AI-powered issue detection, prioritization, and role-aware task assignment',
-          },
-          {
-            id: 'pm-review',
-            title: 'PM Review',
-            url: '/leads?tab=pm-review',
-            roles: MANAGEMENT_ROLES,
-            description: 'Review QA-approved leads before client delivery',
-          },
-        ],
-      },
-      {
-        id: 'finance-program',
-        title: 'Finance & Programs',
-        url: '/finance-program',
+        id: 'account-group',
+        title: 'Account',
         icon: 'Briefcase',
-        roles: [USER_ROLES.ADMIN],
-        badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'Accelerator readiness, funding goals, budget tracking, and milestone management',
-      },
-      {
-        id: 'administration',
-        title: 'Administration',
-        icon: 'Building',
-        roles: [USER_ROLES.ADMIN],
-        description: 'Organization, client, and access management',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
         items: [
           {
-            id: 'organization-manager',
-            title: 'Organizations',
-            url: '/settings/super-org',
+            id: 'billing-invoices',
+            title: 'Billing & Invoices',
+            url: '/finance-program',
             roles: [USER_ROLES.ADMIN],
-            description: 'Manage super, client, and campaign organizations',
           },
           {
-            id: 'client-management',
-            title: 'Client Management',
+            id: 'client-guide',
+            title: 'Client Guide',
             url: '/client-portal-admin',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Manage clients, client users, and portal access',
-          },
-          {
-            id: 'iam-overview',
-            title: 'Access Control',
-            url: '/iam',
-            roles: [USER_ROLES.ADMIN],
-            description: 'IAM dashboard — users, roles, policies, and audit',
-          },
-        ],
-      },
-      {
-        id: 'data-management',
-        title: 'Data Management',
-        icon: 'Database',
-        roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-        description: 'Accounts, contacts, segments, and data operations',
-        items: [
-          {
-            id: 'data-management-hub',
-            title: 'Data Hub',
-            url: '/data-management',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Manage data uploads, quality, templates, and requests',
-          },
-          {
-            id: 'all-accounts',
-            title: 'Accounts',
-            url: '/accounts',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'target-accounts',
-            title: 'Target Accounts (TAL)',
-            url: '/domain-sets',
-            roles: [USER_ROLES.ADMIN, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'account-segments',
-            title: 'Account Segments & Lists',
-            url: '/segments?entity=account',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'all-contacts',
-            title: 'Contacts',
-            url: '/contacts',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'contact-segments',
-            title: 'Contact Segments & Lists',
-            url: '/segments?entity=contact',
-            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
-          },
-          {
-            id: 'lead-forms',
-            title: 'Lead Forms',
-            url: '/lead-forms',
             roles: MANAGEMENT_ROLES,
-            description: 'Lead capture forms',
           },
         ],
       },
     ],
   },
 
-
   // ============================================
-  // SETTINGS DOMAIN
+  // SETTINGS (admin only, collapsed by default)
   // ============================================
   {
     id: 'settings',
@@ -468,14 +291,12 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     domain: NAVIGATION_DOMAINS.SETTINGS,
     roles: [USER_ROLES.ADMIN],
     collapsedByDefault: true,
-    description: 'System configuration and administration',
     items: [
       {
         id: 'settings-general',
         title: 'General',
         icon: 'Settings',
         roles: [USER_ROLES.ADMIN],
-        description: 'Profile, users, integrations, and platform',
         items: [
           {
             id: 'settings-profile',
@@ -495,20 +316,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             url: '/settings/integrations',
             roles: [USER_ROLES.ADMIN],
           },
-          {
-            id: 'settings-platform',
-            title: 'Platform Admin',
-            url: '/settings/super-org',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Super organization management',
-          },
-          {
-            id: 'settings-cloud-logs',
-            title: 'System Logs',
-            url: '/cloud-logs',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Monitor API, media bridge, and SIP server logs',
-          },
         ],
       },
       {
@@ -516,7 +323,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         title: 'Telephony',
         icon: 'Phone',
         roles: [USER_ROLES.ADMIN],
-        description: 'SIP, number pool, and voice settings',
         items: [
           {
             id: 'settings-telephony',
@@ -529,7 +335,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             title: 'Number Pool',
             url: '/number-pool',
             roles: [USER_ROLES.ADMIN],
-            description: 'Manage Telnyx phone numbers for AI calling',
           },
         ],
       },
@@ -538,29 +343,18 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         title: 'AI Configuration',
         icon: 'Bot',
         roles: [USER_ROLES.ADMIN],
-        description: 'Agent defaults, knowledge hub, and prompt management',
         items: [
           {
             id: 'settings-agent-defaults',
             title: 'Agent Defaults',
             url: '/settings/agent-defaults',
             roles: [USER_ROLES.ADMIN],
-            description: 'Configure default AI agent settings',
           },
           {
             id: 'settings-ai-governance',
             title: 'AI Governance',
             url: '/settings/ai-governance',
             roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER],
-            description: 'Govern providers and models by task',
-          },
-          {
-            id: 'settings-prompts',
-            title: 'Prompt Management',
-            url: '/settings/prompts',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Manage AI prompts, versions, and performance analytics',
-            badge: { text: 'New', variant: 'new' },
           },
         ],
       },
@@ -569,42 +363,18 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         title: 'Email & Messaging',
         icon: 'Mail',
         roles: [USER_ROLES.ADMIN],
-        description: 'SMTP, templates, domains, deliverability, and branding',
         items: [
           {
             id: 'settings-mercury-notifications',
             title: 'Mercury & Transactional',
             url: '/settings/mercury-notifications',
             roles: [USER_ROLES.ADMIN],
-            description: 'SMTP providers, transactional templates, and Mercury notification rules',
           },
           {
             id: 'settings-email-management',
             title: 'Campaign Email',
             url: '/settings/email-management',
             roles: [USER_ROLES.ADMIN],
-            description: 'Manage campaign providers, sender profiles, and sending domains',
-          },
-          {
-            id: 'settings-deliverability',
-            title: 'Deliverability',
-            url: '/settings/deliverability',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Monitor email deliverability and blacklists',
-          },
-          {
-            id: 'settings-brand-kits',
-            title: 'Brand Kits',
-            url: '/settings/brand-kits',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Manage brand colors, fonts, and styles for emails',
-          },
-          {
-            id: 'settings-email-builder',
-            title: 'Email Builder',
-            url: '/email-builder',
-            roles: [USER_ROLES.ADMIN],
-            description: 'Build emails with drag-and-drop blocks',
           },
         ],
       },

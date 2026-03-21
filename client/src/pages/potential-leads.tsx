@@ -20,7 +20,6 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Slider } from '@/components/ui/slider';
@@ -33,9 +32,9 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import {
-  RefreshCw, Brain, Search, ArrowLeft, Phone, Building, Clock, FileText,
-  Mic, BarChart3, AlertTriangle, Target, TrendingUp, ChevronLeft, ChevronRight,
-  Sparkles, Crosshair, Zap, CheckCircle2, ShieldCheck, Radar,
+  RefreshCw, Brain, Search, ArrowLeft, Building, Clock, FileText,
+  Mic, AlertTriangle, Target, TrendingUp, ChevronLeft, ChevronRight,
+  Sparkles, Zap, CheckCircle2, ShieldCheck, Radar,
 } from 'lucide-react';
 import PrecisionLeadsPanel from '@/components/precision-leads-panel';
 import {
@@ -482,8 +481,9 @@ export default function PotentialLeadsPage() {
         <ResizablePanelGroup direction="horizontal" className="h-full rounded-xl border bg-background shadow-sm">
           {/* Left Panel - Filters + List */}
           <ResizablePanel defaultSize={40} minSize={30} maxSize={50}>
-            <div className="h-full overflow-auto p-4 space-y-4">
-              {/* Filters */}
+            <div className="h-full flex flex-col overflow-hidden">
+              {/* Filters - Fixed at top */}
+              <div className="shrink-0 p-4 pb-3 border-b">
               <Card>
                 <CardContent className="p-3">
                   <div className="flex items-center justify-between mb-2">
@@ -602,15 +602,16 @@ export default function PotentialLeadsPage() {
                 </CardContent>
               </Card>
 
-              {/* Results List */}
-              <Card className="h-[480px] flex flex-col">
-                <CardHeader className="pb-2 px-4 pt-3 border-b bg-muted/30">
-                  <CardTitle className="text-sm">Potential Leads</CardTitle>
-                  <CardDescription className="text-xs">
+              </div>
+              {/* Results List — fills remaining height */}
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="shrink-0 pb-2 px-4 pt-3 border-b bg-muted/30">
+                  <h3 className="text-sm font-semibold">Potential Leads</h3>
+                  <p className="text-xs text-muted-foreground">
                     {isLoading ? 'Loading...' : `Showing ${((page - 1) * pageSize) + 1}–${Math.min(page * pageSize, total)} of ${total}`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="flex-1 overflow-hidden p-0">
+                  </p>
+                </div>
+                <div className="flex-1 overflow-hidden">
                   {isLoading ? (
                     <div className="p-4 space-y-3">
                       {[1, 2, 3, 4].map((i) => (
@@ -745,10 +746,10 @@ export default function PotentialLeadsPage() {
                       </div>
                     </ScrollArea>
                   )}
-                </CardContent>
+                </div>
                 {/* Pagination */}
                 {meta.totalPages > 1 && (
-                  <div className="border-t px-4 py-2 flex items-center justify-between">
+                  <div className="shrink-0 border-t px-4 py-2 flex items-center justify-between">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -772,7 +773,7 @@ export default function PotentialLeadsPage() {
                     </Button>
                   </div>
                 )}
-              </Card>
+              </div>
             </div>
           </ResizablePanel>
 
@@ -885,184 +886,100 @@ function PotentialLeadCard({
     && lead.suggestedDisposition.toLowerCase() !== lead.disposition.toLowerCase();
 
   return (
-    <Card
+    <div
       className={cn(
-        'cursor-pointer transition-all hover:shadow-md p-3 border-muted/60 bg-background/80 hover:bg-muted/20',
-        isSelected && 'ring-2 ring-primary/60 bg-primary/5'
+        'cursor-pointer transition-all rounded-lg border p-3 hover:shadow-sm',
+        isSelected
+          ? 'ring-2 ring-primary/60 bg-primary/5 border-primary/30'
+          : 'border-muted/60 bg-background hover:bg-muted/20'
       )}
       onClick={onClick}
     >
-      <div className="flex items-start justify-between gap-2">
+      {/* Row 1: Name + Scores */}
+      <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          {/* Contact Name */}
-          <div className="flex items-center gap-2 mb-1">
-            <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="font-medium text-sm truncate">{lead.contactName}</span>
-            {lead.agentType === 'ai' && (
-              <Badge variant="secondary" className="text-[10px] px-1">AI</Badge>
-            )}
-            {/* Scoring Source Badge */}
-            {isAIScored ? (
-              <Badge variant="outline" className="text-[10px] px-1 bg-blue-50 border-blue-300 text-blue-700">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm truncate">{lead.contactName}</span>
+            {isAIScored && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 border-blue-200 text-blue-700 shrink-0">
                 <Sparkles className="h-2.5 w-2.5 mr-0.5" />
-                AI Scored
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="text-[10px] px-1 bg-gray-50 border-gray-300 text-gray-600">
-                Heuristic
+                AI
               </Badge>
             )}
           </div>
-          {/* Company */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Building className="h-3 w-3" />
-            <span className="truncate">{lead.companyName}</span>
+          <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1 truncate">
+              <Building className="h-3 w-3 shrink-0" />
+              {lead.companyName}
+            </span>
+            <span className="truncate">{lead.campaignName}</span>
           </div>
         </div>
 
-        {/* Confidence + Campaign Fit */}
-        <div className="flex flex-col items-end gap-1">
-          <Badge
-            variant="outline"
-            className={cn('text-[10px] px-1.5 font-semibold', confidenceColor)}
-          >
-            {lead.derivedConfidence}% confidence
-          </Badge>
-          {lead.campaignFitScore != null && (
-            <Badge variant="outline" className="text-[10px] px-1.5 bg-indigo-50 border-indigo-300 text-indigo-700">
-              <Crosshair className="h-2.5 w-2.5 mr-0.5" />
-              {lead.campaignFitScore}% fit
-            </Badge>
-          )}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={cn('text-lg font-bold tabular-nums', confidenceColor)}>
+            {lead.derivedConfidence}%
+          </span>
           {lead.disposition && (
-            <Badge variant="outline" className="text-[10px] px-1">
+            <Badge variant="outline" className="text-[10px] capitalize">
               {lead.disposition.replace(/_/g, ' ')}
             </Badge>
           )}
         </div>
       </div>
 
-      {/* Campaign Objective */}
-      {lead.campaignObjective && (
-        <div className="mt-1.5 text-[10px] text-muted-foreground truncate">
-          <span className="font-medium">Objective:</span> {lead.campaignObjective}
-        </div>
-      )}
-
-      {/* Intent Strength + Outcome Category */}
-      {(lead.intentStrength || lead.outcomeCategory) && (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          {lead.intentStrength && (
-            <Badge variant="outline" className={cn('text-[10px] px-1 py-0', intentColor)}>
-              <Zap className="h-2.5 w-2.5 mr-0.5" />
-              {lead.intentStrength} intent
-            </Badge>
-          )}
-          {lead.outcomeCategory && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0 bg-slate-50 border-slate-300 text-slate-700">
-              {lead.outcomeCategory.replace(/_/g, ' ')}
-            </Badge>
-          )}
-        </div>
-      )}
-
-      {/* Suggested Disposition (show both AI suggestion and mismatch) */}
-      {hasSuggestedDispositionMismatch ? (
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="text-amber-600 font-medium flex items-center gap-0.5">
-            <AlertTriangle className="h-3 w-3" />
-            AI suggests:
-          </span>
-          <Badge variant="default" className="bg-amber-600 text-white text-[10px]">
-            {lead.suggestedDisposition!.replace(/_/g, ' ')}
+      {/* Row 2: Intent + Outcome + Duration */}
+      <div className="mt-2 flex items-center gap-2 flex-wrap">
+        {lead.intentStrength && (
+          <Badge variant="outline" className={cn('text-[10px] px-1.5', intentColor)}>
+            <Zap className="h-2.5 w-2.5 mr-0.5" />
+            {lead.intentStrength}
           </Badge>
-        </div>
-      ) : lead.derivedOutcome !== lead.disposition && (
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">Suggested:</span>
-          <Badge variant="default" className="bg-green-600 text-white text-[10px]">
-            {lead.derivedOutcome.replace(/_/g, ' ')}
+        )}
+        {lead.outcomeCategory && (
+          <Badge variant="outline" className="text-[10px] px-1.5 capitalize">
+            {lead.outcomeCategory.replace(/_/g, ' ')}
           </Badge>
-        </div>
-      )}
+        )}
+        {lead.campaignFitScore != null && (
+          <Badge variant="outline" className="text-[10px] px-1.5 bg-indigo-50 border-indigo-200 text-indigo-700">
+            {lead.campaignFitScore}% fit
+          </Badge>
+        )}
+        {lead.qualificationMet && (
+          <Badge variant="outline" className="text-[10px] px-1.5 bg-green-50 border-green-200 text-green-700">
+            <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+            Qualified
+          </Badge>
+        )}
+        {lead.dispositionReview && !lead.dispositionReview.isAccurate && (
+          <Badge variant="outline" className="text-[10px] px-1.5 bg-amber-50 border-amber-200 text-amber-700">
+            <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+            Mismatch
+          </Badge>
+        )}
 
-      {/* Bottom Row */}
-      <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
-        <span className="truncate max-w-[120px]">{lead.campaignName}</span>
-        <div className="flex items-center gap-2">
+        {/* Right-aligned meta */}
+        <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
           {lead.duration !== undefined && lead.duration > 0 && (
             <span className="flex items-center gap-0.5">
-              <Clock className="h-2.5 w-2.5" />
+              <Clock className="h-3 w-3" />
               {Math.floor(lead.duration / 60)}:{String(lead.duration % 60).padStart(2, '0')}
             </span>
           )}
-          <span>
-            {format(new Date(lead.createdAt), 'MMM d, HH:mm')}
-          </span>
+          {lead.hasTranscript && <FileText className="h-3 w-3 text-green-500" />}
+          {lead.hasRecording && <Mic className="h-3 w-3 text-blue-500" />}
+          <span>{format(new Date(lead.createdAt), 'MMM d')}</span>
         </div>
       </div>
 
-      {/* Indicators */}
-      <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-        {lead.hasTranscript && (
-          <span className="flex items-center gap-0.5 text-[10px] text-green-600">
-            <FileText className="h-2.5 w-2.5" />
-            {lead.transcriptQuality}
-          </span>
-        )}
-        {lead.hasRecording && (
-          <span className="flex items-center gap-0.5 text-[10px] text-blue-600">
-            <Mic className="h-2.5 w-2.5" />
-            Recording
-          </span>
-        )}
-        {lead.overallScore !== undefined && (
-          <span className="flex items-center gap-0.5 text-[10px]">
-            <BarChart3 className="h-2.5 w-2.5" />
-            {lead.overallScore}
-          </span>
-        )}
-        {lead.campaignAlignmentScore != null && (
-          <span className="flex items-center gap-0.5 text-[10px] text-indigo-600">
-            <Target className="h-2.5 w-2.5" />
-            Align {lead.campaignAlignmentScore}%
-          </span>
-        )}
-        {lead.qualificationMet && (
-          <span className="flex items-center gap-0.5 text-[10px] text-green-700 font-medium">
-            Qualified
-          </span>
-        )}
-        {lead.dispositionReview && !lead.dispositionReview.isAccurate && (
-          <span className="flex items-center gap-0.5 text-[10px] text-amber-600">
-            <AlertTriangle className="h-2.5 w-2.5" />
-            Mismatch
-          </span>
-        )}
-      </div>
-
-      {/* Engagement Signals */}
-      {lead.engagementSignals && lead.engagementSignals.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {lead.engagementSignals.slice(0, 3).map((signal, idx) => (
-            <Badge
-              key={idx}
-              variant="outline"
-              className="text-[9px] px-1 py-0 bg-purple-50 border-purple-200 text-purple-700"
-            >
-              {signal}
-            </Badge>
-          ))}
-          {lead.engagementSignals.length > 3 && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1 py-0 bg-gray-50 border-gray-200 text-gray-600"
-            >
-              +{lead.engagementSignals.length - 3} more
-            </Badge>
-          )}
+      {/* Row 3: AI Suggestion (only on mismatch) */}
+      {hasSuggestedDispositionMismatch && (
+        <div className="mt-2 flex items-center gap-2 text-xs bg-amber-50 rounded px-2 py-1">
+          <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
+          <span className="text-amber-700">AI suggests: <strong>{lead.suggestedDisposition!.replace(/_/g, ' ')}</strong></span>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
