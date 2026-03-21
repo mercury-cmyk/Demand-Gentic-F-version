@@ -171,7 +171,7 @@ export class EmailTrackingService {
       // Parse payload first
       const data = JSON.parse(payload);
 
-      if (!data.m || !data.r || !data.t) {
+      if (!data.m || data.r === undefined || data.r === null || !data.t) {
         console.error('[EMAIL-TRACKING] Missing required fields in token');
         return null;
       }
@@ -224,17 +224,18 @@ export class EmailTrackingService {
       // Parse payload
       const data = JSON.parse(payload);
 
-      if (!data.m || !data.r || !data.u || !data.t) {
+      if (!data.m || data.r === undefined || data.r === null || !data.u || !data.t) {
         console.error('[EMAIL-TRACKING] Missing required fields in token');
         return null;
       }
 
-      // Check token age (prevent replay attacks with old tokens)
+      // Check token age — warn but still accept for click tracking
+      // (users shouldn't be blocked from clicking links in old emails;
+      //  URL safety is validated in the route before redirect)
       const ageMs = Date.now() - data.t;
       const maxAgeMs = 90 * 24 * 60 * 60 * 1000;
       if (ageMs > maxAgeMs) {
-        console.error('[EMAIL-TRACKING] Token expired');
-        return null;
+        console.warn(`[EMAIL-TRACKING] Click token expired (${Math.round(ageMs / 86400000)}d old), accepting with URL validation`);
       }
 
       // Verify HMAC signature — warn but accept after migration
@@ -259,6 +260,25 @@ export class EmailTrackingService {
     }
   }
   
+  /**
+   * Best-effort URL extraction from a token that failed full decode.
+   * Skips signature verification and expiry — only used as a fallback
+   * to redirect users rather than showing an error page.
+   * The caller MUST still validate the URL with isUrlSafeForRedirect().
+   */
+  extractUrlFromToken(token: string): string | null {
+    try {
+      const decoded = Buffer.from(token, 'base64url').toString('utf-8');
+      // Try to find the JSON payload before the signature separator
+      const separatorIndex = decoded.lastIndexOf('.');
+      const payloadStr = separatorIndex > 0 ? decoded.slice(0, separatorIndex) : decoded;
+      const data = JSON.parse(payloadStr);
+      return data.u || null;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Validate URL is safe for redirect (prevent open redirect attacks)
    */

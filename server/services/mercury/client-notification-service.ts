@@ -77,19 +77,23 @@ ${params.customPrompt ? `\nSpecial instructions: ${params.customPrompt}` : ''}
 
 Make it beautiful, clean, and professional.`;
 
-  // Try OpenAI first, fall back to DeepSeek
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
   try {
     const OpenAI = (await import("openai")).default;
-    
+    const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
+
     let client: InstanceType<typeof OpenAI>;
     let model: string;
 
-    if (openaiKey) {
-      client = new OpenAI({ apiKey: openaiKey });
-      model = process.env.DEMAND_QUAL_MODEL || 'gpt-4o';
-    } else if (deepseekKey) {
-      client = new OpenAI({ apiKey: deepseekKey, baseURL: 'https://api.deepseek.com/v1' });
+    if (deepseekKey) {
+      client = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' });
       model = 'deepseek-chat';
+    } else if (kimiKey) {
+      client = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1' });
+      model = process.env.KIMI_FAST_MODEL || 'moonshot-v1-8k';
+    } else if (openaiKey) {
+      client = new OpenAI({ apiKey: openaiKey });
+      model = 'gpt-4o-mini';
     } else {
       return generateFallbackTemplate(params);
     }

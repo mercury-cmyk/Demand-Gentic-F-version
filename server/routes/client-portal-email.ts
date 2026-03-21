@@ -205,8 +205,9 @@ function oauthErrorHtml(provider: string, error: string) {
  */
 router.get('/status', async (req: Request, res: Response) => {
   try {
-    const clientUserId = req.clientUser!.clientUserId;
+    const clientAccountId = req.clientUser!.clientAccountId;
 
+    // Shared inbox: query by clientAccountId so all users on the same client see the same mailbox
     const mailboxes = await db
       .select({
         id: clientMailboxAccounts.id,
@@ -218,7 +219,7 @@ router.get('/status', async (req: Request, res: Response) => {
         lastSyncAt: clientMailboxAccounts.lastSyncAt,
       })
       .from(clientMailboxAccounts)
-      .where(eq(clientMailboxAccounts.clientUserId, clientUserId));
+      .where(eq(clientMailboxAccounts.clientAccountId, clientAccountId));
 
     const result: Record<string, {
       connected: boolean;
@@ -340,12 +341,12 @@ callbackRouter.get('/google/callback', async (req: Request, res: Response) => {
       : null;
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
-    // Upsert client mailbox account
+    // Shared inbox: upsert by clientAccountId so all users share the same Google connection
     const [existing] = await db
       .select()
       .from(clientMailboxAccounts)
       .where(and(
-        eq(clientMailboxAccounts.clientUserId, clientUserId),
+        eq(clientMailboxAccounts.clientAccountId, clientAccountId),
         eq(clientMailboxAccounts.provider, 'google'),
       ))
       .limit(1);
@@ -474,11 +475,12 @@ callbackRouter.get('/microsoft/callback', async (req: Request, res: Response) =>
     const encryptedRefreshToken = CryptoJS.AES.encrypt(tokenData.refresh_token, ENCRYPTION_KEY).toString();
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
 
+    // Shared inbox: upsert by clientAccountId so all users share the same Microsoft connection
     const [existing] = await db
       .select()
       .from(clientMailboxAccounts)
       .where(and(
-        eq(clientMailboxAccounts.clientUserId, clientUserId),
+        eq(clientMailboxAccounts.clientAccountId, clientAccountId),
         eq(clientMailboxAccounts.provider, 'o365'),
       ))
       .limit(1);
@@ -548,11 +550,12 @@ router.post('/smtp/configure', async (req: Request, res: Response) => {
 
     const encryptedPassword = CryptoJS.AES.encrypt(data.password, ENCRYPTION_KEY).toString();
 
+    // Shared inbox: upsert by clientAccountId so all users share the same SMTP config
     const [existing] = await db
       .select()
       .from(clientMailboxAccounts)
       .where(and(
-        eq(clientMailboxAccounts.clientUserId, clientUserId),
+        eq(clientMailboxAccounts.clientAccountId, clientAccountId),
         eq(clientMailboxAccounts.provider, 'smtp'),
       ))
       .limit(1);
@@ -602,18 +605,19 @@ router.post('/smtp/configure', async (req: Request, res: Response) => {
  */
 router.post('/disconnect/:provider', async (req: Request, res: Response) => {
   try {
-    const clientUserId = req.clientUser!.clientUserId;
+    const clientAccountId = req.clientUser!.clientAccountId;
     const provider = req.params.provider;
 
     if (!['google', 'o365', 'smtp'].includes(provider)) {
       return res.status(400).json({ message: 'Invalid provider' });
     }
 
+    // Shared inbox: disconnect by clientAccountId
     const [mailbox] = await db
       .select()
       .from(clientMailboxAccounts)
       .where(and(
-        eq(clientMailboxAccounts.clientUserId, clientUserId),
+        eq(clientMailboxAccounts.clientAccountId, clientAccountId),
         eq(clientMailboxAccounts.provider, provider),
       ))
       .limit(1);

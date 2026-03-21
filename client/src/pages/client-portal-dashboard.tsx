@@ -61,6 +61,7 @@ import { ServiceCatalogTab } from '@/components/ai-studio/org-intelligence/tabs/
 import { ProblemFrameworkTab } from '@/components/ai-studio/org-intelligence/tabs/problem-framework-tab';
 
 import { UnifiedPipelineTab } from '@/components/unified-pipeline';
+import { ReportingTab } from '@/components/client-portal/reporting/reporting-tab';
 
 interface ClientUser {
   id: string;
@@ -274,6 +275,7 @@ const TAB_ALIASES: Record<string, string> = {
   'analytics': 'overview',
   'leads': 'journey-pipeline',
   'engagement-triggers': 'unified-pipelines',
+  'analytics-reports': 'reporting',
 };
 
 function resolveTab(tab: string | null): string {
@@ -3001,6 +3003,16 @@ export default function ClientPortalDashboard() {
         {activeTab === 'unified-pipelines' && user?.clientAccountId && (
           <div className="space-y-6">
             <UnifiedPipelineTab
+              authHeaders={authHeaders}
+              clientAccountId={user.clientAccountId}
+            />
+          </div>
+        )}
+
+{/* ==================== REPORTING TAB ==================== */}
+        {activeTab === 'reporting' && user?.clientAccountId && (
+          <div className="space-y-6">
+            <ReportingTab
               authHeaders={authHeaders}
               clientAccountId={user.clientAccountId}
             />

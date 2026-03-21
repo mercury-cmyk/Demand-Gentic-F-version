@@ -16,6 +16,7 @@ import { db } from '../db';
 import {
   accountEngagementTriggers,
   unifiedPipelineActions,
+  unifiedPipelines,
   contacts,
   campaigns,
   campaignQueue,
@@ -82,6 +83,22 @@ async function processEngagementTriggers(): Promise<number> {
  * Queues the email via Mercury outbox for async delivery.
  */
 async function executeEmailTrigger(trigger: typeof accountEngagementTriggers.$inferSelect): Promise<void> {
+  // Guard: Only send Mercury emails for campaigns without a clientAccountId (Pivotal B2B internal).
+  // Client campaigns must use their own connected email — skip and log.
+  if (trigger.campaignId) {
+    const [campaign] = await db
+      .select({ clientAccountId: campaigns.clientAccountId })
+      .from(campaigns)
+      .where(eq(campaigns.id, trigger.campaignId))
+      .limit(1);
+
+    if (campaign?.clientAccountId) {
+      console.log(`${LOG_PREFIX} ⏭️  Skipping email trigger ${trigger.id} — campaign ${trigger.campaignId} belongs to client account ${campaign.clientAccountId}. Client must connect their own email.`);
+      await completeTrigger(trigger.id, 'skipped', 'Skipped: client campaign — Mercury emails not authorized for non-Pivotal campaigns');
+      return;
+    }
+  }
+
   // Look up contact email and account
   const [contact] = await db
     .select({ email: contacts.email, name: contacts.firstName, accountId: contacts.accountId })
@@ -222,6 +239,30 @@ async function executePipelineAction(action: typeof unifiedPipelineActions.$infe
 
   switch (action.actionType) {
     case 'email': {
+      // Guard: Only send Mercury emails for Pivotal B2B internal pipelines.
+      // Client pipelines (those with a clientAccountId) must use their own connected email.
+      if (action.pipelineId) {
+        const [pipeline] = await db
+          .select({ clientAccountId: unifiedPipelines.clientAccountId })
+          .from(unifiedPipelines)
+          .where(eq(unifiedPipelines.id, action.pipelineId))
+          .limit(1);
+
+        if (pipeline?.clientAccountId) {
+          console.log(`${LOG_PREFIX} ⏭️  Skipping pipeline email action ${action.id} — pipeline ${action.pipelineId} belongs to client account ${pipeline.clientAccountId}. Client must connect their own email.`);
+          await db
+            .update(unifiedPipelineActions)
+            .set({
+              status: 'skipped',
+              completedAt: new Date(),
+              outcome: 'Skipped: client pipeline — Mercury emails not authorized for non-Pivotal campaigns. Client must connect their own email.',
+              updatedAt: new Date(),
+            })
+            .where(eq(unifiedPipelineActions.id, action.id));
+          return;
+        }
+      }
+
       if (!action.contactId) {
         throw new Error('No contactId for email action');
       }

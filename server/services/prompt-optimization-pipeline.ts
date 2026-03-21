@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
-import openai from "../lib/openai";
+import openai, { resolvedModel } from "../lib/openai";
 import { resolveGeminiBaseUrl } from "../lib/ai-provider-utils";
 import { getOrganizationPromptSettings } from "../lib/org-intelligence-helper";
 
@@ -467,7 +467,7 @@ async function reviewWithOpenAI(
 ): Promise<{ raw: string; model: string }> {
   const model = process.env.PROMPT_OPTIMIZATION_OPENAI_MODEL
     || process.env.OPENAI_VIRTUAL_AGENT_REFINER_MODEL
-    || "gpt-4o-mini";
+    || resolvedModel;
 
   const response = await openai.chat.completions.create({
     model,

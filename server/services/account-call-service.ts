@@ -534,8 +534,11 @@ async function generateAccountCallBriefPayload(params: {
   campaignIntent: CampaignIntent | null;
   productContext?: string | null;
 }): Promise<AccountCallBriefPayload> {
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return buildFallbackAccountCallBrief(params);
   }
 
@@ -555,19 +558,11 @@ Return JSON only in this format:
   "confidence": 0.0
 }`);
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_QUAL_MODEL || "gpt-4o",
-      temperature: 0.2,
-      max_tokens: 900,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Account Intelligence:
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: `Account Intelligence:
 ${JSON.stringify(params.intelligence, null, 2)}
 
 Account Messaging Brief:
@@ -580,14 +575,42 @@ ${params.productContext ? `Product/Event Context (matched for this account):
 ${params.productContext}
 
 ` : ''}Return Account Call Brief JSON now.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+    },
+  ];
 
-    const content = response.choices[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    return normalizeAccountCallBrief(parsed, params.accountId);
+  try {
+    const OpenAI = (await import("openai")).default;
+
+    // DeepSeek primary
+    if (deepseekKey) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const response = await ds.chat.completions.create({ model: "deepseek-chat", temperature: 0.2, max_tokens: 900, messages, response_format: { type: "json_object" } });
+        const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+        return normalizeAccountCallBrief(parsed, params.accountId);
+      } catch (err) { console.warn("[AccountCallBrief] DeepSeek failed:", (err as Error).message); }
+    }
+
+    // Kimi fallback
+    if (kimiKey) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+        const response = await kimi.chat.completions.create({ model: process.env.KIMI_FAST_MODEL || "moonshot-v1-8k", temperature: 0.2, max_tokens: 900, messages });
+        let content = response.choices[0]?.message?.content || "{}";
+        content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        return normalizeAccountCallBrief(JSON.parse(content), params.accountId);
+      } catch (err) { console.warn("[AccountCallBrief] Kimi failed:", (err as Error).message); }
+    }
+
+    // OpenAI last resort
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.2, max_tokens: 900, messages, response_format: { type: "json_object" } });
+      const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+      return normalizeAccountCallBrief(parsed, params.accountId);
+    }
+
+    return buildFallbackAccountCallBrief(params);
   } catch (error) {
     console.error("[AccountCallBrief] AI generation failed:", error);
     return buildFallbackAccountCallBrief(params);
@@ -599,8 +622,11 @@ async function generateParticipantCallPlanPayload(params: {
   participant: ParticipantCallContext;
   attemptNumber: number;
 }): Promise<ParticipantCallPlanPayload> {
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return buildFallbackCallPlan(params);
   }
 
@@ -622,19 +648,11 @@ Return JSON only in this format:
   }
 }`);
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_QUAL_MODEL || "gpt-4o",
-      temperature: 0.3,
-      max_tokens: 900,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Account Call Brief:
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: `Account Call Brief:
 ${JSON.stringify(params.accountCallBrief, null, 2)}
 
 Participant Context:
@@ -643,14 +661,37 @@ ${JSON.stringify(params.participant, null, 2)}
 Attempt Number: ${params.attemptNumber}
 
 Return Participant Call Plan JSON now.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+    },
+  ];
 
-    const content = response.choices[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
-    return normalizeCallPlan(parsed, params);
+  try {
+    const OpenAI = (await import("openai")).default;
+
+    if (deepseekKey) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const response = await ds.chat.completions.create({ model: "deepseek-chat", temperature: 0.3, max_tokens: 900, messages, response_format: { type: "json_object" } });
+        return normalizeCallPlan(JSON.parse(response.choices[0]?.message?.content || "{}"), params);
+      } catch (err) { console.warn("[ParticipantCallPlan] DeepSeek failed:", (err as Error).message); }
+    }
+
+    if (kimiKey) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+        const response = await kimi.chat.completions.create({ model: process.env.KIMI_FAST_MODEL || "moonshot-v1-8k", temperature: 0.3, max_tokens: 900, messages });
+        let content = response.choices[0]?.message?.content || "{}";
+        content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        return normalizeCallPlan(JSON.parse(content), params);
+      } catch (err) { console.warn("[ParticipantCallPlan] Kimi failed:", (err as Error).message); }
+    }
+
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.3, max_tokens: 900, messages, response_format: { type: "json_object" } });
+      return normalizeCallPlan(JSON.parse(response.choices[0]?.message?.content || "{}"), params);
+    }
+
+    return buildFallbackCallPlan(params);
   } catch (error) {
     console.error("[ParticipantCallPlan] AI generation failed:", error);
     return buildFallbackCallPlan(params);

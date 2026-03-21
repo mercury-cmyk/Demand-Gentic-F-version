@@ -612,6 +612,9 @@ async function generateEmailWithAI(
     accountProfile?: AccountProfileData | null;
   }
 ): Promise<PersonalizedEmail> {
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
   const accountContextSection = accountContext
     ? buildAccountContextSection(accountContext.accountIntelligence, accountContext.accountMessagingBrief, accountContext.accountProfile)
@@ -648,23 +651,11 @@ Current Strategy:
 ${accountContextSection ? `\n${accountContextSection}\n` : ''}
 `);
 
-  if (!openaiKey) {
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return generateBasicEmail(context, strategy, accountContext);
   }
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_ENGAGE_MODEL || "gpt-4o",
-      temperature: 0.7,
-      max_tokens: 2000,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Generate a personalized email using this context:
+  const userContent = `Generate a personalized email using this context:
 
 Contact:
 - Name: ${context.contact.fullName}
@@ -704,28 +695,88 @@ Return JSON:
   "textContent": "plain text version",
   "personalizationVariables": {"key": "value used"},
   "confidence": 0.0-1.0
-}`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+}`;
 
-    const content = response.choices[0]?.message?.content || "{}";
-    const parsed = JSON.parse(content);
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userContent },
+  ];
 
-    return {
-      subject: parsed.subject || 'Quick question',
-      preheader: parsed.preheader || '',
-      htmlContent: parsed.htmlContent || '',
-      textContent: parsed.textContent || '',
-      personalizationVariables: parsed.personalizationVariables || {},
-      personalizationLevel,
-      confidence: parsed.confidence || 0.7,
-    };
-  } catch (error) {
-    console.error("[Demand Engage] AI email generation error:", error);
+  let parsed: any = null;
+
+  // Try DeepSeek first (primary — cost-effective, high quality)
+  if (deepseekKey && !parsed) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const deepseek = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+      const response = await deepseek.chat.completions.create({
+        model: process.env.DEMAND_ENGAGE_MODEL || "deepseek-chat",
+        temperature: 0.7,
+        max_tokens: 2000,
+        messages,
+        response_format: { type: "json_object" },
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      parsed = JSON.parse(content);
+    } catch (err) {
+      console.warn("[Demand Engage] DeepSeek failed, trying fallback:", (err as Error).message);
+    }
+  }
+
+  // Try Kimi fallback
+  if (kimiKey && !parsed) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+      const response = await kimi.chat.completions.create({
+        model: process.env.KIMI_STANDARD_MODEL || "moonshot-v1-32k",
+        temperature: 0.7,
+        max_tokens: 2000,
+        messages,
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      let cleaned = content.trim();
+      if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+      if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+      if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+      parsed = JSON.parse(cleaned.trim());
+    } catch (err) {
+      console.warn("[Demand Engage] Kimi failed, trying OpenAI:", (err as Error).message);
+    }
+  }
+
+  // OpenAI last resort
+  if (openaiKey && !parsed) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.7,
+        max_tokens: 2000,
+        messages,
+        response_format: { type: "json_object" },
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      parsed = JSON.parse(content);
+    } catch (err) {
+      console.error("[Demand Engage] OpenAI fallback error:", (err as Error).message);
+    }
+  }
+
+  if (!parsed) {
     return generateBasicEmail(context, strategy, accountContext);
   }
+
+  return {
+    subject: parsed.subject || 'Quick question',
+    preheader: parsed.preheader || '',
+    htmlContent: parsed.htmlContent || '',
+    textContent: parsed.textContent || '',
+    personalizationVariables: parsed.personalizationVariables || {},
+    personalizationLevel,
+    confidence: parsed.confidence || 0.7,
+  };
 }
 
 /**

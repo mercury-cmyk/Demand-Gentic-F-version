@@ -71,12 +71,19 @@ router.get('/open/:token', async (req: Request, res: Response) => {
 router.get('/click/:token', async (req: Request, res: Response) => {
   try {
     const token = req.params.token;
-    
+
     // Decode and verify link tracking token (checks HMAC signature)
     const decoded = emailTrackingService.decodeLinkTrackingToken(token);
-    
+
     if (!decoded) {
-      console.warn('[TRACKING-CLICK] Invalid or tampered token');
+      // Best-effort fallback: try to extract the original URL from the token
+      // even if signature/expiry checks failed, so users aren't left stranded
+      const fallbackUrl = emailTrackingService.extractUrlFromToken(token);
+      if (fallbackUrl && emailTrackingService.isUrlSafeForRedirect(fallbackUrl)) {
+        console.warn(`[TRACKING-CLICK] Token decode failed, but extracted safe URL — redirecting: ${fallbackUrl}`);
+        return res.redirect(302, fallbackUrl);
+      }
+      console.warn('[TRACKING-CLICK] Invalid or tampered token, no recoverable URL');
       return res.status(400).send('Invalid tracking token');
     }
     

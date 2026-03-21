@@ -188,8 +188,6 @@ async function analyzeTranscriptForBANT(
   nextSteps: string[];
   confidence: number;
 }> {
-  const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-
   const systemPrompt = await buildAgentSystemPrompt(`
 You are a B2B sales qualification analyst. Analyze call transcripts and extract BANT qualification signals.
 
@@ -209,23 +207,16 @@ Analyze the transcript and provide:
 Return structured JSON.
 `);
 
-  if (!openaiKey) {
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
+  const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return generateBasicAnalysis(transcript);
   }
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_QUAL_MODEL || "gpt-4o",
-      temperature: 0.2,
-      max_tokens: 3000,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Analyze this call transcript for BANT qualification:
+  const userContent = `Analyze this call transcript for BANT qualification:
 
 ---TRANSCRIPT START---
 ${transcript}
@@ -269,18 +260,75 @@ Return JSON with this structure:
   },
   "nextSteps": ["recommended actions"],
   "confidence": 0.0-1.0
-}`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+}`;
 
-    const content = response.choices[0]?.message?.content || "{}";
-    return JSON.parse(content);
-  } catch (error) {
-    console.error("[Demand Qual] AI analysis error:", error);
-    return generateBasicAnalysis(transcript);
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userContent },
+  ];
+
+  // Try DeepSeek first (primary provider — cost-effective, high quality)
+  if (deepseekKey) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const deepseek = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+      const response = await deepseek.chat.completions.create({
+        model: process.env.DEMAND_QUAL_MODEL || "deepseek-chat",
+        temperature: 0.2,
+        max_tokens: 3000,
+        messages,
+        response_format: { type: "json_object" },
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      return JSON.parse(content);
+    } catch (err) {
+      console.warn("[Demand Qual] DeepSeek failed, trying fallback:", (err as Error).message);
+    }
   }
+
+  // Try Kimi fallback (strong analysis, 128k context)
+  if (kimiKey) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+      const response = await kimi.chat.completions.create({
+        model: process.env.KIMI_STANDARD_MODEL || "moonshot-v1-32k",
+        temperature: 0.2,
+        max_tokens: 3000,
+        messages,
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      let cleaned = content.trim();
+      if (cleaned.startsWith("```json")) cleaned = cleaned.slice(7);
+      if (cleaned.startsWith("```")) cleaned = cleaned.slice(3);
+      if (cleaned.endsWith("```")) cleaned = cleaned.slice(0, -3);
+      return JSON.parse(cleaned.trim());
+    } catch (err) {
+      console.warn("[Demand Qual] Kimi failed, trying OpenAI:", (err as Error).message);
+    }
+  }
+
+  // OpenAI last resort
+  if (openaiKey) {
+    try {
+      const OpenAI = (await import("openai")).default;
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        max_tokens: 3000,
+        messages,
+        response_format: { type: "json_object" },
+      });
+      const content = response.choices[0]?.message?.content || "{}";
+      return JSON.parse(content);
+    } catch (error) {
+      console.error("[Demand Qual] OpenAI fallback error:", error);
+    }
+  }
+
+  console.error("[Demand Qual] All AI providers failed, using basic analysis");
+  return generateBasicAnalysis(transcript);
 }
 
 /**

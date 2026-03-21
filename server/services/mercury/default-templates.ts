@@ -1169,6 +1169,14 @@ export const DEFAULT_RULES: DefaultRule[] = [
     description: 'Send rejection notification to all client users when their campaign order is rejected.',
   },
   {
+    eventType: 'leads_delivered',
+    templateKey: 'leads_delivered',
+    channelType: 'email',
+    recipientResolver: 'all_tenant_users',
+    isEnabled: true,
+    description: 'Notify all client users when new leads have been delivered for their campaign.',
+  },
+  {
     eventType: 'project_request_approved',
     templateKey: 'project_request_approved',
     channelType: 'email',

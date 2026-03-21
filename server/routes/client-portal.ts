@@ -1021,15 +1021,21 @@ router.get('/auth/me', requireClientAuth, async (req, res) => {
 // NOTE: Previously this was `router.use('/', requireClientAuth, analyticsRouter)` which
 // acted as a catch-all and blocked /admin/* routes (that use requireAuth, not client auth)
 // from ever being reached.  Now we conditionally skip client auth for /admin/* paths.
+// Paths that skip the analytics_dashboard feature gate because they have their
+// own auth/feature gates.  /admin uses requireAuth; /orders uses requireClientAuth
+// directly; /cost-tracking uses requireClientFeature('billing_cost_tracking').
+const ANALYTICS_GATE_BYPASS = ['/admin', '/orders', '/cost-tracking'];
+
 router.use((req: Request, res: Response, next: NextFunction) => {
-  // Let /admin/* requests pass through without client auth — they use requireAuth instead
+  // /admin routes use requireAuth (internal), not client auth
   if (req.path.startsWith('/admin')) return next();
-  // For all other paths, apply client auth then forward to the analytics sub-router
+  // All other paths (including /orders, /cost-tracking) still need client auth
   requireClientAuth(req, res, next);
 });
-// Feature-gated analytics: require analytics_dashboard grant
+// Feature-gated analytics: require analytics_dashboard grant — but skip paths
+// that define their own feature gates to avoid double-gating.
 router.use((req: Request, res: Response, next: NextFunction) => {
-  if (req.path.startsWith('/admin')) return next();
+  if (ANALYTICS_GATE_BYPASS.some((p) => req.path.startsWith(p))) return next();
   requireClientFeature('analytics_dashboard')(req, res, next);
 });
 router.use('/', clientPortalAnalyticsRouter);

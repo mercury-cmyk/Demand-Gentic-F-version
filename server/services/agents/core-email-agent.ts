@@ -558,15 +558,33 @@ export class CoreEmailAgent extends BaseAgent {
    */
   private getOpenAI(): OpenAI {
     if (!this.openaiClient) {
-      if (!process.env.OPENAI_API_KEY) {
-        throw new Error('OpenAI API key is not configured');
+      // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+      if (process.env.DEEPSEEK_API_KEY) {
+        this.openaiClient = new OpenAI({
+          apiKey: process.env.DEEPSEEK_API_KEY,
+          baseURL: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+        });
+      } else if (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) {
+        this.openaiClient = new OpenAI({
+          apiKey: (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY)!,
+          baseURL: process.env.KIMI_BASE_URL || 'https://api.moonshot.cn/v1',
+        });
+      } else if (process.env.OPENAI_API_KEY) {
+        this.openaiClient = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY,
+          baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+        });
+      } else {
+        throw new Error('No AI API key configured. Set DEEPSEEK_API_KEY, KIMI_API_KEY, or OPENAI_API_KEY.');
       }
-      this.openaiClient = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-      });
     }
     return this.openaiClient;
+  }
+
+  private getModelName(): string {
+    if (process.env.DEEPSEEK_API_KEY) return 'deepseek-chat';
+    if (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) return process.env.KIMI_STANDARD_MODEL || 'moonshot-v1-32k';
+    return 'gpt-4o-mini';
   }
 
   /**
@@ -586,7 +604,7 @@ export class CoreEmailAgent extends BaseAgent {
 
       const openai = this.getOpenAI();
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: this.getModelName(),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: this.buildUserPrompt(input) },

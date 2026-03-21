@@ -9,21 +9,42 @@ import OpenAI from "openai";
 
 const LOG_PREFIX = "[PromptValidator]";
 
-// Lazy OpenAI client
-let _openaiClient: OpenAI | null = null;
+// Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+let _aiClient: OpenAI | null = null;
+let _aiModel: string = "deepseek-chat";
 
 function getOpenAIClient(): OpenAI {
-  if (!_openaiClient) {
-    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error("OpenAI API key not configured");
+  if (!_aiClient) {
+    // DeepSeek primary
+    if (process.env.DEEPSEEK_API_KEY) {
+      _aiClient = new OpenAI({
+        apiKey: process.env.DEEPSEEK_API_KEY,
+        baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+      });
+      _aiModel = "deepseek-chat";
     }
-    _openaiClient = new OpenAI({
-      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || "https://api.openai.com/v1",
-      apiKey,
-    });
+    // Kimi fallback
+    else if (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) {
+      _aiClient = new OpenAI({
+        apiKey: (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY)!,
+        baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1",
+      });
+      _aiModel = process.env.KIMI_STANDARD_MODEL || "moonshot-v1-32k";
+    }
+    // OpenAI last resort
+    else {
+      const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+      if (!apiKey) {
+        throw new Error("No AI API key configured. Set DEEPSEEK_API_KEY, KIMI_API_KEY, or OPENAI_API_KEY.");
+      }
+      _aiClient = new OpenAI({
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || "https://api.openai.com/v1",
+        apiKey,
+      });
+      _aiModel = "gpt-4o-mini";
+    }
   }
-  return _openaiClient;
+  return _aiClient;
 }
 
 export interface PromptValidationResult {
@@ -149,7 +170,7 @@ async function optimizePromptWithOpenAI(prompt: string): Promise<string> {
   const client = getOpenAIClient();
 
   const response = await client.chat.completions.create({
-    model: "gpt-4o",
+    model: _aiModel,
     messages: [
       {
         role: "system",
@@ -215,7 +236,7 @@ export async function generateValidatedPrompt(inputs: {
   const client = getOpenAIClient();
 
   const response = await client.chat.completions.create({
-    model: "gpt-4o",
+    model: _aiModel,
     messages: [
       {
         role: "system",

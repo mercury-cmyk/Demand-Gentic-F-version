@@ -1,13 +1,36 @@
 import OpenAI from "openai";
 import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
 
-// Lazy OpenAI client – instantiate only when needed and when credentials exist
+// Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+let _deepseek: OpenAI | null = null;
+let _kimi: OpenAI | null = null;
 let _openai: OpenAI | null = null;
-function getOpenAI(): OpenAI {
+
+function getAIClient(): OpenAI {
+  // DeepSeek primary
+  if (!_deepseek && process.env.DEEPSEEK_API_KEY) {
+    _deepseek = new OpenAI({
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+    });
+  }
+  if (_deepseek) return _deepseek;
+
+  // Kimi fallback
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
+  if (!_kimi && kimiKey) {
+    _kimi = new OpenAI({
+      apiKey: kimiKey,
+      baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1",
+    });
+  }
+  if (_kimi) return _kimi;
+
+  // OpenAI last resort
   if (!_openai) {
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      throw new Error("OpenAI API key not configured. Set AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY.");
+      throw new Error("No AI API key configured. Set DEEPSEEK_API_KEY, KIMI_API_KEY, or OPENAI_API_KEY.");
     }
     _openai = new OpenAI({
       apiKey,
@@ -15,6 +38,12 @@ function getOpenAI(): OpenAI {
     });
   }
   return _openai;
+}
+
+function getAIModel(): string {
+  if (process.env.DEEPSEEK_API_KEY) return "deepseek-chat";
+  if (process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY) return process.env.KIMI_FAST_MODEL || "moonshot-v1-8k";
+  return "gpt-4o-mini";
 }
 
 interface ParsedRule {
@@ -46,9 +75,10 @@ export async function parseNaturalLanguageRules(
   }
 
   try {
-    const openai = getOpenAI();
+    const client = getAIClient();
+    const model = getAIModel();
     const systemPrompt = await buildAgentSystemPrompt(`You are a qualification rules parser. Extract evaluation criteria from natural language business rules.
-          
+
 For each criterion, identify:
 - The criterion name (e.g., "Content Interest", "Permission Given")
 - The requirement (what is expected)
@@ -73,8 +103,8 @@ Return a JSON object with:
   "evaluation_instructions": "string (summary of rules for AI evaluator)"
 }`);
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-2024-08-06",
+    const response = await client.chat.completions.create({
+      model,
       messages: [
         {
           role: "system",

@@ -151,10 +151,11 @@ async function identifyProblemMappings(
         );
     }
 
-    const openai = (await import('../../../lib/openai')).default;
+    const openaiMod = await import('../../../lib/openai');
+    const openai = openaiMod.default;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: openaiMod.resolvedModel,
       messages: [
         {
           role: 'system',
@@ -251,10 +252,11 @@ async function getRecommendedRolesForSolution(
 
   // Score and rank roles using AI
   try {
-    const openai = (await import('../../../lib/openai')).default;
+    const openaiMod = await import('../../../lib/openai');
+    const openai = openaiMod.default;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: openaiMod.resolvedModel,
       messages: [
         {
           role: 'system',
@@ -359,10 +361,11 @@ async function generateMessagingRecommendations(
   roleRecommendations: RoleRecommendation[]
 ): Promise<MessagingRecommendation[]> {
   try {
-    const openai = (await import('../../../lib/openai')).default;
+    const openaiMod = await import('../../../lib/openai');
+    const openai = openaiMod.default;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: openaiMod.resolvedModel,
       messages: [
         {
           role: 'system',

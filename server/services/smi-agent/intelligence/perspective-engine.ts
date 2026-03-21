@@ -229,12 +229,13 @@ async function generatePerspectiveAnalysis(
   campaignContext?: any
 ): Promise<PerspectiveAnalysis> {
   try {
-    const openai = (await import('../../../lib/openai')).default;
+    const openaiMod = await import('../../../lib/openai');
+    const openai = openaiMod.default;
 
     const prompt = buildPerspectivePrompt(perspective, accountData, signals, campaignContext);
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: openaiMod.resolvedModel,
       messages: [
         {
           role: 'system',

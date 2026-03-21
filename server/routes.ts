@@ -74,6 +74,7 @@ import { mergeTagsRouter } from './routes/merge-tags-routes';
 import campaignSendRouter from './routes/campaign-send-routes';
 import transactionalTemplatesRouter from './routes/transactional-templates';
 import mercuryBridgeRouter, { smtpProvidersRouter, smtpOAuthCallbackRouter } from './routes/mercury-bridge';
+import { notificationService as mercuryNotificationService } from './services/mercury';
 import domainManagementRouter from './routes/domain-management';
 import emailManagementRouter from './routes/email-management';
 import brevoWebhookRouter from './routes/brevo-webhook';
@@ -122,6 +123,12 @@ import callIntelligenceRouter from './routes/call-intelligence-routes';
 import campaignWizardRouter from './routes/campaign-wizard';
 import adminProjectRequestsRouter from './routes/admin-project-requests';
 import adminClientNotificationsRouter from './routes/admin-client-notifications';
+import knowledgeHubRouter from './routes/knowledge-hub';
+import teamActivityRouter from './routes/team-activity-routes';
+import teamCallsRouter from './routes/team-calls-routes';
+import teamMessagingRouter from './routes/team-messaging-routes';
+import campaignContextRouter from './routes/campaign-context-routes';
+import voiceAgentTrainingRouter from './routes/voice-agent-training';
 import adminTasksRouter from './routes/admin-tasks';
 import dataManagementRouter from './routes/data-management-routes';
 import telephonyProvidersRouter from './routes/telephony-providers';
@@ -11541,6 +11548,32 @@ export function registerRoutes(app: Express) {
         .where(eq(leads.id, req.params.id))
         .returning();
 
+      // Dispatch Mercury notification — leads_delivered (async, non-blocking)
+      if (lead.campaignId) {
+        try {
+          const [campaign] = await db
+            .select({ name: campaigns.name, clientAccountId: campaigns.clientAccountId })
+            .from(campaigns)
+            .where(eq(campaigns.id, lead.campaignId))
+            .limit(1);
+
+          if (campaign?.clientAccountId) {
+            mercuryNotificationService.dispatch({
+              eventType: 'leads_delivered',
+              tenantId: campaign.clientAccountId,
+              actorUserId: userId,
+              payload: {
+                campaignName: campaign.name || 'Campaign',
+                leadCount: '1',
+                portalLink: buildCanonicalPortalUrl('/client-portal/dashboard?tab=leads'),
+              },
+            }).catch(err => console.error('[LEAD-DELIVERY] Mercury notification error:', err.message));
+          }
+        } catch (notifyErr) {
+          console.error('[LEAD-DELIVERY] Mercury notification lookup error:', notifyErr);
+        }
+      }
+
       res.json(updatedLead);
     } catch (error) {
       console.error('[LEAD-DELIVERY] Error marking lead as delivered:', error);
@@ -11573,6 +11606,42 @@ export function registerRoutes(app: Express) {
           eq(leads.qaStatus, 'approved') // Only mark approved leads
         ))
         .returning();
+
+      // Dispatch Mercury notification — leads_delivered per campaign (async, non-blocking)
+      if (updatedLeads.length > 0) {
+        try {
+          // Group delivered leads by campaignId
+          const byCampaign = new Map<string, number>();
+          for (const l of updatedLeads) {
+            if (l.campaignId) {
+              byCampaign.set(l.campaignId, (byCampaign.get(l.campaignId) || 0) + 1);
+            }
+          }
+
+          for (const [campaignId, count] of byCampaign) {
+            const [campaign] = await db
+              .select({ name: campaigns.name, clientAccountId: campaigns.clientAccountId })
+              .from(campaigns)
+              .where(eq(campaigns.id, campaignId))
+              .limit(1);
+
+            if (campaign?.clientAccountId) {
+              mercuryNotificationService.dispatch({
+                eventType: 'leads_delivered',
+                tenantId: campaign.clientAccountId,
+                actorUserId: userId,
+                payload: {
+                  campaignName: campaign.name || 'Campaign',
+                  leadCount: String(count),
+                  portalLink: buildCanonicalPortalUrl('/client-portal/dashboard?tab=leads'),
+                },
+              }).catch(err => console.error('[LEAD-DELIVERY] Mercury notification error:', err.message));
+            }
+          }
+        } catch (notifyErr) {
+          console.error('[LEAD-DELIVERY] Mercury bulk notification error:', notifyErr);
+        }
+      }
 
       res.json({
         success: true,
@@ -16555,6 +16624,20 @@ Provide JSON response with:
 
   // ==================== ADMIN CLIENT NOTIFICATIONS ====================
   app.use('/api/admin/client-notifications', adminClientNotificationsRouter);
+
+  // ==================== KNOWLEDGE HUB ====================
+  app.use('/api/knowledge-hub', requireAuth, knowledgeHubRouter);
+
+  // ==================== TEAM ACTIVITY & COLLABORATION ====================
+  app.use('/api/team-activity', requireAuth, teamActivityRouter);
+  app.use('/api/team-calls', requireAuth, teamCallsRouter);
+  app.use('/api/team-messaging', requireAuth, teamMessagingRouter);
+
+  // ==================== CAMPAIGN CONTEXT (AI session context) ====================
+  app.use('/api/campaign-context', requireAuth, campaignContextRouter);
+
+  // ==================== VOICE AGENT TRAINING ====================
+  app.use('/api/voice-agent-training', requireAuth, voiceAgentTrainingRouter);
 
   // ==================== ADMIN TO-DO TASK BOARD ====================
   app.use('/api/admin/tasks', adminTasksRouter);

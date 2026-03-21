@@ -153,12 +153,28 @@ router.post("/:id/generate-strategy", requireAuth, async (req: Request, res: Res
       funnelStrategy: result.strategy.funnelStrategy,
     });
 
+    // Auto-populate target accounts from ICP criteria so the funnel
+    // starts with a visible "Target" stage before outreach begins.
+    let enrollment = { enrolled: 0, matched: 0 };
+    if (result.strategy.targetCriteria) {
+      try {
+        enrollment = await autoEnrollTargetAccounts(
+          req.params.id,
+          result.strategy.targetCriteria,
+        );
+        console.log(`[UnifiedPipeline] Auto-enrolled ${enrollment.enrolled} target accounts after strategy generation`);
+      } catch (enrollErr: any) {
+        console.warn("[UnifiedPipeline] Auto-enrollment after strategy failed (non-fatal):", enrollErr.message);
+      }
+    }
+
     res.json({
       strategy: result.strategy,
       thinking: result.thinking,
       oiSummary: result.oiSummary,
       model: result.model,
       durationMs: result.durationMs,
+      enrollment,
     });
   } catch (error: any) {
     console.error("[UnifiedPipeline] Strategy generation failed:", error);

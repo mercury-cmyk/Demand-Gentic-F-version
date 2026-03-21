@@ -927,48 +927,74 @@ Return your response in this exact JSON format:
   "knowledgeSources": ["List of knowledge sources incorporated"]
 }`;
 
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 
-  if (!openaiKey) {
-    // Fallback: Generate prompt without OpenAI
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return generateFallbackPrompt(input, orgBrain);
   }
+
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: context },
+  ];
+
+  let parsed: any = null;
 
   try {
     const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
 
-    const completion = await openai.chat.completions.create({
-      model: process.env.AGENT_BRAIN_MODEL || "gpt-4o",
-      temperature: 0.3,
-      max_tokens: 4096,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: context },
-      ],
-      response_format: { type: "json_object" },
-    });
+    // DeepSeek primary
+    if (deepseekKey && !parsed) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const completion = await ds.chat.completions.create({ model: process.env.AGENT_BRAIN_MODEL || "deepseek-chat", temperature: 0.3, max_tokens: 4096, messages, response_format: { type: "json_object" } });
+        parsed = JSON.parse(completion.choices[0]?.message?.content || "{}");
+      } catch (err) { console.warn("[AgentBrain] DeepSeek failed, trying fallback:", (err as Error).message); }
+    }
 
-    const responseText = completion.choices[0]?.message?.content || "";
-    const parsed = JSON.parse(responseText);
+    // Kimi fallback
+    if (kimiKey && !parsed) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+        const completion = await kimi.chat.completions.create({ model: process.env.KIMI_STANDARD_MODEL || "moonshot-v1-32k", temperature: 0.3, max_tokens: 4096, messages });
+        let content = completion.choices[0]?.message?.content || "{}";
+        content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        parsed = JSON.parse(content);
+      } catch (err) { console.warn("[AgentBrain] Kimi failed, trying OpenAI:", (err as Error).message); }
+    }
 
-    const fallback = generateFallbackPrompt(input, orgBrain);
-    const rawMasterPrompt = parsed.masterPrompt || fallback.masterPrompt;
-    const masterPrompt =
-      agentType === "voice" || agentType === "demand_qual"
-        ? ensureVoiceAgentControlLayer(rawMasterPrompt)
-        : rawMasterPrompt;
-
-    return {
-      masterPrompt,
-      optimizedFirstMessage: parsed.optimizedFirstMessage || input.firstMessage,
-      reasoning: parsed.reasoning || "Generated using AI prompt engineering",
-      knowledgeSources: parsed.knowledgeSources || ["Default Knowledge", "Organization Intelligence"],
-    };
+    // OpenAI last resort
+    if (openaiKey && !parsed) {
+      try {
+        const openai = new OpenAI({ apiKey: openaiKey });
+        const completion = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.3, max_tokens: 4096, messages, response_format: { type: "json_object" } });
+        parsed = JSON.parse(completion.choices[0]?.message?.content || "{}");
+      } catch (err) { console.error("[AgentBrain] OpenAI fallback failed:", (err as Error).message); }
+    }
   } catch (error) {
-    console.error("[AgentBrain] OpenAI prompt generation failed:", error);
+    console.error("[AgentBrain] AI prompt generation failed:", error);
+  }
+
+  if (!parsed) {
     return generateFallbackPrompt(input, orgBrain);
   }
+
+  const fallback = generateFallbackPrompt(input, orgBrain);
+  const rawMasterPrompt = parsed.masterPrompt || fallback.masterPrompt;
+  const masterPrompt =
+    agentType === "voice" || agentType === "demand_qual"
+      ? ensureVoiceAgentControlLayer(rawMasterPrompt)
+      : rawMasterPrompt;
+
+  return {
+    masterPrompt,
+    optimizedFirstMessage: parsed.optimizedFirstMessage || input.firstMessage,
+    reasoning: parsed.reasoning || "Generated using AI prompt engineering",
+    knowledgeSources: parsed.knowledgeSources || ["Default Knowledge", "Organization Intelligence"],
+  };
 }
 
 /**

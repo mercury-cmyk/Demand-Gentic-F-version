@@ -148,7 +148,7 @@ async function processUnifiedPipelineSignal(
         return { processed: false, reason: "account_not_in_pipeline_weak_signal" };
       }
 
-      // Auto-enroll the account
+      // Auto-enroll the account at 'outreach' (campaign already touched them)
       const [enrolled] = await db
         .insert(unifiedPipelineAccounts)
         .values({
@@ -197,6 +197,24 @@ async function processUnifiedPipelineSignal(
         stageChanged: decision.action === 'advance_stage',
         actionCreated: !!decision.actionType,
       };
+    }
+
+    // If the account was pre-enrolled at 'target' and this is the first
+    // campaign signal, advance it to 'outreach' before AI processing.
+    if (pipelineAccount.funnelStage === 'target') {
+      await db
+        .update(unifiedPipelineAccounts)
+        .set({
+          funnelStage: 'outreach' as const,
+          previousStage: 'target',
+          stageChangedAt: new Date(),
+          lastActivityAt: new Date(),
+          enrollmentSource: pipelineAccount.enrollmentSource === 'ai' || pipelineAccount.enrollmentSource === 'import'
+            ? 'campaign_signal'
+            : pipelineAccount.enrollmentSource,
+        })
+        .where(eq(unifiedPipelineAccounts.id, pipelineAccount.id));
+      pipelineAccount.funnelStage = 'outreach';
     }
 
     // 3. Update or create the contact record

@@ -150,10 +150,12 @@ async function analyzeWithAI(
   content: string,
   input: OrganizationResearchInput
 ): Promise<StructuredIntelligence> {
+  // Provider chain: Kimi deep (primary — 128k context for website analysis) → DeepSeek → OpenAI (last resort)
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 
-  if (!openaiKey) {
-    // Fallback to basic extraction
+  if (!kimiKey && !deepseekKey && !openaiKey) {
     return buildFallbackIntelligence(input);
   }
 
@@ -205,23 +207,44 @@ ${input.notes ? `Research Notes: ${input.notes}` : ''}
 Website Content:
 ${content.slice(0, 30000)}`;
 
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+
   try {
     const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
 
-    const completion = await openai.chat.completions.create({
-      model: process.env.ORG_RESEARCH_MODEL || "gpt-4o",
-      temperature: 0.3,
-      max_tokens: 4096,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: { type: "json_object" },
-    });
+    // Kimi primary — 128k context is ideal for large website content analysis
+    if (kimiKey) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1", timeout: 180_000 });
+        const completion = await kimi.chat.completions.create({ model: process.env.KIMI_DEEP_MODEL || "moonshot-v1-128k", temperature: 0.3, max_tokens: 4096, messages });
+        let responseText = completion.choices[0]?.message?.content || "{}";
+        responseText = responseText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        return JSON.parse(responseText) as StructuredIntelligence;
+      } catch (err) { console.warn("[OrgResearch] Kimi failed:", (err as Error).message); }
+    }
 
-    const responseText = completion.choices[0]?.message?.content || "{}";
-    return JSON.parse(responseText) as StructuredIntelligence;
+    // DeepSeek fallback
+    if (deepseekKey) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const completion = await ds.chat.completions.create({ model: "deepseek-chat", temperature: 0.3, max_tokens: 4096, messages, response_format: { type: "json_object" } });
+        const responseText = completion.choices[0]?.message?.content || "{}";
+        return JSON.parse(responseText) as StructuredIntelligence;
+      } catch (err) { console.warn("[OrgResearch] DeepSeek failed:", (err as Error).message); }
+    }
+
+    // OpenAI last resort
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const completion = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.3, max_tokens: 4096, messages, response_format: { type: "json_object" } });
+      const responseText = completion.choices[0]?.message?.content || "{}";
+      return JSON.parse(responseText) as StructuredIntelligence;
+    }
+
+    return buildFallbackIntelligence(input);
   } catch (error) {
     console.error("[OrgResearch] AI analysis failed:", error);
     return buildFallbackIntelligence(input);

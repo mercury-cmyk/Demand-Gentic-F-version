@@ -229,10 +229,16 @@ export class SimulationEngine {
   }
   
   private initializeClients() {
-    if (process.env.OPENAI_API_KEY) {
-      console.warn("[SimulationEngine] OpenAI is configured but disabled. Gemini-only runtime enforced.");
+    // DeepSeek as fallback when Gemini is unavailable
+    const deepseekKey = process.env.DEEPSEEK_API_KEY;
+    if (deepseekKey) {
+      this.openai = new OpenAI({
+        apiKey: deepseekKey,
+        baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+      });
+    } else {
+      this.openai = null;
     }
-    this.openai = null;
     const geminiKey = process.env.GEMINI_API_KEY || process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
     if (geminiKey) {
       this.gemini = new GoogleGenerativeAI(geminiKey);
@@ -471,7 +477,7 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
         return responseText;
       } else if (this.openai) {
         const completion = await this.openai.chat.completions.create({
-          model: "gpt-4o-mini",
+          model: "deepseek-chat",
           messages: [{ role: "user", content: personaPrompt }],
           max_tokens: 150,
         });
@@ -553,7 +559,7 @@ Respond ONLY with the human's spoken words. No stage directions or descriptions.
         return responseText;
       } else if (this.openai) {
         const completion = await this.openai.chat.completions.create({
-          model: "gpt-4o-mini",
+          model: "deepseek-chat",
           messages: [
             { role: "system", content: context.systemPrompt },
             ...messages,

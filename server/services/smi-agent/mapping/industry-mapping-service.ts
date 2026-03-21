@@ -253,10 +253,11 @@ async function classifyIndustryWithAI(rawIndustry: string): Promise<IndustryClas
       .where(eq(industryTaxonomy.isActive, true))
       .limit(100);
 
-    const openai = (await import('../../../lib/openai')).default;
+    const openaiMod = await import('../../../lib/openai');
+    const openai = openaiMod.default;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: openaiMod.resolvedModel,
       messages: [
         {
           role: 'system',

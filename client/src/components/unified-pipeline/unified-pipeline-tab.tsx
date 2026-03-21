@@ -37,6 +37,7 @@ import {
   ArrowRight, Calendar, Phone, Mail, Clock, ChevronRight, Zap,
   BarChart3, Activity, CheckCircle2, XCircle, RefreshCw,
   User, Tag, Info, ListChecks, Eye, ChevronLeft,
+  Download, UserCheck, Search, AlertCircle,
 } from "lucide-react";
 import {
   UNIFIED_PIPELINE_FUNNEL_STAGES,
@@ -182,13 +183,14 @@ function StageBadge({ stage }: { stage: string }) {
 
 // ─── Section Nav ──────────────────────────────────────────────────────────────
 
-type Section = 'pipelines' | 'actions' | 'analytics' | 'triggers';
+type Section = 'pipelines' | 'actions' | 'analytics' | 'triggers' | 'leads';
 
 const SECTIONS: { id: Section; label: string; icon: typeof Workflow }[] = [
   { id: 'pipelines', label: 'Pipelines', icon: Workflow },
   { id: 'actions', label: 'Action Queue', icon: ListChecks },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'triggers', label: 'Engagement Triggers', icon: Zap },
+  { id: 'leads', label: 'Leads & Export', icon: Download },
 ];
 
 function SectionNav({ active, onChange }: { active: Section; onChange: (s: Section) => void }) {
@@ -212,6 +214,275 @@ function SectionNav({ active, onChange }: { active: Section; onChange: (s: Secti
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Leads Section ────────────────────────────────────────────────────────────
+
+interface LeadRow {
+  id: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  accountName: string;
+  accountIndustry: string;
+  campaignName: string;
+  aiScore: string;
+  qaStatus: string;
+  aiQualificationStatus: string;
+  createdAt: string;
+}
+
+function LeadsSection({ authHeaders }: { authHeaders: { headers: { Authorization: string } } }) {
+  const [selectedCampaign, setSelectedCampaign] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const { toast } = useToast();
+
+  const { data: campaignsData } = useQuery({
+    queryKey: ['client-portal-campaigns-for-leads'],
+    queryFn: async () => {
+      const res = await fetch('/api/client-portal/campaigns', authHeaders);
+      if (!res.ok) throw new Error('Failed to fetch campaigns');
+      return res.json();
+    },
+  });
+
+  const campaigns = [
+    ...(campaignsData?.verificationCampaigns || []),
+    ...(campaignsData?.regularCampaigns || []),
+  ];
+
+  const { data: leadsData, isLoading } = useQuery({
+    queryKey: ['client-portal-potential-leads-all', selectedCampaign],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
+      const res = await fetch(`/api/client-portal/potential-leads?${params}`, authHeaders);
+      if (!res.ok) throw new Error('Failed to fetch leads');
+      return res.json();
+    },
+  });
+
+  const allLeads: LeadRow[] = leadsData || [];
+  const filteredLeads = allLeads.filter((lead) => {
+    if (statusFilter === 'qualified' && !['approved', 'published'].includes(lead.qaStatus)) return false;
+    if (statusFilter === 'pending' && lead.qaStatus !== 'pending') return false;
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      return (
+        (lead.contactName || '').toLowerCase().includes(term) ||
+        (lead.contactEmail || '').toLowerCase().includes(term) ||
+        (lead.accountName || '').toLowerCase().includes(term)
+      );
+    }
+    return true;
+  });
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedCampaign !== 'all') params.append('campaignId', selectedCampaign);
+      if (statusFilter === 'qualified') params.append('status', 'qualified');
+
+      const res = await fetch(`/api/client-portal/leads/export?${params}`, authHeaders);
+      if (!res.ok) throw new Error('Export failed');
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `leads-export-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+
+      toast({ title: 'Export complete', description: 'Your leads have been exported to CSV.' });
+    } catch {
+      toast({ title: 'Export failed', description: 'Unable to export leads. Please try again.', variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const qualifiedCount = allLeads.filter(l => ['approved', 'published'].includes(l.qaStatus)).length;
+
+  return (
+    <div className="space-y-4">
+      {/* Header with export */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-sky-500 to-sky-600 flex items-center justify-center shadow-sm">
+            <Download className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold">Leads & Export</h3>
+            <p className="text-xs text-muted-foreground">View, search, and export your campaign leads</p>
+          </div>
+        </div>
+        <Button size="sm" onClick={handleExport} disabled={exporting || allLeads.length === 0} className="gap-2">
+          {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Export CSV
+        </Button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Card>
+          <CardContent className="py-4 px-4">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <User className="h-4 w-4 text-blue-500" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Total Leads</p>
+                <p className="text-xl font-bold">{allLeads.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4 px-4">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-lg bg-green-500/10 flex items-center justify-center">
+                <UserCheck className="h-4 w-4 text-green-500" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Qualified</p>
+                <p className="text-xl font-bold">{qualifiedCount}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4 px-4">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <Search className="h-4 w-4 text-amber-500" />
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Showing</p>
+                <p className="text-xl font-bold">{filteredLeads.length}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="py-3 px-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-muted-foreground">Campaign</label>
+              <Select value={selectedCampaign} onValueChange={setSelectedCampaign}>
+                <SelectTrigger className="w-[220px] h-8 text-sm">
+                  <SelectValue placeholder="All Campaigns" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Campaigns</SelectItem>
+                  {campaigns.map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-muted-foreground">Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[160px] h-8 text-sm">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Leads</SelectItem>
+                  <SelectItem value="qualified">Qualified Only</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Input
+              placeholder="Search by name, email, or account..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-[260px] h-8 text-sm"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Leads Table */}
+      <Card>
+        <CardHeader className="py-3 px-4">
+          <CardTitle className="text-sm font-medium">Leads</CardTitle>
+          <CardDescription className="text-xs">{filteredLeads.length} leads matching your filters</CardDescription>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : filteredLeads.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <AlertCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p>No leads found matching your filters</p>
+            </div>
+          ) : (
+            <ScrollArea className="h-[500px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Contact</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Campaign</TableHead>
+                    <TableHead className="text-right">AI Score</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredLeads.map((lead) => (
+                    <TableRow key={lead.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{lead.contactName || 'Unknown'}</p>
+                          <p className="text-xs text-muted-foreground">{lead.contactEmail || ''}</p>
+                          {lead.contactPhone && <p className="text-xs text-muted-foreground/60">{lead.contactPhone}</p>}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p>{lead.accountName || '—'}</p>
+                          {lead.accountIndustry && <p className="text-xs text-muted-foreground">{lead.accountIndustry}</p>}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">{lead.campaignName}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Badge className={Number(lead.aiScore) >= 70 ? 'bg-green-500/10 text-green-600' : Number(lead.aiScore) >= 50 ? 'bg-amber-500/10 text-amber-600' : 'bg-gray-500/10 text-gray-600'}>
+                          {lead.aiScore || '—'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={['approved', 'published'].includes(lead.qaStatus) ? 'default' : 'outline'} className="capitalize text-xs">
+                          {(lead.qaStatus || 'pending').replace(/_/g, ' ')}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -753,7 +1024,10 @@ function AnalyticsPanel({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function UnifiedPipelineTab({ authHeaders, clientAccountId, organizationId }: UnifiedPipelineTabProps) {
-  const [activeSection, setActiveSection] = useState<Section>('pipelines');
+  const urlSection = new URLSearchParams(window.location.search).get('section');
+  const validSections: Section[] = ['pipelines', 'actions', 'analytics', 'triggers', 'leads'];
+  const initialSection = validSections.includes(urlSection as Section) ? (urlSection as Section) : 'pipelines';
+  const [activeSection, setActiveSection] = useState<Section>(initialSection);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [detailAccountId, setDetailAccountId] = useState<string | null>(null);
@@ -867,6 +1141,16 @@ export function UnifiedPipelineTab({ authHeaders, clientAccountId, organizationI
     },
     onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
   });
+
+  // ── Section: Leads ──
+  if (activeSection === 'leads') {
+    return (
+      <div className="space-y-4">
+        <SectionNav active={activeSection} onChange={setActiveSection} />
+        <LeadsSection authHeaders={authHeaders} />
+      </div>
+    );
+  }
 
   // ── Section: Triggers ──
   if (activeSection === 'triggers') {

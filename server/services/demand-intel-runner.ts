@@ -203,44 +203,62 @@ async function researchCompanyCore(domain: string): Promise<any> {
     // Fall back to basic research
   }
 
-  // Basic company research using AI
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return { sources: [], findings: {} };
   }
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.3,
-      messages: [
-        {
-          role: "system",
-          content: `You are a B2B company research analyst. Research the company at ${domain} and provide structured intelligence. Return JSON only.`,
-        },
-        {
-          role: "user",
-          content: `Research ${domain} and provide:
+  const sysMsg = `You are a B2B company research analyst. Research the company at ${domain} and provide structured intelligence. Return JSON only.`;
+  const userMsg = `Research ${domain} and provide:
 1. Company name and description
 2. Industry and sub-industry
 3. Business model
 4. Key products/services
 5. Approximate company size
 
-Return as JSON: { "name": "", "description": "", "industry": "", "subIndustry": "", "businessModel": "", "keyProducts": [], "employeeCount": "", "confidence": 0.0 }`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+Return as JSON: { "name": "", "description": "", "industry": "", "subIndustry": "", "businessModel": "", "keyProducts": [], "employeeCount": "", "confidence": 0.0 }`;
 
-    const content = response.choices[0]?.message?.content || "{}";
-    return {
-      findings: JSON.parse(content),
-      sources: [`AI research on ${domain}`],
-    };
+  const msgs: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: sysMsg },
+    { role: "user", content: userMsg },
+  ];
+
+  try {
+    const OpenAI = (await import("openai")).default;
+
+    // DeepSeek primary
+    if (deepseekKey) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const response = await ds.chat.completions.create({ model: "deepseek-chat", temperature: 0.3, messages: msgs, response_format: { type: "json_object" } });
+        const content = response.choices[0]?.message?.content || "{}";
+        return { findings: JSON.parse(content), sources: [`DeepSeek research on ${domain}`] };
+      } catch (err) { console.warn("[Demand Intel] DeepSeek failed:", (err as Error).message); }
+    }
+
+    // Kimi fallback
+    if (kimiKey) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+        const response = await kimi.chat.completions.create({ model: process.env.KIMI_FAST_MODEL || "moonshot-v1-8k", temperature: 0.3, messages: msgs });
+        let content = response.choices[0]?.message?.content || "{}";
+        content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        return { findings: JSON.parse(content), sources: [`Kimi research on ${domain}`] };
+      } catch (err) { console.warn("[Demand Intel] Kimi failed:", (err as Error).message); }
+    }
+
+    // OpenAI last resort
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.3, messages: msgs, response_format: { type: "json_object" } });
+      const content = response.choices[0]?.message?.content || "{}";
+      return { findings: JSON.parse(content), sources: [`AI research on ${domain}`] };
+    }
+
+    return { sources: [], findings: {} };
   } catch (error) {
     console.error("[Demand Intel] Company core research error:", error);
     return { sources: [], findings: {} };
@@ -261,42 +279,58 @@ async function researchMarketPosition(domain: string): Promise<any> {
     // Fall back to basic research
   }
 
+  // Provider chain: DeepSeek (primary) → Kimi (fallback) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-  if (!openaiKey) {
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return { sources: [], findings: {} };
   }
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      temperature: 0.3,
-      messages: [
-        {
-          role: "system",
-          content: `You are a competitive intelligence analyst. Analyze market position for ${domain}. Return JSON only.`,
-        },
-        {
-          role: "user",
-          content: `Analyze ${domain}'s market position:
+  const sysMsg = `You are a competitive intelligence analyst. Analyze market position for ${domain}. Return JSON only.`;
+  const userMsg = `Analyze ${domain}'s market position:
 1. Main competitors
 2. Market positioning
 3. Key differentiators
 4. Strengths and weaknesses
 
-Return as JSON: { "competitors": [], "positioning": "", "differentiators": [], "strengths": [], "weaknesses": [], "confidence": 0.0 }`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+Return as JSON: { "competitors": [], "positioning": "", "differentiators": [], "strengths": [], "weaknesses": [], "confidence": 0.0 }`;
 
-    const content = response.choices[0]?.message?.content || "{}";
-    return {
-      findings: JSON.parse(content),
-      sources: [`AI competitive analysis of ${domain}`],
-    };
+  const msgs: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: sysMsg },
+    { role: "user", content: userMsg },
+  ];
+
+  try {
+    const OpenAI = (await import("openai")).default;
+
+    if (deepseekKey) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const response = await ds.chat.completions.create({ model: "deepseek-chat", temperature: 0.3, messages: msgs, response_format: { type: "json_object" } });
+        const content = response.choices[0]?.message?.content || "{}";
+        return { findings: JSON.parse(content), sources: [`DeepSeek competitive analysis of ${domain}`] };
+      } catch (err) { console.warn("[Demand Intel] DeepSeek market research failed:", (err as Error).message); }
+    }
+
+    if (kimiKey) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+        const response = await kimi.chat.completions.create({ model: process.env.KIMI_FAST_MODEL || "moonshot-v1-8k", temperature: 0.3, messages: msgs });
+        let content = response.choices[0]?.message?.content || "{}";
+        content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        return { findings: JSON.parse(content), sources: [`Kimi competitive analysis of ${domain}`] };
+      } catch (err) { console.warn("[Demand Intel] Kimi market research failed:", (err as Error).message); }
+    }
+
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.3, messages: msgs, response_format: { type: "json_object" } });
+      const content = response.choices[0]?.message?.content || "{}";
+      return { findings: JSON.parse(content), sources: [`AI competitive analysis of ${domain}`] };
+    }
+
+    return { sources: [], findings: {} };
   } catch (error) {
     console.error("[Demand Intel] Market position research error:", error);
     return { sources: [], findings: {} };
@@ -368,6 +402,9 @@ async function getContactInsights(accountId: string): Promise<any> {
  * Analyze research data with AI
  */
 async function analyzeResearchWithAI(data: any): Promise<any> {
+  // Provider chain: DeepSeek (primary) → Kimi (fallback for deep research) → OpenAI (last resort)
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  const kimiKey = process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY;
   const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 
   const systemPrompt = await buildAgentSystemPrompt(`
@@ -387,24 +424,11 @@ Focus on:
 4. Recommending engagement approach
 `);
 
-  if (!openaiKey) {
-    // Return basic analysis without AI
+  if (!deepseekKey && !kimiKey && !openaiKey) {
     return generateBasicAnalysis(data);
   }
 
-  try {
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({ apiKey: openaiKey });
-
-    const response = await openai.chat.completions.create({
-      model: process.env.DEMAND_INTEL_MODEL || "gpt-4o",
-      temperature: 0.3,
-      max_tokens: 4000,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Analyze this research data and generate a complete intelligence report:
+  const userContent = `Analyze this research data and generate a complete intelligence report:
 
 Domain: ${data.domain}
 
@@ -429,14 +453,46 @@ ${JSON.stringify(data.orgProfile?.offerings || {}, null, 2)}
 Target Signals to Prioritize:
 ${data.targetSignals ? data.targetSignals.join(', ') : 'All signals'}
 
-Generate the complete intelligence report following the output format specification.`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
+Generate the complete intelligence report following the output format specification.`;
 
-    const content = response.choices[0]?.message?.content || "{}";
-    return JSON.parse(content);
+  const messages: Array<{ role: "system" | "user"; content: string }> = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userContent },
+  ];
+
+  try {
+    const OpenAI = (await import("openai")).default;
+
+    // DeepSeek primary
+    if (deepseekKey) {
+      try {
+        const ds = new OpenAI({ apiKey: deepseekKey, baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com" });
+        const response = await ds.chat.completions.create({ model: process.env.DEMAND_INTEL_MODEL || "deepseek-chat", temperature: 0.3, max_tokens: 4000, messages, response_format: { type: "json_object" } });
+        const content = response.choices[0]?.message?.content || "{}";
+        return JSON.parse(content);
+      } catch (err) { console.warn("[Demand Intel] DeepSeek analysis failed:", (err as Error).message); }
+    }
+
+    // Kimi fallback — excellent for deep research with 128k context
+    if (kimiKey) {
+      try {
+        const kimi = new OpenAI({ apiKey: kimiKey, baseURL: process.env.KIMI_BASE_URL || "https://api.moonshot.cn/v1" });
+        const response = await kimi.chat.completions.create({ model: process.env.KIMI_STANDARD_MODEL || "moonshot-v1-32k", temperature: 0.3, max_tokens: 4000, messages });
+        let content = response.choices[0]?.message?.content || "{}";
+        content = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        return JSON.parse(content);
+      } catch (err) { console.warn("[Demand Intel] Kimi analysis failed:", (err as Error).message); }
+    }
+
+    // OpenAI last resort
+    if (openaiKey) {
+      const openai = new OpenAI({ apiKey: openaiKey });
+      const response = await openai.chat.completions.create({ model: "gpt-4o-mini", temperature: 0.3, max_tokens: 4000, messages, response_format: { type: "json_object" } });
+      const content = response.choices[0]?.message?.content || "{}";
+      return JSON.parse(content);
+    }
+
+    return generateBasicAnalysis(data);
   } catch (error) {
     console.error("[Demand Intel] AI analysis error:", error);
     return generateBasicAnalysis(data);

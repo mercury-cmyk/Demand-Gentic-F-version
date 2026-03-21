@@ -272,7 +272,7 @@ class DeepSeekProvider implements ProviderClient {
 
 export class UnifiedEmailRouter {
   private providers: Map<string, ProviderClient>;
-  private providerPriority: string[] = ['gemini', 'gpt4o', 'deepseek'];
+  private providerPriority: string[] = ['deepseek', 'gemini', 'gpt4o'];
 
   constructor() {
     this.providers = new Map();

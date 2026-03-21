@@ -2,10 +2,10 @@
  * Client Portal Layout
  *
  * DESIGN PRINCIPLES:
- * 1. Single, centralized AgentX entry point - prominently placed at TOP
- * 2. Grouped sidebar navigation: Dashboard / Campaigns / AI & Intelligence / Account
+ * 1. Minimal sidebar: pinned Overview + 5 collapsible groups
+ * 2. Clean navigation: Campaigns / AI Studio / Communications / Analytics / Account
  * 3. Collapsible sections with auto-expand for active items
- * 4. Clean, intentional navigation structure
+ * 4. Enterprise-grade, distraction-free UI
  */
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useSearch } from 'wouter';
@@ -34,7 +34,6 @@ import {
   CreditCard,
   Settings,
   LogOut,
-  Package,
   Menu,
   X,
   ChevronRight,
@@ -44,7 +43,6 @@ import {
   FileText,
   HelpCircle,
   Phone,
-  Bot,
   BotMessageSquare,
   PhoneCall,
   ClipboardList,
@@ -55,31 +53,18 @@ import {
   Target,
   Headphones,
   Layers,
-  AlertTriangle,
-  Crosshair,
-  MessageSquareText,
   Mail,
-  Users,
   BarChart3,
-  Mic,
-  TestTube,
-  Building2,
   Plus,
-  Trophy,
-  GitBranch,
   Wand2,
   Workflow,
-  DollarSign,
-  Download,
   Inbox,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { VoiceAssistant } from '../voice/voice-assistant';
 import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-studio/simulation-studio-panel';
-import { AgenticReportsPanel } from '@/components/client-portal/reports/agentic-reports-panel';
 import { AgentPanelProvider, useAgentPanelContextOptional } from '@/components/agent-panel';
 import { clearClientPortalSession } from '@/lib/client-portal-session';
-import { useToast } from '@/hooks/use-toast';
 
 interface ClientUser {
   id: string;
@@ -99,9 +84,6 @@ interface NavItem {
   name: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
-  highlighted?: boolean;
-  disabled?: boolean;
-  disabledBadge?: string;
 }
 
 interface NavGroup {
@@ -110,24 +92,14 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Primary action - AgentX (centralized AI entry point)
-const agenticOperator = {
-  name: 'AgentX',
-  href: '#', // Changed from navigation to action
-  icon: BotMessageSquare,
-  badge: 'COMING SOON',
-  description: 'Unified agentic operations panel',
-};
-
 // Map nav item hrefs to required feature flags for gating.
 // Items not listed are always shown (e.g. Dashboard Overview, Settings, Guide).
 const NAV_FEATURE_MAP: Record<string, string> = {
   '/client-portal/dashboard?tab=campaigns': 'campaign_reports',
   '/client-portal/create-campaign': 'campaign_reports',
-  '/client-portal/dashboard?tab=unified-pipelines': 'lead_journey_pipeline',
+  '/client-portal/dashboard?tab=unified-pipelines': 'journey_pipeline',
   '/client-portal/dashboard?tab=work-orders': 'work_orders',
   '/client-portal/dashboard?tab=bookings': 'calendar_booking',
-  '/client-portal/agents': 'ai_studio_dashboard',
   '/client-portal/intelligence': 'ai_studio_dashboard',
   '/client-portal/dashboard?tab=target-markets': 'ai_studio_dashboard',
   '/client-portal/dashboard?tab=campaign-planner': 'ai_campaign_planner',
@@ -137,6 +109,7 @@ const NAV_FEATURE_MAP: Record<string, string> = {
   '/client-portal/analytics': 'analytics_dashboard',
   '/client-portal/conversation-quality': 'analytics_dashboard',
   '/client-portal/showcase-calls': 'analytics_dashboard',
+  '/client-portal/dashboard?tab=reporting': 'analytics_dashboard',
   '/client-portal/dashboard?tab=billing': 'billing_invoices',
   '/client-portal/disposition-intelligence': 'disposition_overview',
   '/client-portal/cost-tracking': 'billing_cost_tracking',
@@ -149,71 +122,56 @@ const NAV_FEATURE_MAP: Record<string, string> = {
   '/client-portal/email-inbox': 'email_inbox',
 };
 
+// Pinned top-level items (shown above groups without a section header)
+const pinnedNavItems: NavItem[] = [
+  { name: 'Overview', href: '/client-portal/dashboard?tab=overview', icon: LayoutDashboard },
+];
+
 // Grouped navigation structure
 const baseNavigationGroups: NavGroup[] = [
-  {
-    id: 'dashboard',
-    label: 'Dashboard',
-    items: [
-      { name: 'Overview', href: '/client-portal/dashboard?tab=overview', icon: LayoutDashboard },
-    ],
-  },
   {
     id: 'campaigns',
     label: 'Campaigns',
     items: [
       { name: 'All Campaigns', href: '/client-portal/dashboard?tab=campaigns', icon: Megaphone },
-      { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus, highlighted: true },
-      { name: 'Pipeline & Engagement', href: '/client-portal/dashboard?tab=unified-pipelines', icon: Workflow, highlighted: true },
+      { name: 'Create Campaign', href: '/client-portal/create-campaign', icon: Plus },
+      { name: 'Pipeline & Engagement', href: '/client-portal/dashboard?tab=unified-pipelines', icon: Workflow },
       { name: 'Work Orders', href: '/client-portal/dashboard?tab=work-orders', icon: ClipboardList },
-      // { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
-      // { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
       { name: 'Bookings', href: '/client-portal/dashboard?tab=bookings', icon: CalendarDays },
-      { name: 'Leads & Export', href: '/client-portal/leads', icon: Download },
     ],
   },
   {
     id: 'ai-intelligence',
-    label: 'AI & Intelligence',
+    label: 'AI Studio',
     items: [
-      { name: 'The Agentic Council', href: '/client-portal/agents', icon: Bot, highlighted: true },
-      { name: 'Organization Intelligence', href: '/client-portal/intelligence', icon: Brain },
+      { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain },
       { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
-      { name: 'Campaign Planner', href: '/client-portal/dashboard?tab=campaign-planner', icon: Wand2, disabled: true, disabledBadge: 'Coming soon' },
       { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
     ],
   },
   {
-    id: 'analytics',
-    label: 'Analytics & Insights',
+    id: 'communications',
+    label: 'Communications',
     items: [
-      { name: 'Reports & Analytics', href: '/client-portal/reports', icon: BarChart3, highlighted: true },
-      { name: 'Showcase Calls', href: '/client-portal/showcase-calls', icon: Trophy },
-      { name: 'Disposition Intelligence', href: '/client-portal/disposition-intelligence', icon: Target },
+      { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
+      { name: 'Email Studio', href: '/client-portal/email-simulation', icon: Wand2 },
+      { name: 'Shared Inbox', href: '/client-portal/email-inbox', icon: Inbox },
+    ],
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics',
+    items: [
+      { name: 'Reports & Analytics', href: '/client-portal/dashboard?tab=reporting', icon: BarChart3 },
     ],
   },
   {
     id: 'billing',
-    label: 'Billing',
+    label: 'Account',
     items: [
       { name: 'Billing & Invoices', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
-    ],
-  },
-  {
-    id: 'email',
-    label: 'Email',
-    items: [
-      { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
-      { name: 'Email Studio', href: '/client-portal/email-simulation', icon: Sparkles },
-      { name: 'Inbox', href: '/client-portal/email-inbox', icon: Inbox },
-    ],
-  },
-  {
-    id: 'resources',
-    label: 'How it Works',
-    items: [
-      { name: 'Client Guide', href: '/client-portal/services', icon: Package },
+      { name: 'Client Guide', href: '/client-portal/services', icon: HelpCircle },
     ],
   },
 ];
@@ -282,7 +240,6 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [simulationOpen, setSimulationOpen] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
-  const { toast } = useToast();
 
   const storedUser = localStorage.getItem('clientPortalUser');
   const user: ClientUser | null = storedUser ? JSON.parse(storedUser) : null;
@@ -334,53 +291,57 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const visibilitySettings = featuresData?.visibilitySettings || {};
 
   // Build navigation dynamically based on feature availability
-  const navigationGroups = React.useMemo(() => {
-    const enabledSet = new Set(enabledFeatures);
+  const filterByFeature = React.useCallback((item: NavItem) => {
+    const requiredFeature = NAV_FEATURE_MAP[item.href];
+    if (!requiredFeature) return true;
+    if (enabledFeatures.length === 0) return true;
+    return new Set(enabledFeatures).has(requiredFeature);
+  }, [enabledFeatures]);
 
+  const navigationGroups = React.useMemo(() => {
     let groups = baseNavigationGroups.map(group => ({
       ...group,
-      items: group.items.filter(item => {
-        const requiredFeature = NAV_FEATURE_MAP[item.href];
-        // If no feature mapping, always show the item
-        if (!requiredFeature) return true;
-        // If features haven't loaded yet (empty array), show all to avoid flicker
-        if (enabledFeatures.length === 0) return true;
-        return enabledSet.has(requiredFeature);
-      }),
+      items: group.items.filter(filterByFeature),
     }));
 
-    // Hide billing group if showBilling is explicitly false
+    // Hide billing item (not entire Account group) if showBilling is explicitly false
     if (visibilitySettings.showBilling === false) {
-      groups = groups.filter(g => g.id !== 'billing');
+      groups = groups.map(g => {
+        if (g.id === 'billing') {
+          return { ...g, items: g.items.filter(item => !item.href.includes('billing')) };
+        }
+        return g;
+      });
     }
 
     // Remove empty groups after filtering
     groups = groups.filter(g => g.items.length > 0);
 
-    // Rename AI & Intelligence group to [Client Name] AI Studio
+    // Rename AI Studio group with client name
     const aiGroup = groups.find(g => g.id === 'ai-intelligence');
     if (aiGroup) {
       const clientName = user?.clientAccountName || 'Client';
-      // Truncate if too long to prevent layout breaking
       const displayName = clientName.length > 15 ? clientName.substring(0, 15) + '...' : clientName;
       aiGroup.label = `${displayName} AI Studio`;
     }
 
-    // Add conditional items to Campaigns group
+    // Add Upcoming Events to Campaigns if Argyle is enabled
     const campaignsGroup = groups.find(g => g.id === 'campaigns');
-    if (campaignsGroup) {
-      // Add Upcoming Events if Argyle enabled (client-specific integration)
-      if (argyleFeatureStatus?.enabled) {
-        campaignsGroup.items.push({
-          name: 'Upcoming Events',
-          href: '/client-portal/argyle-events',
-          icon: CalendarDays,
-        });
-      }
+    if (campaignsGroup && argyleFeatureStatus?.enabled) {
+      campaignsGroup.items.push({
+        name: 'Upcoming Events',
+        href: '/client-portal/argyle-events',
+        icon: CalendarDays,
+      });
     }
 
     return groups;
-  }, [argyleFeatureStatus?.enabled, user?.clientAccountName, visibilitySettings.showBilling, enabledFeatures]);
+  }, [argyleFeatureStatus?.enabled, user?.clientAccountName, visibilitySettings.showBilling, filterByFeature]);
+
+  // Filter pinned items by feature flags
+  const filteredPinnedItems = React.useMemo(() => {
+    return pinnedNavItems.filter(filterByFeature);
+  }, [filterByFeature]);
 
   // Show suggestions bubble after a delay if user hasn't interacted
   useEffect(() => {
@@ -488,7 +449,6 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     if (location.startsWith('/client-portal/reports')) return 'Reports & Analytics';
     if (location.startsWith('/client-portal/conversation-quality')) return 'Conversation Quality';
     if (location.startsWith('/client-portal/showcase-calls')) return 'Showcase Calls';
-    if (location.startsWith('/client-portal/agents')) return 'The Agentic Council';
     if (location.startsWith('/client-portal/create-campaign')) return 'Create Campaign';
     if (location.startsWith('/client-portal/argyle-events')) return 'Upcoming Events';
     return 'Client Workspace';
@@ -508,164 +468,100 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-72 bg-gradient-to-b from-slate-50 via-white to-white dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 border-r border-slate-200/80 dark:border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 flex flex-col shadow-xl shadow-slate-900/5',
+          'fixed inset-y-0 left-0 z-50 w-64 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 transform transition-transform duration-200 ease-in-out lg:translate-x-0 flex flex-col',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <div className="flex h-20 items-center justify-between px-4 border-b border-slate-200/80 dark:border-slate-800">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-md">
-              <Layers className="h-5 w-5 text-white" />
+        {/* Brand header */}
+        <div className="flex h-14 items-center justify-between px-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shrink-0">
+              <Layers className="h-4 w-4 text-white" />
             </div>
             <Link href="/client-portal/dashboard?tab=overview">
-              <span className="text-base font-semibold text-slate-900 dark:text-slate-100 cursor-pointer truncate block">
-                DemandGentic Client
-                <span className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">Portal Workspace</span>
+              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 cursor-pointer truncate block">
+                DemandGentic
+                <span className="block text-[10px] font-normal text-slate-400 dark:text-slate-500">Client Portal</span>
               </span>
             </Link>
+          </div>
+          <div className="flex items-center gap-1">
             {user?.isOwner && (
-              <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 gap-1 shrink-0">
-                <Crown className="h-3 w-3" />
+              <Badge variant="secondary" className="bg-amber-50 text-amber-700 text-[10px] px-1.5 gap-0.5 shrink-0 border-amber-200/50">
+                <Crown className="h-2.5 w-2.5" />
                 Owner
               </Badge>
             )}
+            <Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" onClick={() => setSidebarOpen(false)}>
+              <X className="h-4 w-4" />
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <X className="h-5 w-5" />
-          </Button>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {/* AGENTIC OPERATOR - Centralized AI Entry Point */}
-          <div className="px-1 mb-4">
-            <Link href="/client-portal/dashboard?tab=overview">
-              <button
-                onClick={() => {
-                  setSidebarOpen(false);
-                  // handleOpenAssistant(); 
-                }}
-                className={cn(
-                  'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold cursor-pointer transition-all',
-                  'bg-gradient-to-r from-indigo-600/15 via-violet-500/10 to-transparent',
-                  'border border-indigo-300/40 dark:border-indigo-700/60 hover:border-indigo-400/60',
-                  'text-indigo-700 dark:text-indigo-300 hover:shadow-md hover:scale-[1.01]',
-                  'group'
-                )}
-              >
-                <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 group-hover:bg-indigo-200/70 dark:group-hover:bg-indigo-900/70 transition-colors">
-                  <agenticOperator.icon className="h-5 w-5" />
-                </div>
-                <div className="flex-1 text-left">
-                  <span className="block flex items-center gap-2">
-                    {agenticOperator.name}
-                    <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.6)]" />
+        <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+          {/* Pinned navigation items */}
+          <div className="space-y-0.5 mb-1">
+            {filteredPinnedItems.map((item) => {
+              const isActive = isItemActive(item, location, searchString);
+              return (
+                <Link key={item.name} href={item.href}>
+                  <span
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer',
+                      isActive
+                        ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                    )}
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <item.icon className={cn('h-[18px] w-[18px]', isActive ? 'text-indigo-600' : 'text-slate-400')} />
+                    {item.name}
+                    {isActive && <ChevronRight className="h-3.5 w-3.5 ml-auto text-indigo-400" />}
                   </span>
-                  <span className="text-xs font-normal text-muted-foreground">{agenticOperator.description}</span>
-                </div>
-                <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px] px-1.5 whitespace-nowrap shadow-sm">
-                  {agenticOperator.badge}
-                </Badge>
-              </button>
-            </Link>
+                </Link>
+              );
+            })}
           </div>
 
-          <Separator className="my-3 mx-1 bg-slate-200 dark:bg-slate-800" />
+          <Separator className="my-2 bg-slate-100 dark:bg-slate-800" />
 
-          {/* Grouped Navigation */}
+          {/* Grouped navigation */}
           {navigationGroups.map((group) => {
             const isGroupActive = groupHasActiveItem(group, location, searchString);
             const isAiStudioGroup = group.id === 'ai-intelligence';
 
             return (
-              <Collapsible key={group.id} defaultOpen={isGroupActive || group.id === 'dashboard' || isAiStudioGroup}>
+              <Collapsible key={group.id} defaultOpen={isGroupActive || group.id === 'campaigns' || isAiStudioGroup}>
                 <CollapsibleTrigger asChild>
                   <button className={cn(
-                    "w-full flex items-center justify-between px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-[0.08em] hover:text-slate-700 dark:hover:text-slate-200 transition-colors group/trigger",
-                    isAiStudioGroup && "text-violet-700 dark:text-violet-300 font-bold bg-violet-50/70 dark:bg-violet-900/20 rounded-lg mb-1 mt-1"
+                    "w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors",
+                    isAiStudioGroup && "text-violet-500 dark:text-violet-400"
                   )}>
-                    <span className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5">
                        {group.label}
-                       {isAiStudioGroup && <Sparkles className="h-3 w-3 animate-pulse" />}
+                       {isAiStudioGroup && <Sparkles className="h-3 w-3" />}
                     </span>
-                    <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[state=open]/trigger:rotate-180" />
+                    <ChevronDown className="h-3 w-3 transition-transform duration-200" />
                   </button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-0.5 pb-2">
                   {group.items.map((item) => {
-                    const isDisabled = !!item.disabled;
-                    const isActive = !isDisabled && isItemActive(item, location, searchString);
-                    const isHighlighted = !!(item as any).highlighted;
-                    const content = (
-                      <span
-                        className={cn(
-                          'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all relative overflow-hidden border border-transparent',
-                          isDisabled
-                            ? 'text-slate-400 cursor-not-allowed opacity-80'
-                            : isActive
-                            ? 'bg-indigo-50 dark:bg-indigo-900/25 text-indigo-700 dark:text-indigo-300 cursor-pointer border-indigo-200/70 dark:border-indigo-700/60 shadow-sm'
-                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/70 hover:text-slate-900 dark:hover:text-slate-100 cursor-pointer',
-                          isHighlighted && !isActive && !isDisabled && 'bg-gradient-to-r from-violet-500/10 via-fuchsia-500/5 to-transparent text-violet-700 dark:text-violet-300 border border-violet-200/50 dark:border-violet-700/40 shadow-sm',
-                          isHighlighted && isActive && !isDisabled && 'bg-gradient-to-r from-violet-100 to-indigo-50 dark:from-violet-900/30 dark:to-indigo-900/20 text-violet-800 dark:text-violet-200 border-violet-200 dark:border-violet-700 font-semibold'
-                        )}
-                        onClick={() => {
-                          if (isDisabled) {
-                            toast({
-                              title: "Campaign Planner",
-                              description: "Campaign Planner is under construction. We're working on it and it will be available soon.",
-                            });
-                            return;
-                          }
-                          setSidebarOpen(false);
-                        }}
-                        aria-disabled={isDisabled}
-                      >
-                        <span
-                          className={cn(
-                            "h-7 w-7 rounded-md shrink-0 flex items-center justify-center transition-colors",
-                            isDisabled
-                              ? "bg-slate-100 dark:bg-slate-800"
-                              : isActive
-                              ? "bg-indigo-100 dark:bg-indigo-900/40"
-                              : "bg-slate-100 dark:bg-slate-800/80",
-                            isHighlighted && !isDisabled && "bg-violet-100 dark:bg-violet-900/40",
-                          )}
-                        >
-                          <item.icon className={cn("h-4 w-4", isDisabled ? "text-slate-400" : isHighlighted ? "text-violet-600 dark:text-violet-300" : isActive ? "text-indigo-600 dark:text-indigo-300" : "text-slate-600 dark:text-slate-300")} />
-                        </span>
-                        <span className={cn(isHighlighted && !isDisabled && "font-semibold tracking-tight")}>{item.name}</span>
-
-                        {isDisabled && item.disabledBadge && (
-                          <Badge variant="secondary" className="ml-auto h-4 px-1.5 text-[9px] bg-slate-200 text-slate-600 border-0">
-                            {item.disabledBadge}
-                          </Badge>
-                        )}
-
-                        {!isDisabled && isHighlighted && (
-                          <Badge className="ml-auto h-4 px-1.5 text-[9px] bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-0 shadow-sm animate-pulse">
-                            HOT
-                          </Badge>
-                        )}
-
-                        {isActive && !isHighlighted && !isDisabled && <ChevronRight className="h-4 w-4 ml-auto text-indigo-500" />}
-                      </span>
-                    );
-
-                    if (isDisabled) {
-                      return (
-                        <button key={item.name} type="button" className="w-full text-left">
-                          {content}
-                        </button>
-                      );
-                    }
-
+                    const isActive = isItemActive(item, location, searchString);
                     return (
                       <Link key={item.name} href={item.href}>
-                        {content}
+                        <span
+                          className={cn(
+                            'flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-colors cursor-pointer',
+                            isActive
+                              ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300'
+                              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-200'
+                          )}
+                          onClick={() => setSidebarOpen(false)}
+                        >
+                          <item.icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-indigo-600' : 'text-slate-400')} />
+                          <span className="truncate">{item.name}</span>
+                          {isActive && <ChevronRight className="h-3.5 w-3.5 ml-auto text-indigo-400 shrink-0" />}
+                        </span>
                       </Link>
                     );
                   })}
@@ -680,7 +576,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           <div className="px-3 pb-2">
             <Link href="/">
               <span
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors bg-amber-50 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-300 dark:hover:bg-amber-900/30 border border-amber-200/60 dark:border-amber-800/60"
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/30"
                 onClick={() => setSidebarOpen(false)}
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -690,21 +586,18 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           </div>
         )}
 
-        {/* Account info at bottom */}
+        {/* Account info */}
         {user && (
-          <div className="border-t border-slate-200/80 dark:border-slate-800 p-4">
-            <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 p-3">
-              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400 mb-2">Organization</div>
-              <div className="flex items-center gap-2">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="text-[11px] bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                    {getInitials()}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{user.clientAccountName}</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{user.email}</div>
-                </div>
+          <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-8 w-8 shrink-0">
+                <AvatarFallback className="text-[11px] bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                  {getInitials()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">{user.clientAccountName}</div>
+                <div className="text-xs text-slate-400 dark:text-slate-500 truncate">{user.email}</div>
               </div>
             </div>
           </div>
@@ -712,20 +605,19 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       </aside>
 
       {/* Main content area */}
-      <div className="lg:pl-72">
+      <div className="lg:pl-64">
         {/* Header */}
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-950/80 backdrop-blur supports-[backdrop-filter]:bg-white/70 px-4 lg:px-6">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-950/90 backdrop-blur-sm px-4 lg:px-6">
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden"
+            className="lg:hidden h-8 w-8"
             onClick={() => setSidebarOpen(true)}
           >
             <Menu className="h-5 w-5" />
           </Button>
 
           <div className="flex-1 min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Client Dashboard</div>
             <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{currentPageLabel}</div>
           </div>
 

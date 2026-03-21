@@ -172,9 +172,9 @@ export default function ClientPortalEmailInbox() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Email Inbox</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Shared Inbox</h1>
             <p className="text-muted-foreground text-sm">
-              Manage your email communications in one place
+              Shared email inbox for your team — all users on your account can view and send from the same connected mailbox
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -252,8 +252,8 @@ export default function ClientPortalEmailInbox() {
                 </div>
                 <CardDescription>
                   {googleStatus?.connected
-                    ? `Connected as ${googleStatus.mailboxEmail}`
-                    : 'Connect your Google email account for sending and receiving.'}
+                    ? `Connected as ${googleStatus.mailboxEmail} (shared with your team)`
+                    : 'Connect a shared Google email account for your team.'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -302,8 +302,8 @@ export default function ClientPortalEmailInbox() {
                 </div>
                 <CardDescription>
                   {microsoftStatus?.connected
-                    ? `Connected as ${microsoftStatus.mailboxEmail}`
-                    : 'Connect your Outlook / Microsoft 365 email account.'}
+                    ? `Connected as ${microsoftStatus.mailboxEmail} (shared with your team)`
+                    : 'Connect a shared Outlook / Microsoft 365 email account for your team.'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -352,8 +352,8 @@ export default function ClientPortalEmailInbox() {
                 </div>
                 <CardDescription>
                   {smtpStatus?.connected
-                    ? `Configured as ${smtpStatus.mailboxEmail}`
-                    : 'Configure a custom email server with SMTP credentials.'}
+                    ? `Configured as ${smtpStatus.mailboxEmail} (shared with your team)`
+                    : 'Configure a shared custom email server with SMTP credentials for your team.'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -441,16 +441,16 @@ export default function ClientPortalEmailInbox() {
                   )}
                 </div>
                 <h3 className="text-lg font-semibold mb-1">
-                  {activeTab === 'inbox' ? 'Your inbox is empty' : 'No sent messages'}
+                  {activeTab === 'inbox' ? 'Shared inbox is empty' : 'No sent messages'}
                 </h3>
                 <p className="text-sm text-muted-foreground max-w-sm">
                   {hasAnyConnection
                     ? activeTab === 'inbox'
-                      ? 'No messages yet. Campaign replies and notifications will appear here.'
-                      : 'Emails you send through campaigns or compose manually will appear here.'
+                      ? 'No messages yet. Campaign replies and notifications will appear here for all team members.'
+                      : 'Emails sent through campaigns or composed manually will appear here for all team members.'
                     : activeTab === 'inbox'
-                      ? 'Connect your email account to start receiving messages here.'
-                      : 'Connect an email account first, then compose and send emails.'}
+                      ? 'Connect your team email account to start receiving messages in the shared inbox.'
+                      : 'Connect a team email account first, then compose and send emails.'}
                 </p>
                 {!hasAnyConnection && (
                   <Button
