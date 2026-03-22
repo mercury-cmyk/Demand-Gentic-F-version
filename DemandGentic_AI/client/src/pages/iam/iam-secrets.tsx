@@ -238,6 +238,37 @@ export default function IamSecrets() {
     },
   });
 
+  const activateMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/secrets/${id}/activate`, {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => null);
+        throw new Error(error?.error || "Failed to activate secret");
+      }
+      return response.json() as Promise;
+    },
+    onSuccess: (updated) => {
+      toast({ title: "Secret activated" });
+      setSelectedSecret((prev) =>
+        updated && prev
+          ? { ...updated, value: prev.value }
+          : prev
+      );
+      queryClient.invalidateQueries({ queryKey: ["/api/secrets"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Unable to activate secret",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const deactivateMutation = useMutation({
     mutationFn: async (id: string) => {
       const response = await fetch(`/api/secrets/${id}/deactivate`, {
@@ -650,12 +681,21 @@ export default function IamSecrets() {
                     
                     {rotateMutation.isLoading ? "Rotating..." : "Rotate"}
                   
-                   deactivateMutation.mutate(selectedSecret.id)}
-                    disabled={deactivateMutation.isLoading || !selectedSecret.isActive}
-                  >
-                    
-                    {selectedSecret.isActive ? "Deactivate" : "Deactivate again"}
-                  
+                  {selectedSecret.isActive ? (
+                     deactivateMutation.mutate(selectedSecret.id)}
+                      disabled={deactivateMutation.isLoading}
+                    >
+
+                      {deactivateMutation.isLoading ? "Deactivating..." : "Deactivate"}
+
+                  ) : (
+                     activateMutation.mutate(selectedSecret.id)}
+                      disabled={activateMutation.isLoading}
+                    >
+
+                      {activateMutation.isLoading ? "Activating..." : "Activate"}
+
+                  )}
                 
               
             

@@ -83,9 +83,54 @@ export function AgentChatInterface({
   const [isLoading, setIsLoading] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<ExecutionPlan | null>(null);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // Voice prompting: Speech-to-text via browser SpeechRecognition API
+  const toggleVoicePrompt = useCallback(() => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast({ title: 'Not Supported', description: 'Voice input is not supported in this browser.', variant: 'destructive' });
+      return;
+    }
+    const recognition = new SR();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognitionRef.current = recognition;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognition.onresult = (event: any) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalText += t;
+        else interimText += t;
+      }
+      if (finalText) {
+        setInputValue(prev => {
+          const base = prev.replace(/ ?\[.*?\]$/, '');
+          return (base ? base + ' ' : '') + finalText;
+        });
+      } else if (interimText) {
+        setInputValue(prev => {
+          const base = prev.replace(/ ?\[.*?\]$/, '');
+          return base + ' [' + interimText + ']';
+        });
+      }
+    };
+    recognition.start();
+  }, [isListening, toast]);
 
   // Detect order intent from messages
   const detectOrderIntent = useCallback((message: string) => {
@@ -252,17 +297,27 @@ export function AgentChatInterface({
 
       const data = await response.json();
       const stepCount = data.executedSteps?.length || 0;
+      const planSteps = currentPlan?.steps || [];
 
       const resultMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
         content: `Plan executed successfully. ${stepCount} step${stepCount !== 1 ? 's' : ''} completed.`,
         timestamp: new Date().toISOString(),
-        toolsExecuted: data.executedSteps?.map((s: any) => ({
-          tool: s.result?.tool || s.stepId,
-          args: {},
-          result: s.result,
-        })),
+        toolsExecuted: data.executedSteps?.map((s: any) => {
+          const planStep = planSteps.find((ps: any) => ps.id === s.stepId);
+          const toolName = s.result?.tool && !s.result.tool.match(/^[0-9a-f-]{36}$/)
+            ? s.result.tool
+            : planStep?.tool || 'action';
+          return {
+            tool: toolName,
+            args: {},
+            result: {
+              ...s.result,
+              message: planStep?.description || s.result?.description || s.result?.message || toolName,
+            },
+          };
+        }),
       };
       setMessages((prev) => [...prev, resultMessage]);
       setCurrentPlan(null);
@@ -622,8 +677,11 @@ const MessageBubble = React.forwardRef<HTMLDivElement, { message: Message }>(({ 
           {hasExecutedSteps && (
             <div className="mt-3 pt-2 border-t border-border/30 space-y-1">
               {message.toolsExecuted!.map((step, idx) => {
-                const toolLabel = (step.result?.message || step.tool || `Step ${idx + 1}`)
-                  .replace(/^Executed\s+/, '')
+                const rawLabel = step.result?.message || step.result?.description || step.tool || `Step ${idx + 1}`;
+                // Avoid displaying raw UUIDs as labels
+                const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawLabel);
+                const toolLabel = (isUuid ? `Step ${idx + 1}` : rawLabel)
+                  .replace(/^Executed\s+/i, '')
                   .replace(/_/g, ' ')
                   .replace(/\b\w/g, (c: string) => c.toUpperCase());
                 return (
@@ -687,4 +745,5 @@ const MessageBubble = React.forwardRef<HTMLDivElement, { message: Message }>(({ 
       </div>
     </motion.div>
   );
-}
+});
+MessageBubble.displayName = 'MessageBubble';

@@ -183,6 +183,21 @@ export async function deactivateSecret(
   return getSecretSummary(id);
 }
 
+export async function activateSecret(
+  id: string,
+  activatedBy: string
+): Promise {
+  await db.update(secretStore).set({
+    isActive: true,
+    deactivatedAt: null,
+    deactivatedBy: null,
+    updatedBy: activatedBy,
+    updatedAt: new Date(),
+  }).where(eq(secretStore.id, id));
+
+  return getSecretSummary(id);
+}
+
 export async function getSecretSummary(id: string): Promise {
   const record = await fetchSecretRecord(id);
   if (!record) {

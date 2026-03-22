@@ -241,6 +241,29 @@ router.post(
 );
 
 router.post(
+  '/:id/activate',
+  auditLog('secret', 'secret_activate'),
+  async (req: Request, res: Response) => {
+    try {
+      const secretSummary = await secretService.getSecretById(req.params.id, getAllowedEnvironments());
+      if (!secretSummary) {
+        return res.status(404).json({ error: 'Secret not found or not accessible' });
+      }
+
+      const activated = await secretService.activateSecret(
+        req.params.id,
+        req.user!.userId
+      );
+
+      res.json(activated);
+    } catch (error: any) {
+      console.error('[SECRETS] Failed to activate secret:', error);
+      res.status(500).json({ error: 'Failed to activate secret' });
+    }
+  }
+);
+
+router.post(
   '/:id/deactivate',
   auditLog('secret', 'secret_deactivate'),
   async (req: Request, res: Response) => {
