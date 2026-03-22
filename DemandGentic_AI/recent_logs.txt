@@ -1,0 +1,100 @@
+[DB-INIT] ? Super organization initialized
+[SUPER-ORG] Super organization already exists: Pivotal B2B
+[SUPER-ORG] Checking super organization status...
+[DB-INIT] Initializing super organization...
+[DB-INIT] Knowledge blocks already initialized
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[CallSessionStore] ? Redis connected (production) - call sessions will persist across instances
+[PendingCallState] Redis connected - pending call context will survive restarts.
+[Redis] Connection established
+[Queue] Redis connected to redis://10.181.0.35:6379
+[Queue] Attempting Redis connection to redis://10.181.0.35:6379
+
+[DB-INIT] Checking knowledge blocks initialization...
+[DB-INIT] Checking database initialization status...
+12:31:18 AM [express] Routes registered - health check available at /api/health
+12:31:18 AM [express] Server listening on http://0.0.0.0:8080 - starting initialization...
+   Voice calling features will not work until these are configured.
+??  Missing critical environment variables: TELNYX_TEXML_APP_ID
+[AI Orchestrator] Processing 4 active AI campaign(s) (global 0/50, share 12, start index 1)
+[Transcription-Reliability] Completed: 41 processed, 0 succeeded, 1 failed
+[Transcription-Reliability] Skipping call 6fab9a40-f100-4d31-96e1-ab3a76b65140 - too short (3.175s)
+[Transcription-Reliability] Skipping call 8f8d1a4e-07d0-4305-8ad5-888d4912f3a6 - too short (3.205s)
+[Transcription-Reliability] Skipping call 25f0af96-c21d-4a5d-926c-7183898900ee - too short (3.146s)
+[Transcription-Reliability] Skipping call 073bb0b5-b717-4f14-b76c-34c72ed98ffa - too short (3.008s)
+[Transcription-Reliability] Skipping call 5948cc56-9cf7-4ac1-aecd-bb25192e7232 - too short (3.387s)
+[Transcription-Reliability] Skipping call c4b5413b-cd07-4b12-97ae-512d48372b0c - too short (3.504s)
+[Transcription-Reliability] Skipping call efac7fec-035f-4bde-a5e7-2cf61d1ab9c7 - too short (3.166s)
+[Transcription-Reliability] Skipping call 862a47ef-f22d-4880-8f86-7972e4a56d7a - too short (3.114s)
+[Transcription-Reliability] Skipping call 39644fbd-0076-4518-8c5c-e8cd9862e0e9 - too short (3.299s)
+[Transcription-Reliability] Skipping call 431a8906-629a-42ec-a974-1c5aeaa19e35 - too short (3.401s)
+[Transcription-Reliability] Skipping call 21362f46-089e-4614-b38b-4adcce2f5954 - too short (4.913s)
+[Transcription-Reliability] Skipping call 3787df76-6930-42e6-be1b-abf130a49e8d - too short (4.801s)
+[Transcription-Reliability] Skipping call a740092e-7f29-4ab7-9528-155e780f6c6d - too short (4.796s)
+[Transcription-Reliability] Skipping call 01178599-4eff-40d6-88d5-3efc3e61dc14 - too short (4.761s)
+[Transcription-Reliability] Skipping call e55a18fd-8eb0-4d34-8523-697afb1bd8b7 - too short (3.753s)
+[Transcription-Reliability] Skipping call cc09427c-a822-47a4-af49-aa02d0bd7884 - too short (3.496s)
+[Transcription-Reliability] Skipping call 33f89f18-8582-4f3e-b48b-737638fb76ee - too short (4.719s)
+[Transcription-Reliability] Skipping call 8371fa7f-d71e-4b54-9ab1-0c7f8fcc201e - too short (4.738s)
+[Transcription-Reliability] Fallback transcription returned empty or too short
+[Transcription] Failed to download audio: 403 Forbidden | url=https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-02/5bc3c634-0052-11f1-aa0f-02420a1f0a69-1770048915? | body="\nAccessDeniedRequest has expired6002026-02-02T16:27:02Z2026-02-09T00:30:42Z9EJCTAGXG5XKWW49n4WaFDCHBMrXamZnDs3djaWm+O"
+    at async Timeout._onTimeout (file:///app/dist/server/background-jobs-T5VYFGUF.js:118:9)
+    at async processMissingTranscripts (file:///app/dist/server/chunk-UCMDI4QM.js:171:24)
+    at async attemptFallbackTranscription (file:///app/dist/server/chunk-UCMDI4QM.js:82:20)
+    at async transcribeFromRecording (file:///app/dist/server/chunk-NPJ32P7O.js:225:22)
+    at async submitTranscription (file:///app/dist/server/chunk-NPJ32P7O.js:146:23)
+    at async downloadAudio (file:///app/dist/server/chunk-NPJ32P7O.js:69:32)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at fetchTelnyxRecording (file:///app/dist/server/chunk-QNKR5LLV.js:74:13)
+[Transcription] Failed to refresh audio via Telnyx API: Error: Telnyx API error fetching recordings (422): {"errors":[{"source":{"pointer":"/call_id"},"detail":["is invalid"]}]}
+[Deepgram-RT] ============================================
+[Deepgram-RT] Language: en-US
+[Deepgram-RT] Model: nova-2-phonecall
+[Deepgram-RT] API Key: NOT SET
+[Deepgram-RT] Deepgram Real-Time Transcription Service
+[Deepgram-RT] ============================================
+[Queue:ai-campaign-orchestrator] Job repeat:a133e31eedc0a91680edfe56feb492e0:1769103600000 started processing
+[EMAIL-TRACKING] WARNING: No EMAIL_TRACKING_SECRET set, using random secret (will break on restart)
+[DB] Using Neon connection pooler: YES (already configured)
+[DB] Database endpoint: ep-mute-sky-ahoyd10z-pooler
+[DB] Development mode - using DATABASE_URL from environment
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ??  write to custom object with { processEnv: myObject }
+[Telnyx] No recordings found with call_control_id, trying call_leg_id: v3:arNZju5HQg84_20Tp7me08o45pAC7P8osf2UhnDTp1fUWN3wOTAIxA
+[Queue:ai-campaign-orchestrator] Job repeat:a133e31eedc0a91680edfe56feb492e0:1770597030000 completed
+[AI Orchestrator] Campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2 not active/ai_agent (status=paused, mode=ai_agent)
+Starting new instance. Reason: DEPLOYMENT_ROLLOUT - Instance started due to traffic shifting between revisions due to deployment, traffic split adjustment, or deployment health check.
+[AI Orchestrator] Campaign ae5b353d-64a9-44d8-92cf-69d4726ca121 not active/ai_agent (status=paused, mode=ai_agent)
+[AI Orchestrator] Campaign 664aff97-ac3c-4fbb-a943-9b123ddb3fda not active/ai_agent (status=paused, mode=ai_agent)
+[AI Orchestrator] Campaign 989423d2-4dbf-47ca-933a-c86bea2f9fc5 not active/ai_agent (status=paused, mode=ai_agent)
+[AI Orchestrator] Processing 4 active AI campaign(s) (global 0/50, share 12, start index 0)
+[Background Jobs] AI analysis job completed in 20673ms
+[AI-QA] Background batch complete (processed 3 leads)
+[AI-QA] Found 3 leads to analyze
+[Worker Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[Transcription] Audio download unauthorized (403 Forbidden) | url=https://s3.amazonaws.com/telephony-recorder-prod/57bd0f26-ee4a-46e5-961e-baeb66744372/2026-02-02/5bc3c634-0052-11f1-aa0f-02420a1f0a69-1770048915?
+[DB Pool] Client removed | Total: 3, Idle: 2, Waiting: 0
+[Transcription-Reliability] Attempting fallback transcription for call aa8b8929-ac95-44fe-b900-bbe1a086a5d4
+[Transcription-Reliability] Skipping call 8f984317-c088-45c4-83a8-7d12ac8e50f4 - too short (4.086s)
+[Transcription-Reliability] Skipping call 4c2b64fe-c1e2-4eff-8569-5ce95fb30581 - too short (4.979s)
+[Transcription-Reliability] Skipping call 35974b44-e529-47c2-81b9-327e1844778f - too short (3.659s)
+[Transcription-Reliability] Skipping call 389b7bac-3fdb-4b4b-8af2-44a02ec6a764 - too short (4.865s)
+[Transcription-Reliability] Skipping call 870d93bd-3f63-4838-b5c2-1526495a3341 - too short (4.636s)
+[Transcription-Reliability] Skipping call 857aae21-891d-49ef-9277-b9b2665ce0b9 - too short (0s)
+[Transcription-Reliability] Skipping call 2a4e65bb-c968-48bb-ae20-d358e2984a79 - too short (4s)
+[Transcription-Reliability] Skipping call 82490658-8c2e-45ed-84df-9402b5a1f4fb - too short (3s)
+[Transcription-Reliability] Skipping call 4fc9148f-9a8a-4f65-81f6-e015bcebc235 - too short (0s)
+[Transcription-Reliability] Skipping call 33552e81-3f50-4c63-ab7f-6f282c56c6f1 - too short (1s)
+[Transcription-Reliability] Skipping call e1f5dd9c-ea70-415b-9b19-8c56659c332a - too short (0s)
+[Transcription-Reliability] Skipping call 3e00517e-b6c1-4379-b9d0-f6f83576519c - too short (4s)
+[Transcription-Reliability] Skipping call d43f639d-0bed-4141-843d-18b86ea1a317 - too short (4s)
+[Transcription-Reliability] Skipping call 2b7b287d-c737-4903-9bd9-bb37dbf09f22 - too short (4s)
+[Transcription-Reliability] Skipping call 14bb0e70-2e48-476a-8cf9-2bb69e71ab19 - too short (4s)
+[Transcription-Reliability] Skipping call c50d0b17-2ca8-4c10-942d-1706368060b3 - too short (0s)
+[Transcription-Reliability] Skipping call 1125a278-f2d5-4bde-993d-bd25319c851e - too short (3s)
+[Transcription-Reliability] Skipping call b0468df7-da13-457b-bc3e-85a785c90b7c - too short (4s)
+[Transcription-Reliability] Skipping call 75a7115b-b6d9-4e50-bb04-df37d9daffaa - too short (4s)
+[Transcription-Reliability] Skipping call 35873c7f-a14d-40ed-b52a-a72a4669ed82 - too short (2s)
+[Transcription-Reliability] Skipping call 6a3a8a4d-b659-48c6-bbc3-ffe14075279e - too short (4.78s)
+[Transcription-Reliability] Skipping call f62fc676-c0db-48d8-ab2e-893c9adfd194 - too short (3.942s)
+[Transcription-Reliability] Found 41 calls without transcripts
+[Queue:ai-campaign-orchestrator] Job repeat:a133e31eedc0a91680edfe56feb492e0:1769103600000 stalled

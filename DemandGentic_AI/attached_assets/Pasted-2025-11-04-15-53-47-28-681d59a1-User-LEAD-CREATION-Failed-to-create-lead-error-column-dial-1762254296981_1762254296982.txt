@@ -1,0 +1,121 @@
+2025-11-04 15:53:47.28
+681d59a1
+User
+[LEAD CREATION] ❌ Failed to create lead: error: column "dialed_number" of relation "leads" does not exist
+
+2025-11-04 15:53:47.28
+681d59a1
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-04 15:53:47.28
+681d59a1
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 15:53:47.28
+681d59a1
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-04 15:53:47.28
+681d59a1
+User
+at async DatabaseStorage.createCallDisposition (file:///home/runner/workspace/dist/index.js:6216:35)
+2025-11-04 15:53:47.28
+681d59a1
+User
+at async file:///home/runner/workspace/dist/index.js:31460:20 {
+2025-11-04 15:53:47.28
+681d59a1
+User
+length: 132,
+2025-11-04 15:53:47.28
+681d59a1
+User
+severity: 'ERROR',
+2025-11-04 15:53:47.28
+681d59a1
+User
+code: '42703',
+2025-11-04 15:53:47.28
+681d59a1
+User
+detail: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+hint: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+position: '143',
+2025-11-04 15:53:47.28
+681d59a1
+User
+internalPosition: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+internalQuery: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+where: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+schema: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+table: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+column: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+dataType: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+constraint: undefined,
+2025-11-04 15:53:47.28
+681d59a1
+User
+file: 'parse_target.c',
+2025-11-04 15:53:47.28
+681d59a1
+User
+line: '1065',
+2025-11-04 15:53:47.28
+681d59a1
+User
+routine: 'checkInsertTargets'
+2025-11-04 15:53:47.28
+681d59a1
+User
+}
+2025-11-04 15:53:47.28
+681d59a1
+User
+[DISPOSITION ERROR] error: column "dialed_number" of relation "leads" does not exist
+2025-11-04 15:53:47.28
+681d59a1
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-04 15:53:47.28
+681d59a1
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 15:53:47.28
+681d59a1
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-04 15:53:47.28
+681d59a1
+User
+at async DatabaseStorage.createCallDisposition (file:///home/runner/workspace/dist/index.js:6216:35)
+2025-11-04 15:53:47.28
+681d59a1
+User
+at async file:///home/runner/workspace/dist/index.js:31460:20 {

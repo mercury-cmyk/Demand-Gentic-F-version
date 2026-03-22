@@ -1,0 +1,145 @@
+PORT=5000
+ENABLE_LOG_STREAMING=true
+DISABLE_REDIS=false
+SESSION_SECRET="M4QVxs7zYnYVgcC2C4yZ/BQPFhhNtz0RCM24yX0IcEIFT7ED1jpo+PW8/l6UMKm/z0RpB/vJ3a/6XA0q/963YQ=="
+EMAIL_TRACKING_SECRET="replace-with-strong-random-secret"
+
+# ============================================
+# DATABASE CONFIGURATION
+# ============================================
+PGDATABASE="neondb"
+PGHOST="ep-fancy-firefly-ad2awc8l.c-2.us-east-1.aws.neon.tech"
+PGPORT="5432"
+PGUSER="neondb_owner"
+PGPASSWORD="npg_C6fqpmSFxvl7"
+JWT_SECRET="node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+
+AI_INTEGRATIONS_OPENAI_API_KEY="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"
+BRAVE_SEARCH_API_KEY="BSAYSfZDinu67gjfYb5QXPBUq6ovkcl"
+EMAIL_LIST_VERIFY_API_KEY="uPZwYkD6wm0ZVuY6P8TILGXysc0io016"
+EMAIL_LIST_VERIFY_KEY="uPZwYkD6wm0ZVuY6P8TILGXysc0io016"
+PSE_GOOGLE="AIzaSyAB5HitEJckXN6ywjMpYJPa1xcOzodq63E"
+GOOGLE_SEARCH_ENGINE_ID="b2c57fdae0c544746"
+ORG_INTELLIGENCE_OPENAI_MODEL="gpt-4o"
+MICROSOFT_CLIENT_ID="0b5fe2fe-a906-4a1a-87e9-68ed877bad71"
+MICROSOFT_CLIENT_SECRET="scz8Q~9Zm-IGf51D0QYa58X5X3kz_xZGnBk4idgk"
+MICROSOFT_TENANT_ID="pivotal-b2b.com"
+DATABASE_URL="postgresql://neondb_owner:npg_7sYERC3kqXcd@ep-mute-sky-ahoyd10z.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require"
+COMPANIES_HOUSE_API_KEY="59f2a5c7-dbfc-402f-8d3c-ad740a978de0"
+GOOGLE_AUTH_CLIENT_ID="823201449858-g3mcurtn55437e771q8nqg6voi4s23mj.apps.googleusercontent.com"
+GOOGLE_CLIENT_ID="823201449858-g3mcurtn55437e771q8nqg6voi4s23mj.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="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"
+AI_INTEGRATIONS_GEMINI_API_KEY="AIzaSyDUR_YL9JpSeuOroMhC1kFh7dK9g9gOubA"
+AI_INTEGRATIONS_ANTHROPIC_API_KEY="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"
+ORG_INTELLIGENCE_GEMINI_MODEL="gemini-2.5-pro"
+ORG_INTELLIGENCE_CLAUDE_MODEL="claude-3-5-sonnet-20241022"
+ORG_INTELLIGENCE_SYNTH_PROVIDER="gemini"
+ORG_INTELLIGENCE_SYNTH_MODEL="gemini-2.5-pro"
+ORG_INTELLIGENCE_OPENAI_MAX_TOKENS="6500"
+ORG_INTELLIGENCE_GEMINI_MAX_OUTPUT_TOKENS="6500"
+ORG_INTELLIGENCE_CLAUDE_MAX_TOKENS="6500"
+S3_REGION="ap-south-1"
+GOOGLE_SEARCH_API_KEY="AIzaSyAB5HitEJckXN6ywjMpYJPa1xcOzodq63E"
+GEMINI_API_KEY="AIzaSyDUR_YL9JpSeuOroMhC1kFh7dK9g9gOubA"
+GEMINI_LIVE_MODEL="gemini-live-2.5-flash-native-audio"
+
+OPENAI_API_KEY="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"
+OPENAI_WEBHOOK_SECRET="whsec_oJNXLtoOVllf8PB0HAS35nh/WyUVHeOB6h3sBFv41A0="
+
+# OpenAI Realtime SIP Configuration (Project ID: proj_OiE21emk2lHIPaaAOKmvgBLe)
+
+
+REDIS_URL="redis://default:f3D5QdjfPaFfFNtmjmy2rz3rNCFEhPfA@redis-10435.c228.us-central1-1.gce.cloud.redislabs.com:10435"
+REDIS_URL_DEV="redis://default:dx967FkobDGG7yj0fUXaB2dU0Po6FzdE@redis-15656.c279.us-central1-1.gce.cloud.redislabs.com:15656"
+# Production URLs
+PUBLIC_WEBSOCKET_URL="wss://demandgentic.ai/voice-dialer"
+PUBLIC_WEBHOOK_HOST="demandgentic.ai"
+TELNYX_WEBHOOK_URL="https://demandgentic.ai/api/webhooks/telnyx"
+BASE_URL="https://demandgentic.ai"
+APP_BASE_URL="https://demandgentic.ai"
+ADMIN_NOTIFICATION_EMAIL="admin@pivotal-b2b.com"
+
+# Order System Routing
+# current system: 'agentic'
+CURRENT_ORDER_SYSTEM="agentic"
+# When true, blocks legacy /api/client-portal/orders write endpoints (GET still allowed)
+DISABLE_LEGACY_ORDER_ROUTES="true"
+
+MAILGUN_API_KEY="86ffcbdf6ba18d2c58c85a651c9ee46e-ac8ca900-abca8a21"
+MAILGUN_DOMAIN="mail.pivotal-b2b.info"
+MAILGUN_WEBHOOK_BASE_URL="https://app.pivotal-b2b.info"
+DEEPSEEK_API_KEY="sk-53a80ac4e13c4795971024963551c71e"
+CONVERSATION_QUALITY_MODEL="deepseek-chat"
+TELNYX_API_KEY="KEY019BAF87FBC50E72BA2631B8EFEEE182_hXPCwJyx4zFUeNxXG3bCSn"
+TELNYX_CONNECTION_ID="2845920641004078445"
+TELNYX_FROM_NUMBER="+12094571966"
+TELNYX_CALL_CONTROL_APP_ID="2853482451592807572"
+TELNYX_TEXML_APP_ID="2870970047591876264"
+
+# Voice Provider Configuration (Google Gemini Live / OpenAI Realtime)
+# Options: openai, google
+# Default: google (Google-native platform, Vertex AI first)
+VOICE_PROVIDER="openai"
+VOICE_PROVIDER_FALLBACK="false"
+VOICE_PROVIDER_FALLBACK_TARGET="google"
+
+# Gemini Live API Model
+# For Vertex AI: use model name without 'models/' prefix
+# For Google AI Studio: use full 'models/model-name' format
+# Valid Vertex AI Live models (2026):
+#   - gemini-live-2.5-flash-native-audio (GA, recommended)
+#   - gemini-live-2.5-flash-preview-native-audio-09-2025 (Preview)
+
+# Google Cloud Configuration
+GOOGLE_CLOUD_PROJECT="gen-lang-client-0789558283"
+# Path to GCP service account key for local development (Pub/Sub, Logging access)
+# Download from: https://console.cloud.google.com/iam-admin/serviceaccounts?project=gen-lang-client-0789558283
+GOOGLE_APPLICATION_CREDENTIALS="./gcp-service-account.json"
+GCP_PROJECT_ID="gen-lang-client-0789558283"
+GCS_PROJECT_ID="gen-lang-client-0789558283"
+GCS_BUCKET="demandgentic-prod-storage-2026"
+# VERTEX_AI_LOCATION - defaults to us-central1
+USE_VERTEX_AI="true"
+AI_INTEGRATIONS_GEMINI_BASE_URL="https://generativelanguage.googleapis.com"
+
+# TeXML instruction callbacks
+PUBLIC_TEXML_HOST="https://demandgentic.ai"
+
+SECRET_MANAGER_MASTER_KEY=Ku5qCL0lfYvR8Nt2aGkpH64V1xwFiUny
+
+# Telnyx WebRTC/SIP Credentials
+TELNYX_SIP_USERNAME=usermercury63270
+TELNYX_SIP_PASSWORD=zahid1234
+TELNYX_SIP_CONNECTION_ID=2845920641004078445
+
+TELNYX_NUMBER_POOL_ENABLED=true
+
+# ============================================
+# LIVEKIT SIP BRIDGE
+# ============================================
+LIVEKIT_URL=wss://demandgentic-wmczsvyo.livekit.cloud
+LIVEKIT_API_KEY=APIrrxH8abxypDR
+LIVEKIT_API_SECRET=IcnJqDNrrl74YSb1Kwrfl0r5L0sfhfeFbdtxtAFYq7TA
+LIVEKIT_SIP_URI=sip:demandgentic-wmczsvyo.sip.livekit.cloud
+LIVEKIT_SIP_CONNECTION_ID=2903106223836497802
+LIVEKIT_SIP_USERNAME=dglivekitsip
+LIVEKIT_SIP_PASSWORD=LKsip2026DmndG99
+
+# ============================================
+# DEEPGRAM REAL-TIME TRANSCRIPTION
+# ============================================
+# Get your API key from: https://console.deepgram.com/
+# Deepgram provides reliable real-time transcription for phone calls
+# This is used as PRIMARY transcription - more reliable than Gemini's built-in
+DEEPGRAM_API_KEY="43b56ac08b7da33bc845cc6c04a73605156e7011"
+# Model options: nova-2-phonecall (recommended), nova-2, nova-3
+DEEPGRAM_MODEL="nova-2-phonecall"
+DEEPGRAM_LANGUAGE="en-US"
+FEATURE_FLAGS=argyle_event_drafts,smtp_email_enabled
+CALL_EXECUTION_ENABLED=true
+
+# Unified Agent Architecture ΓÇö voice agent knowledge source
+# When true, the voice agent reads its foundational prompt from the UA's
+# versioned prompt sections instead of the hardcoded legacy prompt.
+# Falls back to legacy automatically on any failure.
+VOICE_AGENT_USE_UNIFIED_ARCHITECTURE=true

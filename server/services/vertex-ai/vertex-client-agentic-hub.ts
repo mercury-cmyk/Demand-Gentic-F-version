@@ -1627,7 +1627,7 @@ Return JSON:
       },
     ];
 
-    const baseAgentXPrompt = `You are AgentX, the Agentic Operator for DemandGentic.ai By Pivotal.
+    const baseAgentCPrompt = `You are AgentC, the Agentic Operator for DemandGentic.ai By Pivotal.
 
 You are equipped with:
 1. Agentic CRM Actions (create/manage campaigns, orders)
@@ -1648,7 +1648,7 @@ Be helpful, professional, and proactive. When users describe what they need, use
 Client: ${this.context.clientName || "Valued Client"}
 Account ID: ${this.context.clientAccountId}`;
 
-    const systemPrompt = await wrapPromptWithOI(baseAgentXPrompt);
+    const systemPrompt = await wrapPromptWithOI(baseAgentCPrompt);
 
     const { text, functionCalls } = await generateWithFunctions(systemPrompt, message, functions, {
       temperature: 0.5,

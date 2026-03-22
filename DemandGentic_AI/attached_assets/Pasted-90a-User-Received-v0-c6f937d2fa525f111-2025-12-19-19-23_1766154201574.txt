@@ -1,0 +1,51 @@
+90a
+User
+- Received: v0=c6f937d2fa525f111...
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766154185, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_7301kcvfw9zmfy3tsna7gw4a94sz", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+13023601514", "to_number": "+447703444946", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-19 19:23:06.08
+337ac90a
+User
+- Expected: v0=c6f937d2fa525f111...
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 19:23:06.08
+337ac90a
+User
+- Timestamp: 1766154185
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_7301kcvfw9zmfy3tsna7gw4a94sz
+2025-12-19 19:23:06.08
+337ac90a
+User
+[ElevenLabs Webhook] No campaign_id in dynamic_variables
+2025-12-19 19:23:06.08
+337ac90a
+User
+2:23:06 PM [express] POST /api/webhooks/elevenlabs 200 in 2ms :: {"status":"ok","message":"No campai…
+2025-12-19 19:23:06.15
+3227d645
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766154184657-q3hd0iub7, conversation: conv_7301kcvfw9zmfy3tsna7gw4a94sz
+2025-12-19 19:23:06.18
+3227d645
+User
+[AI Batch] Call 9/10 initiated for queue item e0f82dd5-c005-4d91-91ca-ea97e77a99e0

@@ -1,0 +1,85 @@
+node.exe : [Env] Missing critical environment variables: TELNYX_TEXML_APP_ID
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([Env] Missing c...YX_TEXML_APP_ID 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[Env] Voice calling features will stay disabled until configured.
+[Env] Missing GOOGLE_AI_API_KEY or GEMINI_API_KEY.
+[Env] Server starting with missing optional env vars.
+=== COPY PRODUCTION ΓåÆ DEV ===
+PROD host: ep-mute-sky-ahoyd10z.c-3.us-east-1.aws.neon.tech
+DEV  host: ep-restless-band-ah70bsxl-pooler.c-3.us-east-1.aws.neon.tech
+
+Found 352 tables in production.
+
+--- Preparing dev database ---
+Truncated 349 tables in dev.
+
+--- Copying data ---
+  [ok]    users: 14 rows
+  [ok]    accounts: 285505 rows
+  [empty] export_templates
+  [ok]    campaigns: 10 rows
+  [ok]    account_call_briefs: 486 rows
+  [ok]    account_call_memory_notes: 43758 rows
+  [empty] account_domains
+  [empty] account_health_scores
+  [ok]    account_intelligence: 47637 rows
+  [ok]    account_messaging_briefs: 53099 rows
+  [empty] account_perspective_analysis
+  [ok]    activity_log: 89305 rows
+  [ok]    admin_todo_board_notes: 1 rows
+  [ok]    admin_todo_tasks: 17 rows
+  [empty] ae_assignment_batches
+  [ok]    agent_conversations: 11 rows
+  [ok]    agent_defaults: 1 rows
+  [ok]    agent_execution_plans: 26 rows
+  [empty] gamification_rewards
+  [empty] goal_definitions
+  [empty] performance_periods
+  [empty] agent_goals
+  [ok]    virtual_agents: 3 rows
+  [empty] agent_instance_contexts
+  [ok]    knowledge_blocks: 11 rows
+  [empty] agent_knowledge_config
+  [empty] agent_period_stats
+  [empty] agent_prompt_history
+  [empty] agent_prompts
+  [ok]    contacts: 489144 rows
+  [ok]    agent_queue: 362830 rows
+  [empty] agent_runs
+  [empty] agent_simulations
+  [empty] call_jobs
+  [ok]    call_sessions: 72658 rows
+  [empty] agent_status
+  [empty] agent_steps
+  [empty] agentic_campaign_sessions
+  [empty] ai_call_sessions
+  [empty] content_assets
+  [empty] ai_content_generations
+  [ok]    ai_image_generation_jobs: 63 rows
+  [ok]    client_accounts: 6 rows
+  [empty] projects
+  [ok]    ai_project_intents: 1 rows
+  [empty] ai_intent_feedback
+  [empty] audit_logs
+  [empty] voicemail_assets
+  [empty] auto_dialer_queues
+  [empty] availability_slots
+  [empty] blacklist_check_history
+  [empty] blacklist_monitors
+  [ok]    booking_types: 2 rows
+  [ok]    bookings: 3 rows
+  [empty] brand_kits
+  [empty] bulk_imports
+  [empty] business_hours_config
+  [empty] business_perspectives
+  [ok]    call_attempts: 10564 rows
+  [empty] dispositions
+  [empty] call_dispositions
+  [empty] call_events
+  [ok]    campaign_queue: 494989 rows
+  [ok]    dialer_runs: 27 rows

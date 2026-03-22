@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1761080413612,
+      "tag": "0000_dazzling_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1769747792823,
+      "tag": "0001_add-prompt-registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1769756207272,
+      "tag": "0002_mature_human_robot",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1771084910353,
+      "tag": "0003_eager_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771167078832,
+      "tag": "0004_amazing_slipstream",
+      "breakpoints": true
+    }
+  ]
+}

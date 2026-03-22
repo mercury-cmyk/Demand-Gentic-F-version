@@ -1,0 +1,460 @@
+import React from "react";
+import { motion } from "framer-motion";
+import { 
+  LayoutDashboard, Users, Building2, Rocket, Settings, Link2, Globe, Phone, Mail, ExternalLink, Filter, X, CheckCircle2, AlertCircle, Play, Pause, FileText, BarChart3, PhoneCall, Linkedin, ChevronRight, Search, Sun, Moon, Factory, ShieldCheck, Layers, CalendarClock, Server, Clock3, Network, Database, SlidersHorizontal
+} from "lucide-react";
+import { 
+  Card, CardContent, CardHeader, CardTitle 
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+
+// ---------------------------------------------
+// THEME TOKENS (align with Pivotal B2B branding)
+// ---------------------------------------------
+// Primary: #0D6EFD | Secondary: #00BFA5 | Text: #1E293B / #64748B
+const brand = {
+  primary: "#0D6EFD",
+  secondary: "#00BFA5",
+  slate900: "#0F172A",
+  slate800: "#1E293B",
+  slate600: "#475569",
+  slate500: "#64748B",
+  bg: "#F8FAFC",
+  card: "#FFFFFF",
+  amber: "#FFB020",
+  red: "#EF4444",
+};
+
+// ---------------------------------------------
+// UTIL COMPONENTS
+// ---------------------------------------------
+const Stat = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
+  
+    
+      {label}
+      
+        {value}
+        {sub && {sub}}
+      
+    
+  
+);
+
+const StatusPill = ({ status }: { status: "Draft" | "Running" | "Paused" | "Completed" }) => {
+  const map: Record = {
+    Draft: "bg-slate-100 text-slate-700",
+    Running: "bg-blue-100 text-blue-700",
+    Paused: "bg-amber-100 text-amber-700",
+    Completed: "bg-green-100 text-green-700",
+  };
+  return {status};
+};
+
+const Chip = ({ children, onClear }: { children: React.ReactNode; onClear?: () => void }) => (
+  
+     {children}
+    {onClear && (
+      
+        
+      
+    )}
+  
+);
+
+const IconLink = ({ href, label, icon: Icon }: { href: string; label: string; icon: any }) => (
+  
+    
+      
+        
+          
+        
+      
+      {label}
+    
+  
+);
+
+// ---------------------------------------------
+// FILTER BAR
+// ---------------------------------------------
+const FilterBar = () => {
+  return (
+    
+      
+        
+          
+          
+        
+        
+          
+            
+              Equals
+              Not equal
+              Contains
+              Does not contain
+            
+          
+        
+        
+          
+            
+              Begins with
+              Ends with
+              Has value
+              Is empty
+            
+          
+        
+        
+          Advanced
+          Apply Filters
+          Clear All
+        
+      
+      
+        Job Title contains "Manager"
+        Domain ends with ".co.uk"
+        Status ≠ "Inactive"
+      
+    
+  );
+};
+
+// ---------------------------------------------
+// HEADER & SHELL
+// ---------------------------------------------
+const AppHeader = () => (
+  
+    
+      
+      
+        Pivotal B2B Dashboard
+        ABM • Data • Demand Generation
+      
+    
+    
+      Light
+      New Campaign
+    
+  
+);
+
+const Sidebar = ({ current, onNav }: { current: string; onNav: (k: string) => void }) => {
+  const items = [
+    { k: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { k: "accounts", label: "Accounts", icon: Building2 },
+    { k: "contacts", label: "Contacts", icon: Users },
+    { k: "campaigns", label: "Campaigns", icon: BarChart3 },
+    { k: "settings", label: "Settings", icon: Settings },
+  ];
+  return (
+    
+      
+        {items.map(({ k, label, icon: Icon }) => (
+           onNav(k)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition ${
+              current === k ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50 text-slate-700"
+            }`}
+          >
+            
+            {label}
+          
+        ))}
+      
+      
+        Complete your setup
+        
+           Verify domain
+           Configure dedicated IP
+           Send-time optimization
+        
+      
+    
+  );
+};
+
+// ---------------------------------------------
+// PAGES
+// ---------------------------------------------
+const DashboardPage = () => (
+  
+    
+    
+      
+      
+      
+      
+    
+
+    
+      
+        
+           Campaign Performance
+        
+        
+          {/* Chart placeholder */}Chart area
+          
+            Export
+            View Report
+          
+        
+      
+
+      
+        
+           Calling Queue
+        
+        
+          {["Emily Carter — CTO, JRI Ltd", "Michael Shaw — VP IT, Acme Med", "Sara Lee — CIO, Northex"].map((r, i) => (
+            
+              
+                {r}
+                Last activity: 2h ago • Disposition required
+              
+              
+                Call
+                Hold
+              
+            
+          ))}
+        
+      
+    
+  
+);
+
+const AccountsPage = () => (
+  
+    
+    
+      {[1,2,3,4,5,6].map((i) => (
+        
+          
+            
+              
+                
+                
+                  JRI Ltd
+                  Medical Devices • 250–500
+                
+              
+              
+                
+                
+                
+                
+              
+            
+            
+              ICP: SDM
+              UK
+              High Intent
+            
+            Last touch: 3d ago • Owner: Zahid • Notes: Interested in webinar co-promo
+          
+        
+      ))}
+    
+  
+);
+
+const ContactsPage = () => (
+  
+    
+    
+      
+        
+          Name & Title
+          Company
+          Email
+          Actions
+        
+        {[1,2,3,4,5].map((i) => (
+          
+            
+              Emily Carter
+              CTO
+            
+            JRI Ltd
+            emily.carter@jri-ltd.co.uk
+            
+              
+              
+              
+            
+          
+        ))}
+      
+    
+  
+);
+
+const CampaignsPage = () => (
+  
+    
+      
+    
+    
+      {[{name:"Q4 UK MedTech Webinar", status:"Running"},{name:"ABM Email + Call Pilot", status:"Draft"},{name:"Syndication: HR eBook", status:"Completed"}].map((c, i) => (
+        
+          
+            
+              
+                {c.name}
+                Target: SDM • GEO: UK/DE/US
+              
+              {/* @ts-ignore */}
+              
+            
+            
+              
+                Delivered
+                24,120
+              
+              
+                Responses
+                612
+              
+              
+                CPL
+                $41
+              
+            
+            
+              Summary
+              Open
+            
+          
+        
+      ))}
+    
+  
+);
+
+const SettingsPage = () => (
+  
+    
+      
+         Platform Settings
+      
+      
+        
+          
+            Email Setup
+            Domain Verification
+            Dedicated IP
+            Send-Time Optimization
+          
+
+          
+            
+              
+                SMTP / OAuth
+                
+                  
+                  
+                  
+                  
+                
+                
+                   Enable open/click tracking
+                
+                
+                  Test Connection
+                  Save
+                
+              
+              
+                 Compliance
+                GDPR/CCPA ready. Configure suppression lists and unsubscribe handling.
+                Manage Suppression
+              
+            
+          
+
+          
+            
+               Domain Verification
+              Add the following DNS records to verify your sending domain.
+              
+                SPFv=spf1 include:mail.pivotal-b2b.com ~all
+                DKIMk=rsa; p=MIIBIjANBgkqh…
+                DMARCv=DMARC1; p=quarantine; rua=mailto:dmarc@pivotal…
+              
+              
+                Check Status
+                Verified
+              
+            
+          
+
+          
+            
+               Dedicated IP Configuration
+              Warm up your IP with automated ramp-up plans to protect deliverability.
+              
+                IP203.0.113.24
+                StatusPending Warm-up
+                ReputationGood
+              
+              
+                Start Warm-up
+                Save
+              
+            
+          
+
+          
+            
+               Send-Time Optimization
+              Batch sending with time gaps to maximize deliverability. Configure windows per region.
+              
+                Batch Size2,000 emails / 15 min
+                Quiet Hours22:00–06:00 (recipient local)
+                Region WindowsUK: 09–12, US: 10–13, DE: 09–11
+              
+              
+                Simulate
+                Save
+              
+            
+          
+        
+      
+    
+  
+);
+
+// ---------------------------------------------
+// ROOT COMPONENT
+// ---------------------------------------------
+export default function PivotalB2BUIConcept() {
+  const [tab, setTab] = React.useState("dashboard");
+
+  return (
+    
+      
+        
+        
+          
+            
+          
+          
+            
+              {tab === "dashboard" && }
+              {tab === "accounts" && }
+              {tab === "contacts" && }
+              {tab === "campaigns" && }
+              {tab === "settings" && }
+            
+          
+        
+      
+    
+  );
+}

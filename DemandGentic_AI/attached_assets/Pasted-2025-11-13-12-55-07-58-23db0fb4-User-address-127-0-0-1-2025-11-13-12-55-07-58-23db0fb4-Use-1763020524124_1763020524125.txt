@@ -1,0 +1,133 @@
+2025-11-13 12:55:07.58
+23db0fb4
+User
+address: '127.0.0.1',
+2025-11-13 12:55:07.58
+23db0fb4
+User
+port: 5000
+2025-11-13 12:55:07.58
+23db0fb4
+User
+}
+2025-11-13 12:55:07.58
+23db0fb4
+User
+}
+2025-11-13 12:55:07.62
+23db0fb4
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 12:55:07.62
+23db0fb4
+User
+at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {
+2025-11-13 12:55:07.62
+23db0fb4
+User
+errno: -111,
+2025-11-13 12:55:07.62
+23db0fb4
+User
+syscall: 'connect',
+2025-11-13 12:55:07.62
+23db0fb4
+User
+address: '127.0.0.1',
+2025-11-13 12:55:07.62
+23db0fb4
+User
+port: 5000
+2025-11-13 12:55:07.62
+23db0fb4
+User
+}
+2025-11-13 12:55:07.62
+23db0fb4
+User
+}
+2025-11-13 12:55:07.65
+23db0fb4
+User
+[BULK ENRICHMENT] Error enriching contact becf4f60-2043-4a52-9700-4155278d5236: TypeError: fetch failed
+2025-11-13 12:55:07.65
+23db0fb4
+User
+at node:internal/deps/undici/undici:13510:13
+2025-11-13 12:55:07.65
+23db0fb4
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 12:55:07.65
+23db0fb4
+User
+at async file:///home/runner/workspace/dist/index.js:14267:30 {
+2025-11-13 12:55:07.65
+23db0fb4
+User
+at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {
+2025-11-13 12:55:07.65
+23db0fb4
+User
+errno: -111,
+2025-11-13 12:55:07.65
+23db0fb4
+User
+code: 'ECONNREFUSED',
+2025-11-13 12:55:07.65
+23db0fb4
+User
+address: '127.0.0.1',
+2025-11-13 12:55:07.65
+23db0fb4
+User
+port: 5000
+2025-11-13 12:55:07.65
+23db0fb4
+User
+}
+2025-11-13 12:55:07.69
+23db0fb4
+User
+[BULK ENRICHMENT] Error enriching contact 0863efed-2464-4836-8480-2deeadb1fcbb: TypeError: fetch failed
+2025-11-13 12:55:07.69
+23db0fb4
+User
+at node:internal/deps/undici/undici:13510:13
+2025-11-13 12:55:07.69
+23db0fb4
+User
+port: 5000
+2025-11-13 12:55:12.54
+23db0fb4
+User
+[BULK ENRICHMENT] Error enriching contact 6e6ea371-d541-4e67-902c-efb8e1452a88: TypeError: fetch failed
+2025-11-13 12:55:12.54
+23db0fb4
+User
+at node:internal/deps/undici/undici:13510:13
+2025-11-13 12:55:12.54
+23db0fb4
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 12:55:12.54
+23db0fb4
+User
+at async file:///home/runner/workspace/dist/index.js:14267:30 {
+
+2025-11-13 12:55:12.54
+23db0fb4
+User
+[cause]: Error: connect ECONNREFUSED 127.0.0.1:5000
+2025-11-13 12:55:12.54
+23db0fb4
+User
+at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {
+2025-11-13 12:55:12.54
+23db0fb4
+User
+errno: -111,
+2025-11-13 12:55:12.54
+23db0fb4
+User
+code: 'ECONNREFUSED',

@@ -1,0 +1,100 @@
+🎨 Replit Prompt — Left Sidebar Filter Redesign (Beautiful + Operator Model)
+
+Objective:
+Redesign all filters across the app into a left sidebar filter panel that’s elegant, fast, and consistent. Use the simplified operator model (Equals, Not equals, Contains, Does not contain, Begins with, Ends with, Is empty, Has any value) and multi-value chips input. Remove bulky dropdowns; use type-ahead chips only where controlled vocab is required.
+
+1) Layout & Placement
+
+Left Sidebar (fixed, 300–360px):
+
+Stacks filter conditions vertically.
+
+Header: “Filters” + result count badge (e.g., 1,284 results after Apply).
+
+Footer actions: Clear (ghost) · Apply (primary) — sticky at bottom.
+
+Main Content (right): results table/cards.
+
+Responsive:
+
+≥1280px: persistent left panel.
+
+
+      {/* Header */}
+      
+        Filters
+        Showing — results
+      
+
+      {/* Body */}
+      
+        {/* Condition Row (repeatable) */}
+        
+
+        
+
+         fetchStates(q, { countries: parents.country })}
+          parents={["country"]}
+          maxValues={5}
+        />
+
+         fetchCities(q, { countries: parents.country, states: parents.state })}
+          parents={["country","state"]}
+          maxValues={5}
+        />
+
+        {/* (+) Add Condition button */}
+        
+      
+
+      {/* Footer actions */}
+      
+        Clear
+        
+          Apply
+        
+      
+    
+  );
+}
+
+
+Implement FilterCondition as a reusable row with: Field Select, Operator Select, and Chips Input (free-text or async type-ahead). Use virtualization for long suggestion lists.
+
+7) API & Performance
+
+Type-ahead endpoints (paged):
+
+/filters/countries?query=pak&page=1
+
+/filters/states?countries=US,CA&query=tex&page=1
+
+/filters/cities?countries=US&states=TX,CA&query=aus&page=1
+
+Server validation:
+
+Enforce caps (States/Cities ≤5; others ≤10).
+
+Accept only valid IDs for controlled lists.
+
+Indexes: country_id, state_id, city_id, industry_id, seniority_id, company_size_id, revenue_band_id.
+
+Query model: OR within field, AND across fields.
+
+Caching: 5–15 min for static lists; client uses React Query stale-while-revalidate.
+
+8) Acceptance Criteria
+
+ Filters live in the left sidebar (desktop persistent, mobile drawer).
+
+ Operator model + multi-value chips work for all applicable fields.
+
+ Type-ahead chips used for controlled vocabularies; dropdowns removed elsewhere.
+
+ Result count updates after Apply.
+
+ Per-field caps enforced with friendly helper text.
+
+ Panel is beautiful (consistent shadows, spacing, typography) and fully responsive.
+
+ Saved Segments supported; Clear resets state; errors non-blocking.

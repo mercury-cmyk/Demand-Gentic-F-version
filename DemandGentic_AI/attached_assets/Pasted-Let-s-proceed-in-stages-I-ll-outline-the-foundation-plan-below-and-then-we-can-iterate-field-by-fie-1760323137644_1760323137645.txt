@@ -1,0 +1,213 @@
+Let’s proceed in stages. I’ll outline the foundation plan below and then we can iterate field-by-field and UX-by-UX, similar to how we did for Contacts and Accounts.
+
+17.0 Lists & Segmentation Engine
+17.1 Purpose
+
+The Lists & Segmentation engine enables users to create, manage, and reuse audience definitions across the platform.
+It serves three main purposes:
+
+Define target audiences for campaigns (email, telemarketing, ABM).
+
+Support data operations (bulk exports, QA sampling, enrichment).
+
+Enable analytics segmentation for engagement and performance metrics.
+
+17.2 Core Concepts
+Concept	Description
+Segment (Dynamic)	A saved query definition (rule-based). Evaluated dynamically every time it’s used.
+List (Static)	A snapshot of contacts/accounts at the time of creation. Does not change automatically.
+Domain Set	A subset of Accounts or Contacts created from an uploaded list of domains (for ABM programs).
+Combined Audience	The union/intersection of Lists and Segments, created ad hoc for campaign selection.
+17.3 Data Model
+
+Segment
+
+id
+
+name
+
+description
+
+entity_type (contact / account)
+
+definition_json (query structure)
+
+created_by
+
+last_refreshed_at
+
+is_active
+
+record_count_cache
+
+tags[]
+
+visibility_scope (private | team | global)
+
+List
+
+id
+
+name
+
+description
+
+entity_type
+
+source_type (segment | manual_upload | selection)
+
+source_ref (Segment ID or import ID)
+
+snapshot_ts
+
+record_ids[]
+
+created_by
+
+tags[]
+
+visibility_scope
+
+17.4 Filter Categories
+
+The segmentation builder supports nested AND/OR logic, with field categorization for discoverability and scalability.
+Filters dynamically populate based on available fields and custom fields defined in schema registry.
+
+A. Contact Fields
+
+Full Name, Job Title, Email, Phone, Department, Seniority, City, State, Country,
+Email Verification Status, Intent Topics, LinkedIn URL, Created Date, Owner, Custom Fields…
+
+B. Account Fields
+
+Company Name, Domain, Industry (verified + AI), Employee Size, Annual Revenue,
+HQ Country, Region, LinkedIn URL, Technologies Installed, Specialties, Custom Fields…
+
+C. Suppression Fields
+
+Email Suppressed (True/False), DNC Flag, Unsubscribed Date, Suppression Source.
+
+D. Email Campaign Metrics
+
+Campaign Name, Sent (True/False), Delivered, Opened, Clicked, Not Sent,
+Not Opened, Not Clicked, Soft Bounce, Hard Bounce, Never Bounced, Last Engaged Date.
+
+E. Telemarketing Campaign Metrics
+
+Campaign Name, Caller Name, Call Disposition, Call Comments,
+Qualifying Question Responses, Call Date & Time, Call Duration.
+
+F. QA Fields
+
+QA Status (In Review, Accepted, Rejected), QA Reviewer, QA Comments, Rejection Reason.
+
+G. List / Segment Membership
+
+Included in List (multi-select), Not Included in List,
+Included in Segment, Not Included in Segment.
+
+H. Client Portal Fields
+
+Client Delivered, Client Accepted, Client Rejected, Client Comments, Client Name.
+
+17.5 Operators Supported
+Type	Operators
+String/Text	equals, not equals, contains, not contains, starts with, ends with, regex
+Number	equals, greater than, less than, between
+Boolean	is true, is false
+Date/Time	before, after, within last X days
+List/Array	includes any, includes all, excludes
+Nullables	is empty, is not empty, has value
+17.6 UX & Interaction
+
+Visual Query Builder (No-Code)
+
+Drag-and-drop condition blocks, AND/OR grouping.
+
+Autocomplete field search.
+
+Live preview count (via async query to index).
+
+Saved Views and Templates (e.g., “Marketing Decision Makers in UK”).
+
+Advanced Mode (Power Users)
+
+JSON editor for complex queries.
+
+Validation and syntax highlighting.
+
+Re-usable via API endpoints.
+
+Segmentation Dashboard
+
+Columns: Name, Type (Contact/Account), Count, Creator, Last Updated, Tags.
+
+Actions: Duplicate, Export, Convert to List, Delete.
+
+List Dashboard
+
+Columns: Name, Source Type, Created Date, Record Count.
+
+Actions: Export CSV, Add to Campaign, Add to Suppression, Merge, Delete.
+
+17.7 Performance & Scalability
+
+Real-time preview powered by OpenSearch indexes.
+
+Large queries paginated and cached.
+
+Dynamic filter generation (from schema registry) ensures new fields appear automatically everywhere (Contacts, Accounts, Campaigns, Client Portal).
+
+Indexing strategy:
+
+Contact index includes flattened Account fields for cross-entity filters.
+
+Incremental re-index jobs triggered on entity updates.
+
+Full refresh nightly or on schema change.
+
+17.8 Bulk Operations
+
+Supported actions (based on selection/filter context):
+
+Add to existing List
+
+Create new List and add selected
+
+Export selected (CSV/XLSX)
+
+Assign Owner / Update Field (bulk edit)
+
+Bulk Delete (soft delete + undo window)
+
+Supports per-page and select all matching filter actions.
+
+Operations queued for async execution with progress bar & notifications.
+
+17.9 API Endpoints (Illustrative)
+
+POST /segments — create a segment
+
+GET /segments/:id/preview — live count preview
+
+POST /lists — create static list (from segment/filter)
+
+POST /lists/:id/export — export CSV
+
+POST /bulk/update — bulk edit
+
+POST /bulk/delete — soft delete
+
+POST /bulk/add-to-list — mass add selected to list
+
+GET /segments/schema — get filterable field definitions (from registry)
+
+17.10 AI & Automation Extensions
+
+AI Smart Segmentation: Suggest filters based on intent, ICP, or past campaign engagement.
+
+Lookalike Segment Generation: AI analyzes high-performing segments and recommends similar profiles.
+
+Segment Quality Scoring: Evaluate data completeness and engagement potential.
+
+Natural Language Query Builder: “Show me all CFOs in the UK who opened any HR campaign last month.”

@@ -6,6 +6,7 @@ import {
   ChevronRight,
   RotateCcw,
   Package,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -48,23 +49,22 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
 
   const statusLabel =
     agentStatus === 'thinking'
-      ? 'Thinking'
+      ? 'Thinking...'
       : agentStatus === 'awaiting_review'
-        ? 'Awaiting review'
+        ? 'Awaiting Review'
         : agentStatus === 'executing'
-          ? 'Executing'
+          ? 'Executing...'
           : 'Ready';
 
   const statusDotClass =
     agentStatus === 'thinking'
-      ? 'bg-sky-500'
+      ? 'bg-sky-400 shadow-sky-400/50'
       : agentStatus === 'awaiting_review'
-        ? 'bg-amber-500'
+        ? 'bg-amber-400 shadow-amber-400/50'
         : agentStatus === 'executing'
-          ? 'bg-violet-500'
-          : 'bg-green-500';
+          ? 'bg-violet-400 shadow-violet-400/50'
+          : 'bg-emerald-400 shadow-emerald-400/50';
 
-  // Compute effective width for order mode
   const effectiveWidth = state.orderMode
     ? Math.max(state.width, 850)
     : state.width;
@@ -111,6 +111,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
     closePanel();
   };
 
+  // ── Closed state: edge handle ──
   if (!state.isOpen) {
     return (
       <div className={cn('fixed right-0 top-1/2 -translate-y-1/2 z-50', className)}>
@@ -120,27 +121,30 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
               variant="outline"
               onClick={openPanel}
               className={cn(
-                'h-24 w-8 px-0 rounded-l-2xl rounded-r-none border-r-0',
-                'bg-background/80 backdrop-blur-md shadow-[0_0_20px_rgba(0,0,0,0.1)] hover:bg-background hover:w-10 transition-all duration-300',
-                'border-y border-l border-border/50'
+                'h-20 w-9 px-0 rounded-l-2xl rounded-r-none border-r-0',
+                'bg-background/90 backdrop-blur-xl shadow-[0_4px_24px_rgba(0,0,0,0.08)] hover:bg-background hover:w-11 transition-all duration-300',
+                'border-y border-l border-border/40'
               )}
-              data-testid="button-agentx-edge-handle"
+              data-testid="button-agentc-edge-handle"
             >
-              <div className="flex flex-col items-center justify-center gap-2 h-full">
-                <div className="w-1 h-8 rounded-full bg-primary/20" />
-                <Bot className="h-5 w-5 text-primary shrink-0" />
+              <div className="flex flex-col items-center justify-center gap-1.5 h-full">
+                <div className="relative">
+                  <Bot className="h-5 w-5 text-primary shrink-0" />
+                  <span className={cn('absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full shadow-[0_0_6px]', statusDotClass)} />
+                </div>
               </div>
             </Button>
           </TooltipTrigger>
           <TooltipContent side="left" className="flex items-center gap-2">
-            <span className="font-semibold">Open AgentX</span>
-            <Badge variant="secondary" className="text-[10px] h-5 px-1.5 opacity-70">Ctrl+/</Badge>
+            <span className="font-semibold">AgentC</span>
+            <kbd className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-mono">Ctrl+/</kbd>
           </TooltipContent>
         </Tooltip>
       </div>
     );
   }
 
+  // ── Open state ──
   return (
     <AnimatePresence mode="wait">
       <motion.div
@@ -160,7 +164,8 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
         }}
         className={cn(
           'fixed right-0 top-0 h-screen z-50 flex',
-          'bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-[-10px_0_30px_-10px_rgba(0,0,0,0.1)]',
+          'bg-white dark:bg-slate-950 border-l border-slate-200/80 dark:border-slate-800/80',
+          'shadow-[-20px_0_40px_-12px_rgba(0,0,0,0.06)]',
           className
         )}
       >
@@ -170,29 +175,29 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
             className="absolute left-0 top-0 w-4 -translate-x-1/2 h-full z-50 cursor-col-resize group flex items-center justify-center outline-none touch-none"
             onMouseDown={handleResizeStart}
           >
-            {/* Visual line */}
-            <div className="w-1 h-full bg-transparent group-hover:bg-primary/10 transition-colors duration-300">
-               <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-1.5 h-16 rounded-full bg-border group-hover:bg-primary/60 transition-all duration-300 shadow-sm" />
+            <div className="w-px h-full bg-transparent group-hover:bg-primary/15 transition-colors duration-300">
+              <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-1 h-12 rounded-full bg-border/60 group-hover:bg-primary/50 group-hover:h-20 transition-all duration-300" />
             </div>
           </div>
         )}
 
         {/* Collapsed State */}
         {state.isCollapsed ? (
-          <div className="w-full flex flex-col items-center py-4 gap-2">
+          <div className="w-full flex flex-col items-center py-4 gap-3">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={toggleCollapse}
-                  className="text-primary"
+                  className="relative text-primary hover:bg-primary/10"
                 >
                   <Bot className="h-5 w-5" />
+                  <span className={cn('absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full shadow-[0_0_6px]', statusDotClass)} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p>Expand AgentX (Ctrl+/)</p>
+                <p>Expand AgentC</p>
               </TooltipContent>
             </Tooltip>
 
@@ -202,69 +207,68 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                   variant="ghost"
                   size="icon"
                   onClick={handleClose}
-                  className="text-muted-foreground"
+                  className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="left">
-                <p>Close AgentX</p>
+                <p>Close AgentC</p>
               </TooltipContent>
             </Tooltip>
           </div>
         ) : (
           <div className="flex flex-col w-full h-full">
-            {/* Header */}
+            {/* ── Header ── */}
             <div className={cn(
-              'flex items-center justify-between px-4 py-3 border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-10',
-              state.orderMode && 'border-b-primary/20'
+              'flex items-center justify-between px-4 h-14 border-b shrink-0',
+              state.orderMode
+                ? 'border-b-primary/20 bg-primary/[0.02]'
+                : 'border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60'
             )}>
               <div className="flex items-center gap-3">
                 <div className="relative">
-                  <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/10">
+                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 ring-1 ring-primary/10">
                     <Bot className="h-4 w-4 text-primary" />
                   </div>
-                  <span
-                    className={cn(
-                      'absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full border-2 border-background',
-                      statusDotClass,
-                      agentStatus === 'thinking' && 'animate-pulse'
-                    )}
-                  />
+                  <span className={cn(
+                    'absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-[1.5px] border-background shadow-[0_0_6px]',
+                    statusDotClass,
+                    (agentStatus === 'thinking' || agentStatus === 'executing') && 'animate-pulse'
+                  )} />
                 </div>
-                <div className="flex flex-col gap-0.5">
-                  <h3 className="font-semibold text-sm leading-none tracking-tight">AgentX</h3>
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-                    <span>{statusLabel}</span>
-                    <span className="opacity-30">&middot;</span>
-                    <span>{prettyRole}</span>
+                <div className="flex flex-col">
+                  <h3 className="font-semibold text-[13px] leading-none tracking-tight text-foreground">AgentC</h3>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="text-[10px] font-medium text-muted-foreground/80">{statusLabel}</span>
+                    <span className="text-[10px] text-muted-foreground/30">&middot;</span>
+                    <span className="text-[10px] font-medium text-muted-foreground/80">{prettyRole}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1">
-                {/* New Order button - client portal only, when not in order mode */}
+              <div className="flex items-center gap-0.5">
+                {/* New Order button - client portal only */}
                 {isClientPortal && !state.orderMode && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-2 rounded-lg text-xs gap-1 hover:bg-primary/10 text-primary font-medium"
+                        className="h-7 px-2.5 rounded-lg text-xs gap-1.5 hover:bg-primary/10 text-primary font-medium"
                         onClick={enterOrderMode}
                       >
                         <Package className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">New Order</span>
+                        <span className="hidden sm:inline">Order</span>
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Create Campaign Order</p>
-                    </TooltipContent>
+                    <TooltipContent>Create Campaign Order</TooltipContent>
                   </Tooltip>
                 )}
 
                 {state.orderMode && (
-                  <Badge variant="secondary" className="text-[10px] bg-primary/10 text-primary border-primary/20">
+                  <Badge variant="secondary" className="text-[10px] h-5 bg-primary/10 text-primary border-primary/20 gap-1">
+                    <Sparkles className="h-3 w-3" />
                     Order Mode
                   </Badge>
                 )}
@@ -274,15 +278,13 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                      className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
                       onClick={resetSession}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <p>New Conversation</p>
-                  </TooltipContent>
+                  <TooltipContent>New Conversation</TooltipContent>
                 </Tooltip>
 
                 {!state.orderMode && (
@@ -291,15 +293,13 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
                         onClick={toggleCollapse}
                       >
                         <ChevronRight className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Collapse</p>
-                    </TooltipContent>
+                    <TooltipContent>Collapse</TooltipContent>
                   </Tooltip>
                 )}
 
@@ -308,22 +308,19 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-7 w-7 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors ml-1"
+                      className="h-7 w-7 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive ml-0.5"
                       onClick={handleClose}
                     >
                       <X className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Close AgentX (Ctrl+/)</p>
-                  </TooltipContent>
+                  <TooltipContent>Close</TooltipContent>
                 </Tooltip>
               </div>
             </div>
 
-            {/* Content: Dual-zone when order mode active */}
+            {/* ── Content: Dual-zone when order mode active ── */}
             <div className="flex-1 overflow-hidden flex">
-              {/* Order wizard zone (left side when in order mode) */}
               <AnimatePresence>
                 {state.orderMode && (
                   <motion.div
@@ -342,7 +339,7 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                 )}
               </AnimatePresence>
 
-              {/* Chat zone (always visible, narrower in order mode) */}
+              {/* Chat zone */}
               <div className={cn(
                 'flex flex-col transition-all duration-300 overflow-hidden',
                 state.orderMode ? 'w-[320px] min-w-[280px]' : 'flex-1'
@@ -379,11 +376,11 @@ export function AgentPanelToggle() {
           )}
         >
           <Bot className="h-5 w-5" />
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full" />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-emerald-400 rounded-full shadow-[0_0_6px] shadow-emerald-400/50" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        <p>AgentX (Ctrl+/)</p>
+        <p>AgentC (Ctrl+/)</p>
       </TooltipContent>
     </Tooltip>
   );

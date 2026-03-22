@@ -1,0 +1,4613 @@
+import WebSocket, { WebSocketServer } from "ws";
+import { Server as HttpServer } from "http";
+import { db } from "../db";
+import { campaigns, dialerCallAttempts, dialerRuns, campaignQueue, contacts, accounts, CanonicalDisposition, campaignTestCalls, leads, callSessions, callProducerTracking } from "@shared/schema";
+import { eq, and, sql } from "drizzle-orm";
+import { processDisposition } from "./disposition-engine";
+import { triggerCampaignReplenish } from "../lib/ai-campaign-orchestrator";
+import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import {
+  buildAccountContextSection,
+  getOrBuildAccountIntelligence,
+  getOrBuildAccountMessagingBrief,
+  getAccountProfileData,
+  type AccountIntelligencePayload,
+  type AccountMessagingBriefPayload,
+  type AccountProfileData,
+} from "./account-messaging-service";
+import {
+  buildCallPlanContextSection,
+  buildParticipantCallContext,
+  generatePostCallFollowupEmail,
+  getCallMemoryNotes,
+  getOrBuildAccountCallBrief,
+  getOrBuildParticipantCallPlan,
+  recordCallMemoryNotes,
+  saveCallFollowupEmail,
+} from "./account-call-service";
+import { scheduleAutoRecordingSync } from "../lib/auto-recording-sync-queue";
+import {
+  setCallSession,
+  updateCallSessionStatus,
+  deleteCallSession,
+  getCallSession,
+  getActiveCallSessions,
+  type CallSession,
+} from "./call-session-store";
+import {
+  ensureVoiceAgentControlLayer,
+  validateOpeningMessageVariables,
+  interpolateCanonicalOpening,
+  CANONICAL_DEFAULT_OPENING_MESSAGE,
+} from "./voice-agent-control-defaults";
+import {
+  preflightVoiceVariableContract,
+  extractTemplateVariables,
+  findDisallowedVoiceVariables,
+  interpolateVoiceTemplate,
+  normalizeVoiceTemplateToken,
+} from "./voice-variable-contract";
+import {
+  initializeCostTracking,
+  recordAudioInput,
+  recordAudioOutput,
+  recordTextTokens,
+  updateRateLimits,
+  finalizeCostTracking,
+  estimateTokenCount,
+  type CallCostMetrics,
+} from "./call-cost-tracker";
+import {
+  type VoiceAgentSettings,
+  type VoicePersonalityConfig,
+  type ConversationState,
+  type FillerWordsConfig,
+  buildPersonalityPromptSection,
+  buildConversationStatesSection,
+  buildFillerWordsInstructions,
+} from "@shared/voice-agent-config";
+import {
+  buildFoundationPromptSections,
+  buildCampaignContextSection,
+  buildContactContextSection,
+} from "./foundation-capabilities";
+import { getOrganizationBrain } from "./agent-brain-service";
+import {
+  DEFAULT_ADVANCED_SETTINGS,
+  DEFAULT_SYSTEM_TOOLS,
+  getVirtualAgentConfig,
+  mergeAgentSettings,
+  type AdvancedSettings,
+  type SystemToolsSettings,
+  type VirtualAgentSettings,
+} from "./virtual-agent-settings";
+import {
+  assembleProviderPrompt,
+  getUniversalKnowledgeForProvider,
+  type AssembledProviderPrompt,
+} from "./provider-prompt-assembly";
+
+type DispositionCode = CanonicalDisposition;
+
+
+const LOG_PREFIX = "[OpenAI-Realtime-Dialer]";
+
+// Telnyx media streaming expects real-time G.711 packetization.
+// For 8kHz μ-law: 20ms == 160 bytes.
+const TELNYX_G711_FRAME_BYTES = 160;
+const TELNYX_G711_FRAME_MS = 20;
+const TELNYX_MAX_FRAMES_PER_TICK = 5;
+// Cap buffer to avoid runaway memory if Telnyx isn't ready.
+const TELNYX_MAX_BUFFER_BYTES = TELNYX_G711_FRAME_BYTES * 2000; // ~40s of audio
+
+interface OpenAIRealtimeSession {
+  callId: string;
+  runId: string;
+  campaignId: string;
+  queueItemId: string;
+  callAttemptId: string;
+  contactId: string;
+  calledNumber?: string | null;
+  provider: 'openai' | 'google';
+  virtualAgentId: string;
+  isTestSession: boolean;
+  // Test contact data for test sessions (from test panel form)
+  testContact?: {
+    name?: string;
+    company?: string;
+    title?: string;
+    email?: string;
+  } | null;
+  // OpenAI Realtime configuration (from Preview Studio)
+  openaiConfig?: OpenAIConfigOverride | null;
+  telnyxWs: WebSocket;
+  openaiWs: WebSocket | null;
+  streamSid: string | null;
+  audioFormat: 'g711_ulaw' | 'g711_alaw';
+  audioFormatSource: 'env' | 'telnyx' | 'default' | 'test';
+  isActive: boolean;
+  isEnding: boolean; // Idempotent guard to prevent double execution
+  startTime: Date;
+  transcripts: Array;
+  callSummary: CallSummary | null;
+  detectedDisposition: DispositionCode | null;
+  callOutcome: 'completed' | 'no_answer' | 'voicemail' | 'error' | null;
+  audioFrameBuffer: Buffer[];
+  audioFrameCount: number;
+  lastAudioFrameTime: Date | null;
+  lastUserSpeechTime: Date | null;
+  audioBytesSent: number;
+  telnyxInboundFrames: number;
+  telnyxInboundLastTime: Date | null;
+  openaiAppendsSinceLastLog: number;
+  openaiAppendBytesSinceLastLog: number;
+  openaiAppendLastLogTime: Date | null;
+  agentSettings: VirtualAgentSettings;
+  responseStartTime: Date | null;
+  responseTimeoutHandle: ReturnType | null;
+  softTimeoutTriggered: boolean;
+  systemPromptOverride: string | null;
+  firstMessageOverride: string | null;
+  voiceOverride: string | null;
+  agentSettingsOverride: Partial | null;
+  voiceVariables: Record | null;
+  // Interruption handling state
+  currentResponseId: string | null;
+  currentResponseItemId: string | null;
+  isResponseInProgress: boolean;
+  audioPlaybackMs: number; // Track how much audio has been sent to Telnyx
+  lastAudioDeltaTimestamp: number | null;
+  // Telnyx outbound packetization state
+  telnyxOutboundBuffer: Buffer;
+  telnyxOutboundPacer: ReturnType | null;
+  telnyxOutboundLastSendAt: number | null;
+  telnyxOutboundFramesSent: number;
+  // Rate limiting state
+  rateLimits: {
+    requestsRemaining: number;
+    requestsLimit: number;
+    tokensRemaining: number;
+    tokensLimit: number;
+    resetAt: Date | null;
+  } | null;
+  // Conversation state tracking (prevents identity re-verification)
+  conversationState: {
+    identityConfirmed: boolean;
+    identityConfirmedAt: Date | null;
+    currentState: 'IDENTITY_CHECK' | 'RIGHT_PARTY_INTRO' | 'CONTEXT_FRAMING' | 'DISCOVERY' | 'LISTENING' | 'ACKNOWLEDGEMENT' | 'PERMISSION_REQUEST' | 'CLOSE' | 'GATEKEEPER';
+    stateHistory: string[];
+  };
+  // Campaign-level max call duration (enforced strictly)
+  campaignMaxCallDurationSeconds: number | null;
+  // Intelligent audio detection state (IVR, hold music, human detection)
+  audioDetection: {
+    hasGreetingSent: boolean; // Track if AI has sent its opening greeting
+    humanDetected: boolean; // True once we confirm human speech
+    humanDetectedAt: Date | null;
+    audioPatterns: Array;
+    lastTranscriptCheckTime: Date | null;
+  };
+}
+
+interface DispositionFunctionResult {
+  disposition: DispositionCode;
+  confidence: number;
+  reason: string;
+}
+
+type CallSummary = {
+  summary: string;
+  engagement_level: "low" | "medium" | "high";
+  sentiment: "guarded" | "neutral" | "reflective" | "positive";
+  time_pressure: boolean;
+  primary_challenge?: string;
+  follow_up_consent: "yes" | "no" | "unknown";
+  next_step?: string;
+};
+
+type ClientStateFormat = "raw_json" | "base64";
+type ClientStateParseResult = {
+  params: any;
+  format: ClientStateFormat;
+};
+
+function tryParseJson(value: string): any | null {
+  let attemptNumber = 1;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBase64Url(value: string): string {
+  // Spaces may be + signs that were incorrectly decoded (e.g., by some URL parsers)
+  // Convert spaces back to + before processing
+  const spacesToPlus = value.replace(/ /g, "+");
+
+  // Remove other whitespace (newlines, tabs) that shouldn't be in base64
+  const cleaned = spacesToPlus.replace(/[\t\n\r]/g, "");
+  if (!cleaned) {
+    return "";
+  }
+
+  // Convert URL-safe base64 characters to standard base64
+  const replaced = cleaned.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = replaced.length % 4;
+  return padding ? replaced + "=".repeat(4 - padding) : replaced;
+}
+
+function decodeClientStatePayload(rawValue: string): ClientStateParseResult | null {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  // Try direct JSON parse first (for non-base64 encoded payloads)
+  const directParse = tryParseJson(trimmed);
+  if (directParse) {
+    return {
+      params: directParse,
+      format: "raw_json",
+    };
+  }
+
+  // Normalize and decode as base64
+  const normalized = normalizeBase64Url(trimmed);
+  if (!normalized) {
+    console.log(`${LOG_PREFIX} client_state normalization produced empty string from: ${truncateForLog(trimmed)}`);
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(normalized, "base64").toString("utf8");
+    const decodedParse = tryParseJson(decoded);
+    if (decodedParse) {
+      return {
+        params: decodedParse,
+        format: "base64",
+      };
+    }
+    // Base64 decoded successfully but JSON parse failed
+    console.log(`${LOG_PREFIX} client_state base64 decoded but JSON parse failed. First 100 chars of decoded: ${truncateForLog(decoded, 100)}`);
+  } catch (err) {
+    // Base64 decode failed
+    console.log(`${LOG_PREFIX} client_state base64 decode failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  return null;
+}
+
+function truncateForLog(value: string, limit = 120): string {
+  return value.length ([
+  "qualified_lead",
+  "not_interested",
+  "do_not_call",
+]);
+
+const activeSessions = new Map();
+const streamIdToCallId = new Map();
+
+function normalizeG711Format(value?: string | null): 'g711_ulaw' | 'g711_alaw' | null {
+  if (!value) return null;
+  const normalized = value.toString().trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'g711_ulaw' || normalized === 'ulaw' || normalized === 'mulaw' || normalized === 'pcmu' || normalized.includes('g711u')) {
+    return 'g711_ulaw';
+  }
+  if (normalized === 'g711_alaw' || normalized === 'alaw' || normalized === 'pcma' || normalized.includes('g711a')) {
+    return 'g711_alaw';
+  }
+  return null;
+}
+
+function resolveAudioFormat(message: any): { format: 'g711_ulaw' | 'g711_alaw'; source: 'env' | 'telnyx' | 'default' | 'test' } {
+  const envOverride = normalizeG711Format(
+    process.env.OPENAI_REALTIME_AUDIO_FORMAT || process.env.TELNYX_AUDIO_FORMAT
+  );
+
+  if (envOverride) {
+    return { format: envOverride, source: 'env' };
+  }
+
+  const startFormat = message?.start?.media_format;
+  const rawFormat = typeof startFormat === 'string'
+    ? startFormat
+    : startFormat?.encoding
+      || startFormat?.format
+      || startFormat?.codec
+      || startFormat?.name
+      || startFormat?.media_type;
+
+  const telnyxFormat = normalizeG711Format(rawFormat);
+  if (telnyxFormat) {
+    return { format: telnyxFormat, source: 'telnyx' };
+  }
+
+  return { format: 'g711_ulaw', source: 'default' };
+}
+
+const DISPOSITION_FUNCTION_TOOLS = [
+    {
+      type: "function",
+      name: "send_dtmf",
+      description: "Send DTMF tones (keypad digits) during a call. Use this to navigate IVR systems, dial extensions, or respond to automated phone menus. Only press keys when explicitly prompted by the IVR system.",
+      parameters: {
+        type: "object",
+        properties: {
+          digits: {
+            type: "string",
+            description: "The DTMF digits to send (0-9, *, #). Can be a single digit or multiple digits. Examples: '1' for menu option, '1234' for extension, '*' for operator, '#' to confirm."
+          },
+          reason: {
+            type: "string",
+            description: "Brief explanation of why sending these digits (e.g., 'Selecting option 1 for sales', 'Dialing extension 1234', 'Pressing 0 for operator')"
+          }
+        },
+        required: ["digits", "reason"]
+      }
+    },
+    {
+      type: "function",
+      name: "detect_voicemail_and_hangup",
+      description: "Detect voice mail on a call and hang up if it is detected, ensuring the process appears authentic.",
+      parameters: {
+        type: "object",
+        properties: {
+          call_id: {
+            type: "string",
+            description: "Unique identifier of the call to monitor for voicemail."
+          }
+        }
+      }
+    },
+    // 0.8 if all three criteria (identity confirmed, meaningful conversation, clear interest signals) are met."
+        },
+        reason: {
+          type: "string",
+          description: "Brief explanation for the disposition including specific evidence (e.g., 'Prospect asked about pricing and requested demo' for qualified_lead)"
+        }
+      },
+      required: ["disposition", "confidence", "reason"]
+    }
+  },
+  {
+    type: "function",
+    name: "submit_call_summary",
+    description: "Submit a concise post-call summary for coaching and analytics. Call this after submit_disposition when a human conversation occurred.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description: "2-4 sentence summary of the conversation."
+        },
+        engagement_level: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          description: "Overall engagement level from the prospect."
+        },
+        sentiment: {
+          type: "string",
+          enum: ["guarded", "neutral", "reflective", "positive"],
+          description: "Overall sentiment from the prospect."
+        },
+        time_pressure: {
+          type: "boolean",
+          description: "Whether time pressure was detected."
+        },
+        primary_challenge: {
+          type: "string",
+          description: "Primary challenge or pain point mentioned, if any."
+        },
+        follow_up_consent: {
+          type: "string",
+          enum: ["yes", "no", "unknown"],
+          description: "Whether the prospect consented to follow-up."
+        },
+        next_step: {
+          type: "string",
+          description: "Any agreed next step or callback timing."
+        }
+      },
+      required: ["summary", "engagement_level", "sentiment", "time_pressure", "follow_up_consent"]
+    }
+  },
+  {
+    type: "function",
+    name: "schedule_callback",
+    description: "Schedule a callback when the prospect requests to be called back at a specific time",
+    parameters: {
+      type: "object",
+      properties: {
+        callback_datetime: {
+          type: "string",
+          description: "The requested callback date/time in ISO 8601 format"
+        },
+        notes: {
+          type: "string",
+          description: "Any notes about the callback request"
+        }
+      },
+      required: ["callback_datetime"]
+    }
+  },
+  {
+    type: "function",
+    name: "end_call",
+    description: "End the call gracefully. Call this after saying goodbye when the conversation is complete, when you need to hang up on voicemail/IVR, or when the prospect asks you to stop calling. Always call submit_disposition BEFORE calling end_call.",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "Brief reason for ending the call (e.g., 'Conversation complete', 'Voicemail detected', 'Prospect requested to end call', 'Gatekeeper blocked')"
+        }
+      },
+      required: ["reason"]
+    }
+  },
+  {
+    type: "function",
+    name: "transfer_to_human",
+    description: "Request transfer to a human agent when the prospect requests to speak with a person. Always capture comprehensive context to ensure smooth handoff.",
+    parameters: {
+      type: "object",
+      properties: {
+        rationale_for_transfer: {
+          type: "string",
+          description: "The reasoning why this transfer is needed (e.g., user requested human, complex technical question, escalation needed)"
+        },
+        conversation_summary: {
+          type: "string",
+          description: "Brief summary of the conversation so far, including key points discussed and any information already collected"
+        },
+        prospect_sentiment: {
+          type: "string",
+          enum: ["positive", "neutral", "guarded", "frustrated", "angry"],
+          description: "Current emotional state and sentiment of the prospect"
+        },
+        urgency: {
+          type: "string",
+          enum: ["low", "medium", "high", "critical"],
+          description: "How urgent is this transfer request"
+        },
+        key_topics: {
+          type: "array",
+          items: { type: "string" },
+          description: "Key topics or concerns mentioned by the prospect that the human agent should be aware of"
+        },
+        attempted_resolution: {
+          type: "string",
+          description: "What you attempted to resolve before requesting transfer, if applicable"
+        }
+      },
+      required: ["rationale_for_transfer", "conversation_summary", "prospect_sentiment", "urgency"]
+    }
+  }
+];
+
+export function initializeOpenAIRealtimeDialer(server: HttpServer): WebSocketServer {
+  // We do NOT pass the server instance here because we are handling upgrades manually in index.ts
+  // Passing 'server' would cause ws to try to attach its own upgrade listener, conflicting with ours.
+  const wss = new WebSocketServer({
+    noServer: true
+  });
+
+  console.log(`${LOG_PREFIX} WebSocket server initialized on /openai-realtime-dialer`);
+
+  wss.on("error", (err) => {
+    console.error(`${LOG_PREFIX} WebSocket server error:`, err.message);
+  });
+
+  wss.on("connection", (ws: WebSocket, req) => {
+    console.log(`${LOG_PREFIX} âœ… CONNECTION EVENT FIRED - New Telnyx connection from: ${req.url}`);
+    
+    // Send a welcome message immediately to confirm connection
+    ws.send(JSON.stringify({
+      type: "connection_established",
+      message: "Connected to OpenAI Realtime Dialer Service",
+      timestamp: new Date().toISOString()
+    }));
+
+    // Extract query parameters from WebSocket URL (fallback for Telnyx)
+    const url = new URL(req.url || '', `wss://${req.headers.host}`);
+    const urlParams = {
+      call_id: url.searchParams.get('call_id'),
+      run_id: url.searchParams.get('run_id'),
+      campaign_id: url.searchParams.get('campaign_id'),
+      queue_item_id: url.searchParams.get('queue_item_id'),
+      call_attempt_id: url.searchParams.get('call_attempt_id'),
+      contact_id: url.searchParams.get('contact_id'),
+      virtual_agent_id: url.searchParams.get('virtual_agent_id'),
+    };
+    console.log(`${LOG_PREFIX} URL params:`, urlParams);
+    
+    let sessionId: string | null = null;
+    let session: OpenAIRealtimeSession | null = null;
+
+    ws.on("message", async (data: Buffer | string) => {
+      try {
+        const message = typeof data === "string" ? JSON.parse(data) : JSON.parse(data.toString());
+        
+        if (message.event === "start") {
+          // Guard against multiple start events on the same connection
+          if (session) {
+            console.warn(`${LOG_PREFIX} âš ï¸  Received duplicate 'start' event for active session ${session.callId}. Ignoring to prevent session reset.`);
+            return;
+          }
+
+          // Decode client_state from Telnyx or URL parameters
+          let customParams: any = {};
+          
+          // Priority 1: Check URL query parameter client_state (for TeXML implementation) - this is where WE put the data
+          // Priority 2: Check message.start.client_state (Telnyx sends its own binary format here, not useful)
+          const urlClientState = url.searchParams.get('client_state');
+          const messageClientState = message.start?.client_state;
+          
+          // Prefer URL client_state since that's where we encode our params
+          const rawClientState = urlClientState || messageClientState;
+          
+          if (rawClientState) {
+            const clientStateOrigin = urlClientState ? 'URL params' : 'Telnyx payload';
+            let normalizedClientState = rawClientState;
+
+            try {
+              normalizedClientState = decodeURIComponent(rawClientState);
+            } catch {
+              // Swallow decode errors and fall back to the raw string we already have
+            }
+
+            const parsedState = decodeClientStatePayload(normalizedClientState);
+
+            if (parsedState) {
+              customParams = parsedState.params;
+              console.log(`${LOG_PREFIX} Decoded client_state (${parsedState.format}) from ${clientStateOrigin}:`, customParams);
+
+              // Try to fetch additional params from call session store (system_prompt, openai_config, etc.)
+              if (customParams.call_id || customParams.test_call_id) {
+                const callId = customParams.call_id || customParams.test_call_id;
+                try {
+                  const { getCallParams } = await import('./call-session-store');
+                  const storedParams = await getCallParams(callId);
+                  if (storedParams) {
+                    // Merge stored params, preferring already decoded params but filling in gaps
+                    if (!customParams.system_prompt && storedParams.system_prompt) {
+                      customParams.system_prompt = storedParams.system_prompt;
+                      console.log(`${LOG_PREFIX} Retrieved system_prompt from session store for ${callId}`);
+                    }
+                    if (!customParams.openai_config && storedParams.openai_config) {
+                      customParams.openai_config = storedParams.openai_config;
+                      console.log(`${LOG_PREFIX} Retrieved openai_config from session store for ${callId}:`, storedParams.openai_config);
+                    }
+                    if (!customParams.first_message && storedParams.first_message) {
+                      customParams.first_message = storedParams.first_message;
+                      console.log(`${LOG_PREFIX} Retrieved first_message from session store for ${callId}`);
+                    }
+                    if (!customParams.provider && storedParams.provider) {
+                      customParams.provider = storedParams.provider;
+                      console.log(`${LOG_PREFIX} Retrieved provider from session store for ${callId}: ${storedParams.provider}`);
+                    }
+                  }
+                } catch (storeErr) {
+                  console.warn(`${LOG_PREFIX} Failed to fetch from session store:`, storeErr);
+                }
+              }
+            } else {
+              console.error(
+                `${LOG_PREFIX} Failed to decode client_state from ${clientStateOrigin} - raw payload: ${truncateForLog(
+                  normalizedClientState
+                )}`
+              );
+              customParams = message.start?.custom_parameters || {};
+            }
+          } else {
+            // Fallback to custom_parameters if client_state not provided
+            customParams = message.start?.custom_parameters || {};
+          }
+          
+          sessionId = customParams.call_id || urlParams.call_id || message.stream_id || `call-${Date.now()}`;
+          const runId = customParams.run_id || urlParams.run_id;
+          const campaignId = customParams.campaign_id || urlParams.campaign_id;
+          const queueItemId = customParams.queue_item_id || urlParams.queue_item_id;
+          const callAttemptId = customParams.call_attempt_id || urlParams.call_attempt_id;
+          const contactId = customParams.contact_id || urlParams.contact_id;
+
+          console.log(`${LOG_PREFIX} 🔍 Parameters Extracted:`, { campaignId, customParamsCampaignId: customParams.campaign_id, urlParamsCampaignId: urlParams.campaign_id });
+
+          let { format: audioFormat, source: audioFormatSource } = resolveAudioFormat(message);
+          // Check for test session - either from explicit flag or from ID prefixes
+          // NOTE: is_test_call can be boolean true, string 'true', or any truthy value
+          const isTestCallFlag = Boolean(customParams.is_test_call) || Boolean(customParams.test_call_id);
+          const isTestIdPattern = (sessionId?.startsWith('openai-test-') || sessionId?.startsWith('test-') || runId?.startsWith('run-test-'))
+            && (queueItemId?.startsWith('queue-test-') || queueItemId?.startsWith('test-queue-'))
+            && (callAttemptId?.startsWith('attempt-') || callAttemptId?.startsWith('test-attempt-'));
+          const isTestSession = isTestCallFlag || isTestIdPattern;
+
+          // Determine provider - test sessions default to OpenAI (more reliable)
+          const requestedProvider = (customParams.provider || (urlParams as any).provider || process.env.VOICE_PROVIDER || 'openai').toString().toLowerCase();
+          // Check if openai is requested (handles 'openai', 'openai_realtime', etc.)
+          const isOpenAIRequested = requestedProvider.includes('openai');
+          const provider: 'openai' | 'google' = isOpenAIRequested ? 'openai' : 'google';
+
+          if (isTestSession) {
+            audioFormat = 'g711_ulaw';
+            audioFormatSource = 'test';
+            console.log(`${LOG_PREFIX} Test session using provider: ${provider}, audio format: g711_ulaw`);
+          }
+
+          console.log(`${LOG_PREFIX} ðŸ“ž Starting session for call: ${sessionId}`);
+          console.log(`${LOG_PREFIX} ðŸ“‹ Session parameters:`, {
+            call_id: sessionId,
+            run_id: runId,
+            campaign_id: campaignId,
+            stream_id: message.stream_id,
+            provider,
+            audio_format: audioFormat,
+            audio_format_source: audioFormatSource,
+            has_custom_params: Object.keys(customParams).length > 0,
+            has_url_params: Object.keys(urlParams).filter(k => (urlParams as any)[k]).length > 0
+          });
+
+          // Validate required identifiers are present (skip for test sessions)
+          // For AI campaigns, warn but don't terminate if some params are missing - the call can still proceed
+          if (!isTestSession) {
+            const missingParams: string[] = [];
+            if (!callAttemptId) missingParams.push('call_attempt_id');
+            if (!queueItemId) missingParams.push('queue_item_id');
+            if (!contactId) missingParams.push('contact_id');
+            if (!campaignId) missingParams.push('campaign_id');
+            if (!runId) missingParams.push('run_id');
+
+            if (missingParams.length > 0) {
+              // Log warning but allow session to continue - AI calls can work without full tracking
+              console.warn(`${LOG_PREFIX} ⚠️ Missing parameters: ${missingParams.join(', ')}. Call will proceed without full tracking.`);
+              // Don't terminate - allow the AI call to proceed for better UX
+            }
+          } else {
+            console.log(`${LOG_PREFIX} 🧪 Test session detected - skipping production parameter validation`);
+          }
+
+          // Get virtualAgentId from params
+          const virtualAgentId = customParams.virtual_agent_id || urlParams.virtual_agent_id;
+          const systemPromptOverride = typeof customParams.system_prompt === 'string' ? customParams.system_prompt : null;
+          const firstMessageOverride = typeof customParams.first_message === 'string' ? customParams.first_message : null;
+          const voiceOverride = typeof customParams.voice === 'string' ? customParams.voice : null;
+          const agentSettingsOverride = customParams.agent_settings
+            && typeof customParams.agent_settings === 'object'
+            && !Array.isArray(customParams.agent_settings)
+            ? (customParams.agent_settings as Partial)
+            : null;
+
+          // Validate that call attempt exists and belongs to the specified campaign/contact
+          // Skip validation if missing required params or using fallback timestamp-based IDs
+          const isFallbackSession = !callAttemptId || 
+            callAttemptId.startsWith('attempt-') || 
+            !runId || 
+            runId.startsWith('run-') ||
+            !contactId;
+          
+          if (!isTestSession && !isFallbackSession) {
+            const validationResult = await validateSessionIdentifiers(callAttemptId!, queueItemId!, contactId!, campaignId!, runId!);
+            if (!validationResult.valid) {
+              console.error(`${LOG_PREFIX} Invalid session identifiers: ${validationResult.error}. Terminating session.`);
+              ws.send(JSON.stringify({
+                event: "error",
+                message: validationResult.error
+              }));
+              ws.close();
+              return;
+            }
+
+            // Only set virtualAgentId from DB-backed validation when not in test mode
+            session = {
+              callId: sessionId!,
+              runId: runId || '',
+              campaignId: campaignId || '',
+              queueItemId: queueItemId || '',
+              callAttemptId: callAttemptId || '',
+              contactId: contactId || '',
+              calledNumber: customParams.called_number || urlParams.called_number || null,
+              calledNumber: customParams.called_number || urlParams.called_number || null,
+              calledNumber: customParams.called_number || urlParams.called_number || null,
+              provider,
+              virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || validationResult.virtualAgentId || '',
+              isTestSession,
+              // OpenAI config override from Preview Studio
+              openaiConfig: customParams.openai_config as OpenAIConfigOverride | undefined,
+              telnyxWs: ws,
+              openaiWs: null,
+              streamSid: message.stream_id || null,
+              audioFormat,
+              audioFormatSource,
+              isActive: true,
+              isEnding: false,
+              startTime: new Date(),
+              transcripts: [],
+              callSummary: null,
+              detectedDisposition: null,
+              callOutcome: null,
+              audioFrameBuffer: [],
+              audioFrameCount: 0,
+              lastAudioFrameTime: null,
+              lastUserSpeechTime: null,
+              audioBytesSent: 0,
+              telnyxInboundFrames: 0,
+              telnyxInboundLastTime: null,
+              openaiAppendsSinceLastLog: 0,
+              openaiAppendBytesSinceLastLog: 0,
+              openaiAppendLastLogTime: null,
+              agentSettings: {
+                systemTools: DEFAULT_SYSTEM_TOOLS,
+                advanced: DEFAULT_ADVANCED_SETTINGS,
+              },
+              responseStartTime: null,
+              responseTimeoutHandle: null,
+              softTimeoutTriggered: false,
+              systemPromptOverride,
+              firstMessageOverride,
+              voiceOverride,
+              agentSettingsOverride,
+              voiceVariables: null,
+              // Interruption handling state
+              currentResponseId: null,
+              currentResponseItemId: null,
+              isResponseInProgress: false,
+              audioPlaybackMs: 0,
+              lastAudioDeltaTimestamp: null,
+              telnyxOutboundBuffer: Buffer.alloc(0),
+              telnyxOutboundPacer: null,
+              telnyxOutboundLastSendAt: null,
+              telnyxOutboundFramesSent: 0,
+              // Rate limiting state
+              rateLimits: null,
+              // Conversation state tracking
+              conversationState: {
+                identityConfirmed: false,
+                identityConfirmedAt: null,
+                currentState: 'IDENTITY_CHECK',
+                stateHistory: ['IDENTITY_CHECK'],
+              },
+              // Intelligent audio detection state
+              audioDetection: {
+                hasGreetingSent: false,
+                humanDetected: false,
+                humanDetectedAt: null,
+                audioPatterns: [],
+                lastTranscriptCheckTime: null,
+              },
+              // Campaign-level max call duration (will be fetched from campaign config)
+              campaignMaxCallDurationSeconds: null,
+            };
+          } else {
+            console.warn(`${LOG_PREFIX} âš ï¸  Test session detected for call ${sessionId} - skipping DB validation. Locks/dispositions will not be enforced.`);
+            session = {
+              callId: sessionId!,
+              runId: runId || '',
+              campaignId: campaignId || '',
+              queueItemId: queueItemId || '',
+              callAttemptId: callAttemptId || '',
+              contactId: contactId || '',
+              provider,
+              virtualAgentId: customParams.virtual_agent_id || urlParams.virtual_agent_id || '',
+              isTestSession,
+              // Store test contact data from customParams for test sessions
+              testContact: (customParams.test_contact as { name?: string; company?: string; title?: string; email?: string } | undefined) || null,
+              // OpenAI config override from Preview Studio
+              openaiConfig: customParams.openai_config as OpenAIConfigOverride | undefined,
+              telnyxWs: ws,
+              openaiWs: null,
+              streamSid: message.stream_id || null,
+              audioFormat,
+              audioFormatSource,
+              isActive: true,
+              isEnding: false,
+              startTime: new Date(),
+              transcripts: [],
+              callSummary: null,
+              detectedDisposition: null,
+              callOutcome: null,
+              audioFrameBuffer: [],
+              audioFrameCount: 0,
+              lastAudioFrameTime: null,
+              lastUserSpeechTime: null,
+              audioBytesSent: 0,
+              telnyxInboundFrames: 0,
+              telnyxInboundLastTime: null,
+              openaiAppendsSinceLastLog: 0,
+              openaiAppendBytesSinceLastLog: 0,
+              openaiAppendLastLogTime: null,
+              agentSettings: {
+                systemTools: DEFAULT_SYSTEM_TOOLS,
+                advanced: DEFAULT_ADVANCED_SETTINGS,
+              },
+              responseStartTime: null,
+              responseTimeoutHandle: null,
+              softTimeoutTriggered: false,
+              systemPromptOverride,
+              firstMessageOverride,
+              voiceOverride,
+              agentSettingsOverride,
+              voiceVariables: null,
+              // Interruption handling state
+              currentResponseId: null,
+              currentResponseItemId: null,
+              isResponseInProgress: false,
+              audioPlaybackMs: 0,
+              lastAudioDeltaTimestamp: null,
+              telnyxOutboundBuffer: Buffer.alloc(0),
+              telnyxOutboundPacer: null,
+              telnyxOutboundLastSendAt: null,
+              telnyxOutboundFramesSent: 0,
+              // Rate limiting state
+              rateLimits: null,
+              // Conversation state tracking
+              conversationState: {
+                identityConfirmed: false,
+                identityConfirmedAt: null,
+                currentState: 'IDENTITY_CHECK',
+                stateHistory: ['IDENTITY_CHECK'],
+              },
+              // Intelligent audio detection state
+              audioDetection: {
+                hasGreetingSent: false,
+                humanDetected: false,
+                humanDetectedAt: null,
+                audioPatterns: [],
+                lastTranscriptCheckTime: null,
+              },
+              // Campaign-level max call duration (will be fetched from campaign config)
+              campaignMaxCallDurationSeconds: null,
+            };
+          }
+
+          activeSessions.set(sessionId!, session!);
+          
+          // Persist session to Redis for cross-instance state sharing
+          // This solves "invalid call control ID" in production with multiple instances
+          await setCallSession({
+            callId: sessionId!,
+            callControlId: sessionId!, // Will be updated when webhook provides actual control ID
+            runId: runId || '',
+            campaignId: campaignId || '',
+            queueItemId: queueItemId || '',
+            callAttemptId: callAttemptId || '',
+            contactId: contactId || '',
+            calledNumber: customParams.called_number || urlParams.called_number || null,
+            virtualAgentId: session!.virtualAgentId,
+            status: 'active',
+            provider: provider,
+            isTestSession,
+            createdAt: session!.startTime.toISOString(),
+            updatedAt: new Date().toISOString(),
+            conversationState: {
+              identityConfirmed: false,
+              currentState: 'IDENTITY_CHECK',
+            },
+          });
+          console.log(`${LOG_PREFIX} ✅ Session persisted to store for call: ${sessionId}`);
+          
+          const initialStreamId = message.stream_id || message.start?.stream_id;
+          if (initialStreamId) {
+            session!.streamSid = initialStreamId;
+            streamIdToCallId.set(initialStreamId, sessionId!);
+            if (session!.audioFrameBuffer.length > 0) {
+              console.log(`${LOG_PREFIX} dY" Flushing ${session!.audioFrameBuffer.length} buffered audio frames after initial stream_id`);
+              flushAudioBuffer(session!);
+            }
+          }
+
+          // Warn if Telnyx never provides a streaming_event with stream_id soon after start
+          setTimeout(() => {
+            if (session!.isActive && !session!.streamSid) {
+              const telnyxState = session!.telnyxWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session!.telnyxWs.readyState] : 'NULL';
+              console.warn(`${LOG_PREFIX} âš ï¸  No stream_id received yet for call ${session!.callId}. Telnyx state=${telnyxState}. Audio cannot be sent until stream_id arrives.`);
+            }
+          }, 4000);
+
+          if (provider === 'google') {
+            await initializeGoogleSession(session);
+          } else {
+            await initializeOpenAISession(session);
+          }
+        } else if (message.event === "media" && session) {
+          if (!session.streamSid && message.stream_id) {
+            session.streamSid = message.stream_id;
+            if (!streamIdToCallId.has(message.stream_id)) {
+              streamIdToCallId.set(message.stream_id, session.callId);
+            }
+            if (session.audioFrameBuffer.length > 0) {
+              console.log(`${LOG_PREFIX} dY" Flushing ${session.audioFrameBuffer.length} buffered audio frames after media stream_id`);
+              flushAudioBuffer(session);
+            }
+          }
+          await handleTelnyxMedia(session, message);
+        } else if (message.event === "streaming_event") {
+          // This is where Telnyx sends the stream_id for the media streaming connection
+          if (message.stream_id && session) {
+            session.streamSid = message.stream_id;
+            console.log(`${LOG_PREFIX} ðŸ”— Telnyx streaming_event received! stream_id set to: ${message.stream_id} for call: ${session.callId}`);
+            
+            // Map stream_id to call ID for routing
+            if (!streamIdToCallId.has(message.stream_id)) {
+              streamIdToCallId.set(message.stream_id, session.callId);
+            }
+            
+            // Flush any buffered audio frames now that we have stream_id
+            if (session.audioFrameBuffer.length > 0) {
+              console.log(`${LOG_PREFIX} ðŸ“¤ Flushing ${session.audioFrameBuffer.length} buffered audio frames now that stream_id is available`);
+              flushAudioBuffer(session);
+            }
+          }
+        } else if (message.event === "stop") {
+          console.log(`${LOG_PREFIX} Stop event received for: ${message.stream_id}`);
+          const stopCallId = streamIdToCallId.get(message.stream_id) || message.stream_id;
+          await endCall(stopCallId, 'completed');
+        }
+      } catch (error) {
+        console.error(`${LOG_PREFIX} Error processing message:`, error);
+      }
+    });
+  // Added missing closing brace for previous function/block
+
+    ws.on("close", async () => {
+      console.log(`${LOG_PREFIX} Telnyx WebSocket closed for session: ${sessionId}`);
+      if (sessionId) {
+        const session = activeSessions.get(sessionId);
+        if (session && session.isActive && !session.isEnding) {
+          console.warn(`${LOG_PREFIX} âš ï¸  Telnyx WebSocket closed unexpectedly during active call. Attempting to flush buffered audio...`);
+          // Try to flush any buffered audio frames before ending
+          if (session.audioFrameBuffer.length > 0) {
+            console.log(`${LOG_PREFIX} ðŸ“¤ ${session.audioFrameBuffer.length} frames were buffered when Telnyx disconnected`);
+          }
+        }
+        await endCall(sessionId, 'completed');
+      }
+    });
+
+    ws.on("error", (error) => {
+      console.error(`${LOG_PREFIX} WebSocket error:`, error);
+      if (sessionId) {
+        endCall(sessionId, 'error');
+      }
+    });
+  });
+
+  return wss;
+}
+
+function mapAsrModel(model: AdvancedSettings['asr']['model']): string {
+  return model === 'scribe_realtime' ? 'gpt-4o-mini-transcribe' : 'whisper-1';
+}
+
+interface OpenAIConfigOverride {
+  turn_detection?: 'server_vad' | 'semantic' | 'disabled';
+  eagerness?: 'low' | 'medium' | 'high';
+  max_tokens?: number;
+}
+
+function buildTurnDetection(
+  settings: AdvancedSettings['conversational'],
+  configOverride?: OpenAIConfigOverride
+) {
+  // Check if turn detection is disabled via override
+  if (configOverride?.turn_detection === 'disabled') {
+    console.log(`[Turn Detection] Disabled via config override`);
+    return null;
+  }
+
+  // Use override turn detection type or default to server_vad
+  const turnDetectionType = configOverride?.turn_detection || 'server_vad';
+
+  // Map eagerness levels from override or settings
+  // OPTIMIZED: Use medium eagerness for more natural, responsive conversation
+  // Medium eagerness provides good balance between responsiveness and accuracy
+  let eagernessValue: string;
+  if (configOverride?.eagerness) {
+    // Map 'medium' to 'normal' for OpenAI API compatibility
+    eagernessValue = configOverride.eagerness === 'medium' ? 'normal' : configOverride.eagerness;
+  } else {
+    // Use MEDIUM (normal) eagerness by default for natural conversation flow
+    // Can be overridden per-agent if needed for compliance-focused scenarios
+    eagernessValue = settings.eagerness || 'normal';
+  }
+
+  console.log(`[Turn Detection] Using ${turnDetectionType} with eagerness: ${eagernessValue}`);
+
+  if (turnDetectionType === 'semantic') {
+    // Semantic turn detection - context-aware, understands speech patterns
+    // Low eagerness ensures the model waits for clear confirmation before proceeding
+    return {
+      type: "semantic_vad",
+      eagerness: eagernessValue,
+    };
+  }
+
+  // Default: server_vad - recommended for Telnyx
+  // OPTIMIZED: Reduced silence duration for more responsive, natural conversation
+  // - 800ms provides good balance between responsiveness and not interrupting
+  // - Allows natural pauses without excessive waiting
+  // - Faster turn-taking improves conversation flow
+  const silenceDurationMs = settings.silenceDurationMs || 800;
+  console.log(`[Turn Detection] Using server_vad with silence_duration_ms: ${silenceDurationMs}`);
+
+  return {
+    type: "server_vad",
+    threshold: 0.5,
+    prefix_padding_ms: 300,
+    silence_duration_ms: silenceDurationMs, // Optimized from 2500ms -> 800ms for natural conversation flow
+  };
+}
+
+function getAvailableTools(systemTools: SystemToolsSettings) {
+  return DISPOSITION_FUNCTION_TOOLS.filter((tool) => {
+    if (tool.name === "transfer_to_human") {
+      return systemTools.transferToAgent;
+    }
+    return true;
+  });
+}
+
+function sanitizeRealtimeTools(tools: unknown[]): unknown[] {
+  // OpenAI Realtime rejects unsupported keys like `tools[*].strict`.
+  return tools.map((tool) => {
+    if (!tool || typeof tool !== 'object') return tool;
+    const { strict: _strict, ...rest } = tool as any;
+    return rest;
+  });
+}
+
+function enqueueTelnyxOutboundAudio(session: OpenAIRealtimeSession, audioBytes: Buffer): void {
+  if (!audioBytes?.length) return;
+
+  session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.length
+    ? Buffer.concat([session.telnyxOutboundBuffer, audioBytes])
+    : audioBytes;
+
+  if (session.telnyxOutboundBuffer.length > TELNYX_MAX_BUFFER_BYTES) {
+    // Keep newest audio to reduce perceived latency.
+    const dropped = session.telnyxOutboundBuffer.length - TELNYX_MAX_BUFFER_BYTES;
+    session.telnyxOutboundBuffer = session.telnyxOutboundBuffer.subarray(dropped);
+    console.warn(`${LOG_PREFIX} WARN: Telnyx outbound buffer capped (dropped ${dropped} bytes) for call: ${session.callId}`);
+  }
+}
+
+function stopTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
+  if (session.telnyxOutboundPacer) {
+    clearInterval(session.telnyxOutboundPacer);
+    session.telnyxOutboundPacer = null;
+  }
+  session.telnyxOutboundLastSendAt = null;
+}
+
+function ensureTelnyxOutboundPacer(session: OpenAIRealtimeSession): void {
+  if (session.telnyxOutboundPacer) return;
+
+  session.telnyxOutboundPacer = setInterval(() => {
+    try {
+      if (!session.isActive) return;
+      
+      // DEBUG: Warn if streamSid is missing but we have audio
+      if (!session.streamSid && session.telnyxOutboundBuffer && session.telnyxOutboundBuffer.length > 0) {
+          if (Math.random()  {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error(`${LOG_PREFIX} Missing OPENAI_API_KEY - terminating session and releasing locks`);
+    await endCall(session.callId, 'error');
+    return;
+  }
+
+  // Log masked API key for debugging
+  const maskedKey = apiKey.substring(0, 8) + "..." + apiKey.substring(apiKey.length - 4);
+  console.log(`${LOG_PREFIX} ðŸ”‘ Using OpenAI API Key: ${maskedKey} (Length: ${apiKey.length})`);
+
+  try {
+    const campaignConfig = await getCampaignConfig(session.campaignId);
+    console.log(`${LOG_PREFIX} 🔍 Fetched Campaign Config for ${session.campaignId}:`, {
+        found: !!campaignConfig,
+        objective: campaignConfig?.campaignObjective ? 'Present' : 'Missing',
+        brief: campaignConfig?.campaignContextBrief ? 'Present' : 'Missing',
+        maxCallDuration: campaignConfig?.maxCallDurationSeconds ?? 'Not set'
+    });
+
+    // Set campaign-level max call duration for strict enforcement
+    if (campaignConfig?.maxCallDurationSeconds) {
+      session.campaignMaxCallDurationSeconds = campaignConfig.maxCallDurationSeconds;
+      console.log(`${LOG_PREFIX} ⏱️ Campaign max call duration set to ${campaignConfig.maxCallDurationSeconds}s`);
+    }
+
+    let contactInfo = await getContactInfo(session.contactId);
+
+    // DEBUG: Log contact resolution details
+    console.log(`${LOG_PREFIX} ðŸ”Ž Contact Info Resolution - IsTest: ${session.isTestSession}, ContactInfo Found: ${!!contactInfo}, TestContact Present: ${!!session.testContact}`);
+    if (session.isTestSession && session.testContact) {
+       console.log(`${LOG_PREFIX} ðŸ§ª Test Contact Data:`, JSON.stringify(session.testContact));
+    }
+
+    // For test sessions, use test contact data if database lookup returns null
+    if (session.isTestSession && !contactInfo && session.testContact) {
+      console.log(`${LOG_PREFIX} 🧪 Using test contact data for test session: ${session.testContact.name}`);
+      contactInfo = {
+        id: session.contactId,
+        firstName: session.testContact.name?.split(' ')[0] || 'Test',
+        lastName: session.testContact.name?.split(' ').slice(1).join(' ') || 'Contact',
+        fullName: session.testContact.name || 'Test Contact',
+        jobTitle: session.testContact.title || 'Test Title',
+        email: session.testContact.email || 'test@example.com',
+        company: session.testContact.company || 'Test Company',
+        companyName: session.testContact.company || 'Test Company',
+        accountId: null,
+      };
+    }
+
+    // For test sessions, fill in missing fields from test contact data
+    // This handles the case where contact exists in DB but has no account/company
+    if (session.isTestSession && contactInfo && session.testContact) {
+      if (!contactInfo.company && !contactInfo.companyName) {
+        const fallbackCompany = session.testContact.company || 'Test Company';
+        contactInfo.company = fallbackCompany;
+        contactInfo.companyName = fallbackCompany;
+        console.log(`${LOG_PREFIX} 🧪 Filled missing company from test contact: ${fallbackCompany}`);
+      }
+      if (!contactInfo.jobTitle && session.testContact.title) {
+        contactInfo.jobTitle = session.testContact.title;
+        console.log(`${LOG_PREFIX} 🧪 Filled missing job title from test contact: ${session.testContact.title}`);
+      }
+    }
+    const agentConfig = await getVirtualAgentConfig(session.virtualAgentId);
+    const baseSettings = session.agentSettingsOverride ?? (agentConfig?.settings ?? undefined);
+    const agentSettings = mergeAgentSettings(baseSettings as Partial | undefined);
+    session.agentSettings = agentSettings;
+
+    let attemptNumber = 1;
+    if (session.callAttemptId) {
+      try {
+        const [attempt] = await db
+          .select({ attemptNumber: dialerCallAttempts.attemptNumber })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, session.callAttemptId))
+          .limit(1);
+        if (attempt?.attemptNumber) {
+          attemptNumber = attempt.attemptNumber;
+        }
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Unable to resolve attempt number:`, error);
+      }
+    }
+
+// if (!session.isTestSession) {
+//   const orgNameOverride = campaignConfig?.organizationName || campaignConfig?.companyName || agentSettings.persona?.companyName || null;
+//   // Use contactInfo from database (fetched above), not session.testContact which is null for real calls
+//   const preflight = await preflightVoiceVariableContract({
+//     contactId: session.contactId,
+//     virtualAgentId: session.virtualAgentId,
+//     callAttemptId: session.callAttemptId,
+//     callerId: process.env.TELNYX_FROM_NUMBER || null,
+//     calledNumber: session.calledNumber || null,
+//     agentName: agentSettings.persona?.name || null,
+//     orgName: orgNameOverride,
+//     contact: {
+//       fullName: contactInfo?.fullName || contactInfo?.firstName && contactInfo?.lastName ? `${contactInfo.firstName} ${contactInfo.lastName}` : null,
+//       firstName: contactInfo?.firstName || null,
+//       lastName: contactInfo?.lastName || null,
+//       jobTitle: contactInfo?.jobTitle || null,
+//       email: contactInfo?.email || null,
+//     },
+//     account: {
+//       name: contactInfo?.companyName || contactInfo?.company || orgNameOverride,
+//     },
+//     timeUtc: new Date().toISOString(),
+//   });
+//
+//   if (!preflight.valid) {
+//     console.error(
+//       `${LOG_PREFIX} Voice variable preflight failed for call ${session.callId}: ${preflight.errors.join("; ")}`
+//     );
+//     if (session.telnyxWs?.readyState === WebSocket.OPEN) {
+//       session.telnyxWs.send(
+//         JSON.stringify({
+//           event: "error",
+//           message: "Voice variable preflight failed - missing or invalid canonical fields",
+//           missing_fields: preflight.missingKeys,
+//           invalid_fields: preflight.invalidKeys,
+//           contract_version: preflight.contractVersion,
+//         })
+//       );
+//     }
+//     await endCall(session.callId, "error");
+//     return;
+//   }
+//   session.voiceVariables = preflight.values;
+// }
+
+// Use the latest GA gpt-realtime model for most natural, human-like speech
+const url = process.env.OPENAI_REALTIME_MODEL_URL || "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+console.log(`${LOG_PREFIX} Connecting to OpenAI Realtime: ${url.split('?')[0]}...`);
+
+const openaiWs = new WebSocket(url, {
+  headers: {
+    "Authorization": `Bearer ${apiKey}`,
+    "OpenAI-Beta": "realtime=v1",
+  },
+});
+
+openaiWs.on("open", async () => {
+  try {
+    let resolvedOrgName = campaignConfig?.organizationName || campaignConfig?.companyName;
+    if (!resolvedOrgName) {
+      try {
+        const orgBrain = await getOrganizationBrain();
+        resolvedOrgName = orgBrain?.identity?.companyName || 'our organization';
+      } catch (e) {
+        console.warn(`${LOG_PREFIX} Could not fetch Organization Brain for org name:`, e);
+        resolvedOrgName = 'our organization';
+      }
+    }
+
+      const voiceTemplateValues = buildVoiceTemplateValues({
+        baseValues: session.voiceVariables,
+        contactInfo,
+        callerId: process.env.TELNYX_FROM_NUMBER || null,
+        calledNumber: session.calledNumber || null,
+        orgName: resolvedOrgName,
+      });
+      // Get cost optimization settings early to use in prompt building
+      const costSettingsEarly = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
+      const useCondensedPrompt = costSettingsEarly.useCondensedPrompt !== false;
+
+      const baseSystemPrompt = await buildSystemPrompt(
+        campaignConfig,
+        contactInfo,
+        session.systemPromptOverride?.trim() || agentConfig?.systemPrompt || undefined,
+        useCondensedPrompt,
+        undefined, // foundationCapabilities
+        agentConfig?.settings as VoiceAgentSettings | null, // Pass agent settings for personality config
+        session.callAttemptId,
+        attemptNumber,
+        session.isTestSession,
+        'openai'  // Use OpenAI provider for prompt formatting
+      );
+      const systemPrompt = interpolateVoiceTemplate(
+        baseSystemPrompt,
+        voiceTemplateValues
+      );
+      
+      // OpenAI Realtime voices - marin & cedar are highest quality, most natural sounding
+      const VALID_VOICES = ["alloy", "shimmer", "echo", "ash", "ballad", "coral", "sage", "verse", "marin", "cedar", "nova", "fable", "onyx"];
+      // Default to marin for best audio quality (warm, confident, natural speech)
+      let voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "marin";
+      if (!VALID_VOICES.includes(voice)) {
+        console.warn(`${LOG_PREFIX} Invalid voice '${voice}' detected. Falling back to 'marin'.`);
+        voice = "marin";
+      }
+
+      const modalities = ["text", "audio"];
+      // Use OpenAI config override from session (used by Preview Studio for custom configuration)
+      const turnDetection = buildTurnDetection(agentSettings.advanced.conversational, session.openaiConfig || undefined);
+      const audioFormat = session.audioFormat;
+      const audioFormatSource = session.audioFormatSource || 'default';
+      console.log(`${LOG_PREFIX} Audio format selected: ${audioFormat} (source=${audioFormatSource})`);
+
+      // Transcription configuration - can be disabled to save ~$0.006/min
+      const transcriptionEnabled = agentSettings.advanced.asr.transcriptionEnabled !== false;
+      const transcriptionConfig: Record = transcriptionEnabled ? {
+        model: mapAsrModel(agentSettings.advanced.asr.model),
+      } : undefined as any;
+
+      const keywordList = typeof agentSettings.advanced.asr.keywords === 'string'
+        ? agentSettings.advanced.asr.keywords
+        : '';
+
+      if (transcriptionConfig && keywordList.trim()) {
+        transcriptionConfig.prompt = `Keywords: ${keywordList}`;
+      }
+
+      if (agentSettings.advanced.asr.model === 'scribe_realtime') {
+        console.log(`${LOG_PREFIX} Scribe Realtime ASR enabled for call: ${session.callId}`);
+      }
+
+      // Get cost optimization settings with defaults
+      const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
+      // Use override max_tokens from Preview Studio config, or fall back to cost settings
+      const configuredMaxTokens = session.openaiConfig?.max_tokens || costSettings.maxResponseTokens || 512;
+      const maxResponseTokens = Math.min(Math.max(configuredMaxTokens, 256), 16384);
+
+      // Initialize cost tracking if enabled
+      if (costSettings.enableCostTracking) {
+        initializeCostTracking(session.callId, systemPrompt, transcriptionEnabled);
+        console.log(`${LOG_PREFIX} Cost tracking enabled for call: ${session.callId}`);
+      }
+
+      // Configure OpenAI Realtime session aligned with official API documentation
+      const configMessage = {
+        type: "session.update",
+        session: {
+          modalities,
+          instructions: systemPrompt, // Use the fully interpolated system prompt
+          voice: voice, // Voice from config (defaults to marin)
+          input_audio_format: audioFormat,
+          output_audio_format: audioFormat,
+          input_audio_transcription: transcriptionConfig,
+          turn_detection: turnDetection, // Use semantic_vad with eagerness from buildTurnDetection()
+          tools: sanitizeRealtimeTools(getAvailableTools(agentSettings.systemTools)),
+          tool_choice: "auto",
+          temperature: 0.7,
+          max_response_output_tokens: maxResponseTokens, // Use the cost-optimized max tokens
+        },
+      };
+
+      openaiWs.send(JSON.stringify(configMessage));
+      console.log(`${LOG_PREFIX} OpenAI session configured with dynamic system instructions and voice`);
+      console.log(`${LOG_PREFIX} Voice config:`, JSON.stringify(configMessage, null, 2));
+      
+      // Start audio health monitoring
+      startAudioHealthMonitor(session);
+
+      // =====================================================================
+      // OPENING MESSAGE ASSEMBLY WITH CANONICAL VARIABLE VALIDATION
+      // =====================================================================
+      let openingScript: string;
+      
+      // Check if we have a custom first message override
+      const customFirstMessage = session.firstMessageOverride?.trim()
+        || agentConfig?.firstMessage
+        || campaignConfig?.openingScript
+        || campaignConfig?.script;
+      
+      if (customFirstMessage) {
+        // Skip variable validation for test sessions
+        if (!session.isTestSession) {
+          const disallowedVariables = findDisallowedVoiceVariables(customFirstMessage);
+          if (disallowedVariables.length > 0) {
+            console.error(
+              `${LOG_PREFIX} Call ${session.callId} blocked: disallowed variables in first message (${disallowedVariables.join(", ")})`
+            );
+            await endCall(session.callId, "error");
+            return;
+          }
+        }
+
+        const normalizedTokens = extractTemplateVariables(customFirstMessage)
+          .map(normalizeVoiceTemplateToken)
+          .filter(Boolean);
+        const usesCanonicalOpeningTokens = normalizedTokens.includes("contact.full_name")
+          || normalizedTokens.includes("contact.job_title")
+          || normalizedTokens.includes("account.name");
+
+        // If it contains canonical variables (including aliases), validate and interpolate them
+        if (usesCanonicalOpeningTokens) {
+
+          // Validate required variables for canonical opening (skip for test sessions)
+          if (!session.isTestSession) {
+            const validation = validateOpeningMessageVariables(
+              {
+                fullName: contactInfo?.fullName,
+                firstName: contactInfo?.firstName,
+                lastName: contactInfo?.lastName,
+                jobTitle: contactInfo?.jobTitle,
+              },
+              {
+                name: contactInfo?.companyName || contactInfo?.company,
+              }
+            );
+
+            if (!validation.valid) {
+              console.error(`${LOG_PREFIX} ❌ ${validation.message}`);
+              console.error(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')}`);
+              // BLOCK THE CALL - do not proceed with incomplete data
+              await endCall(session.callId, 'error');
+              return;
+            }
+          }
+
+          // For test sessions, FORCE the canonical opening to ensure identity verification behavior
+          if (session.isTestSession) {
+            const debugCompanyName = contactInfo?.companyName || contactInfo?.company;
+            console.log(`${LOG_PREFIX} ðŸ§ª Interpolating Canonical Opening. Company Name: "${debugCompanyName}", FullName: "${contactInfo?.fullName}"`);
+            
+            openingScript = interpolateCanonicalOpening(
+              {
+                fullName: contactInfo?.fullName,
+                firstName: contactInfo?.firstName,
+                lastName: contactInfo?.lastName,
+                jobTitle: contactInfo?.jobTitle,
+              },
+              {
+                name: contactInfo?.companyName || contactInfo?.company,
+              }
+            );
+            console.log(`${LOG_PREFIX} ✅ Test session - forcing canonical gatekeeper-first opening: "${openingScript}"`);
+          } else {
+            // Interpolate the canonical opening with validated data
+            openingScript = interpolateCanonicalOpening(
+              {
+                fullName: contactInfo?.fullName,
+                firstName: contactInfo?.firstName,
+                lastName: contactInfo?.lastName,
+                jobTitle: contactInfo?.jobTitle,
+              },
+              {
+                name: contactInfo?.companyName || contactInfo?.company,
+              }
+            );
+            console.log(`${LOG_PREFIX} ✅ Canonical opening variables validated and interpolated`);
+          }
+        } else {
+          // Custom message without canonical variables - interpolate allowed tokens
+          openingScript = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
+        }
+      } else {
+        // No custom message - use canonical default with validation
+        let useGenericOpening = false;
+
+        const validation = validateOpeningMessageVariables(
+          {
+            fullName: contactInfo?.fullName,
+            firstName: contactInfo?.firstName,
+            lastName: contactInfo?.lastName,
+            jobTitle: contactInfo?.jobTitle,
+          },
+          {
+            name: contactInfo?.companyName || contactInfo?.company,
+          }
+        );
+
+        if (!validation.valid) {
+          console.warn(`${LOG_PREFIX} ⚠️ ${validation.message}`);
+          console.warn(`${LOG_PREFIX} Missing: ${validation.missingVariables.join(', ')} - Falling back to generic opening`);
+          useGenericOpening = true;
+        }
+
+        // For validation failures, use a simple fallback opening
+        if (useGenericOpening) {
+          const testContactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+          openingScript = `Hello, may I speak with ${testContactName} please?`;
+          console.log(`${LOG_PREFIX} ⚠️ Validation failed - using simple opening message`);
+        } else {
+          // Use the canonical opening with interpolation
+          openingScript = interpolateCanonicalOpening(
+            {
+              fullName: contactInfo?.fullName,
+              firstName: contactInfo?.firstName,
+              lastName: contactInfo?.lastName,
+              jobTitle: contactInfo?.jobTitle,
+            },
+            {
+              name: contactInfo?.companyName || contactInfo?.company,
+            }
+          );
+          console.log(`${LOG_PREFIX} ✅ Using canonical gatekeeper-first opening`);
+        }
+      }
+
+      if (!openingScript || !openingScript.trim()) {
+        const fallbackName = contactInfo?.fullName || contactInfo?.firstName || "there";
+        openingScript = `Hello, may I speak with ${fallbackName} please?`;
+        console.warn(`${LOG_PREFIX} Opening script empty after interpolation; using fallback greeting`);
+      }
+
+      // Wait longer before sending greeting to ensure Telnyx stream is fully established
+      // This prevents audio being generated before the stream is ready
+      setTimeout(() => {
+        if (!session.isActive) {
+          console.log(`${LOG_PREFIX} Session no longer active, skipping greeting`);
+          return;
+        }
+        
+        if (openaiWs.readyState !== WebSocket.OPEN) {
+          console.warn(`${LOG_PREFIX} âš ï¸  OpenAI WebSocket closed before greeting sent`);
+          return;
+        }
+        
+        if (session.telnyxWs?.readyState !== WebSocket.OPEN) {
+          console.warn(`${LOG_PREFIX} âš ï¸  Telnyx WebSocket not ready, delaying greeting...`);
+          // Retry after another delay
+          setTimeout(() => {
+            if (session.isActive && openaiWs.readyState === WebSocket.OPEN && session.telnyxWs?.readyState === WebSocket.OPEN) {
+              console.log(`${LOG_PREFIX} ???????  Sending greeting (delayed): "${openingScript.substring(0, 50)}..."`);
+              sendOpeningMessage(openaiWs, openingScript);
+            } else {
+              console.error(`${LOG_PREFIX} âŒ Stream still not ready after delay, greeting aborted`);
+            }
+          }, 1000);
+        } else {
+          console.log(`${LOG_PREFIX} ???????  Sending greeting: "${openingScript.substring(0, 50)}..."`);
+          sendOpeningMessage(openaiWs, openingScript);
+        }
+      }, 400); // Optimized from 1500ms -> 800ms -> 400ms for faster caller experience
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Failed to initialize OpenAI session for call ${session.callId}:`, error);
+      await endCall(session.callId, 'error');
+    }
+  });
+
+    openaiWs.on("message", async (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        await handleOpenAIMessage(session, message);
+      } catch (error) {
+        console.error(`${LOG_PREFIX} Error parsing OpenAI message:`, error);
+      }
+    });
+
+    openaiWs.on("close", () => {
+      console.log(`${LOG_PREFIX} OpenAI WebSocket closed for call: ${session.callId}`);
+      session.openaiWs = null;
+    });
+
+    openaiWs.on("error", async (error) => {
+      console.error(`${LOG_PREFIX} OpenAI WebSocket error for call ${session.callId}:`, error);
+      // OpenAI connection failed - tear down Telnyx session and release locks
+      console.log(`${LOG_PREFIX} OpenAI handshake failed, terminating session and releasing locks`);
+      await endCall(session.callId, 'error');
+    });
+
+    // Set a connection timeout - if OpenAI doesn't connect within 10 seconds, abort
+    const connectionTimeout = setTimeout(async () => {
+      if (openaiWs.readyState !== WebSocket.OPEN) {
+        console.error(`${LOG_PREFIX} OpenAI connection timeout for call ${session.callId}`);
+        openaiWs.close();
+        await endCall(session.callId, 'error');
+      }
+    }, 10000);
+
+    openaiWs.on("open", () => {
+      clearTimeout(connectionTimeout);
+      console.log(`${LOG_PREFIX} âœ… OpenAI Realtime connected for call: ${session.callId}`);
+      
+      // Process any buffered audio frames
+      if (session.audioFrameBuffer.length > 0) {
+        console.log(`${LOG_PREFIX} ðŸ“¤ Processing ${session.audioFrameBuffer.length} buffered audio frames...`);
+        // Note: Don't send buffered frames as they're already old
+        // Just clear them and start fresh with new audio
+        session.audioFrameBuffer = [];
+      }
+    });
+
+    session.openaiWs = openaiWs;
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to initialize OpenAI session:`, error);
+    // Clean up on initialization failure
+    await endCall(session.callId, 'error');
+  }
+}
+
+
+// Google Gemini Live Provider Integration
+// Uses the voice-providers abstraction for Google's real-time voice API
+
+// Google Gemini Live Provider Integration
+// Uses the voice-providers abstraction for Google's real-time voice API
+async function initializeGoogleSession(session: OpenAIRealtimeSession): Promise {
+  console.log(`${LOG_PREFIX} Initializing Google Gemini Live session for call: ${session.callId}`);
+
+  // Check for required environment variables
+  const apiKey = process.env.GOOGLE_AI_API_KEY || process.env.GEMINI_API_KEY;
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT_ID;
+
+  if (!apiKey && !projectId) {
+    console.error(`${LOG_PREFIX} ❌ GEMINI CONFIG ERROR: No API key or Project ID found`);
+    console.error(`${LOG_PREFIX} Set GEMINI_API_KEY or GOOGLE_AI_API_KEY in .env.local`);
+    await endCall(session.callId, 'error');
+    return;
+  }
+
+  console.log(`${LOG_PREFIX} Gemini config: apiKey=${apiKey ? 'present' : 'missing'}, projectId=${projectId || 'not set'}`);
+
+  try {
+    // Dynamically import to avoid circular dependencies
+    const { GeminiLiveProvider } = await import("./voice-providers/gemini-live-provider");
+    const { mapVoiceToProvider } = await import("./voice-providers/voice-provider.interface");
+
+    const provider = new GeminiLiveProvider();
+
+    // Connect to Gemini Live API
+    console.log(`${LOG_PREFIX} Connecting to Gemini Live API...`);
+    await provider.connect();
+    console.log(`${LOG_PREFIX} ✅ Connected to Gemini Live API`);
+
+    // Get campaign and agent config
+    const campaignConfig = await getCampaignConfig(session.campaignId);
+    let contactInfo = await getContactInfo(session.contactId);
+    const agentConfig = session.virtualAgentId ? await getVirtualAgentConfig(session.virtualAgentId) : null;
+
+    // For test sessions, fill in missing fields from test contact data
+    if (session.isTestSession && session.testContact) {
+      if (!contactInfo) {
+        contactInfo = {
+          id: session.contactId,
+          firstName: session.testContact.name?.split(' ')[0] || 'Test',
+          lastName: session.testContact.name?.split(' ').slice(1).join(' ') || 'Contact',
+          fullName: session.testContact.name || 'Test Contact',
+          jobTitle: session.testContact.title || 'Test Title',
+          email: session.testContact.email || 'test@example.com',
+          company: session.testContact.company || 'Test Company',
+          companyName: session.testContact.company || 'Test Company',
+          accountId: null,
+        };
+      } else if (!contactInfo.company && !contactInfo.companyName) {
+        const fallbackCompany = session.testContact.company || 'Test Company';
+        contactInfo.company = fallbackCompany;
+        contactInfo.companyName = fallbackCompany;
+        console.log(`${LOG_PREFIX} 🧪 [Gemini] Filled missing company from test contact: ${fallbackCompany}`);
+      }
+    }
+
+    // Merge agent settings - combine base settings with any overrides
+    const baseSettings = agentConfig?.settings as Partial | undefined;
+    const mergedBase = session.agentSettingsOverride
+      ? { ...baseSettings, ...session.agentSettingsOverride } as Partial
+      : baseSettings;
+    const agentSettings = mergeAgentSettings(mergedBase);
+
+    // Resolve org name for template interpolation - use campaign persona or fall back to Organization Brain
+    let resolvedOrgNameGemini = campaignConfig?.organizationName || campaignConfig?.companyName;
+    if (!resolvedOrgNameGemini) {
+      try {
+        const orgBrain = await getOrganizationBrain();
+        resolvedOrgNameGemini = orgBrain?.identity?.companyName || 'our organization';
+      } catch (e) {
+        console.warn(`${LOG_PREFIX} [Gemini] Could not fetch Organization Brain for org name:`, e);
+        resolvedOrgNameGemini = 'our organization';
+      }
+    }
+
+    // Build system prompt
+    const voiceTemplateValues = buildVoiceTemplateValues({
+      baseValues: session.voiceVariables,
+      contactInfo,
+      callerId: process.env.TELNYX_FROM_NUMBER || null,
+      orgName: resolvedOrgNameGemini,
+    });
+    const costSettings = agentSettings.advanced.costOptimization || DEFAULT_ADVANCED_SETTINGS.costOptimization;
+    const useCondensedPrompt = costSettings.useCondensedPrompt !== false;
+
+    // Debug logging for Gemini campaign context
+    console.log(`${LOG_PREFIX} [Gemini] Campaign Config:`, {
+      campaignId: campaignConfig?.id,
+      hasObjective: !!campaignConfig?.campaignObjective,
+      hasBrief: !!campaignConfig?.campaignContextBrief,
+      hasTalkingPoints: !!campaignConfig?.talkingPoints?.length,
+      talkingPointsCount: campaignConfig?.talkingPoints?.length || 0,
+      hasProductInfo: !!campaignConfig?.productServiceInfo,
+    });
+
+    const baseSystemPrompt = await buildSystemPrompt(
+      campaignConfig, contactInfo,
+      session.systemPromptOverride?.trim() || agentConfig?.systemPrompt || undefined,
+      useCondensedPrompt, undefined, agentConfig?.settings as VoiceAgentSettings | null,
+      session.callAttemptId, 1, session.isTestSession,
+      'google'  // Use Google/Gemini provider for prompt formatting
+    );
+    const systemPrompt = interpolateVoiceTemplate(baseSystemPrompt, voiceTemplateValues);
+
+    // Log system prompt length and key sections for debugging
+    console.log(`${LOG_PREFIX} [Gemini] System Prompt Stats:`, {
+      totalLength: systemPrompt.length,
+      hasCriticalInstructions: systemPrompt.includes(''),
+      hasCampaignContext: systemPrompt.includes('Campaign Context') || systemPrompt.includes('campaign_context'),
+      hasContactInfo: systemPrompt.includes('Prospect Information') || systemPrompt.includes(contactInfo?.firstName || 'N/A'),
+    });
+
+    // Configure Gemini provider
+    const voice = session.voiceOverride?.trim() || agentConfig?.voice || campaignConfig?.voice || "Kore";
+    const geminiVoice = mapVoiceToProvider(voice, 'google');
+
+    // Map tools to ProviderTool format
+    const providerTools = getAvailableTools(agentSettings.systemTools).map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters as { type: 'object'; properties: Record; required?: string[] },
+    }));
+
+    await provider.configure({
+      systemPrompt,
+      voice: geminiVoice,
+      inputAudioFormat: session.audioFormat,
+      outputAudioFormat: session.audioFormat,
+      tools: providerTools,
+      turnDetection: { type: 'server_vad', threshold: 0.5, silenceDurationMs: 800 }, // Optimized for natural conversation flow
+      temperature: 0.7,
+      maxResponseTokens: costSettings.maxResponseTokens || 512,
+      transcriptionEnabled: agentSettings.advanced.asr.transcriptionEnabled !== false,
+    });
+
+    // Event handlers: Audio from Gemini -> Telnyx
+    provider.on('audio:delta', (event: any) => {
+      if (!event?.audioBuffer || !(event.audioBuffer instanceof Buffer)) {
+        return;
+      }
+
+      enqueueTelnyxOutboundAudio(session, event.audioBuffer);
+      ensureTelnyxOutboundPacer(session);
+    });
+
+    provider.on('transcript:user', (event: any) => {
+      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true)
+        session.transcripts.push({ role: 'user', text: event.text, timestamp: event.timestamp });
+    });
+
+    provider.on('transcript:agent', (event: any) => {
+      if (event.isFinal && agentSettings.advanced.privacy?.noPiiLogging !== true)
+        session.transcripts.push({ role: 'assistant', text: event.text, timestamp: event.timestamp });
+    });
+
+    provider.on('function:call', async (event: any) => {
+      console.log(`${LOG_PREFIX} Gemini function call: ${event.name}`);
+      const result = await handleGeminiFunctionCall(session, event.name, event.args);
+      provider.respondToFunctionCall(event.callId, result);
+    });
+
+    provider.on('error', async (event: any) => {
+      console.error(`${LOG_PREFIX} Gemini error:`, event.message);
+      if (!event.recoverable) await endCall(session.callId, 'error');
+    });
+
+    provider.on('disconnected', async () => {
+      console.log(`${LOG_PREFIX} Gemini disconnected: ${session.callId}`);
+      if (session.isActive) await endCall(session.callId, 'error');
+    });
+
+    // Store provider for Telnyx audio routing
+    (session as any).geminiProvider = provider;
+
+    // Send opening message
+    let openingScript = getGeminiOpeningScript(session, contactInfo, agentConfig, campaignConfig, voiceTemplateValues);
+    if (!openingScript || !openingScript.trim()) {
+      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+      openingScript = `Hello, may I speak with ${fallbackName} please?`;
+      console.warn(`${LOG_PREFIX} Gemini opening empty after interpolation; using fallback greeting`);
+    }
+    // Wait briefly for setup to complete (usually fast)
+    setTimeout(() => {
+      if (session.isActive && provider.isConnected) {
+        console.log(`${LOG_PREFIX} Gemini opening: "${openingScript.substring(0, 50)}..."`);
+        provider.sendOpeningMessage(openingScript);
+      }
+    }, 200);
+
+    console.log(`${LOG_PREFIX} ✅ Google Gemini Live session initialized`);
+  } catch (error: any) {
+    console.error(`${LOG_PREFIX} ❌ Gemini init failed:`, error.message || error);
+    console.error(`${LOG_PREFIX} Stack:`, error.stack);
+    // Check for common errors
+    if (error.message?.includes('401') || error.message?.includes('UNAUTHENTICATED')) {
+      console.error(`${LOG_PREFIX} 🔑 Authentication error - check your GEMINI_API_KEY`);
+    }
+    if (error.message?.includes('timeout')) {
+      console.error(`${LOG_PREFIX} ⏱️ Connection timeout - Gemini API may be unreachable`);
+    }
+    await endCall(session.callId, 'error');
+  }
+}
+
+// Handle Gemini function calls
+async function handleGeminiFunctionCall(session: OpenAIRealtimeSession, name: string, args: Record): Promise {
+  switch (name) {
+    case 'submit_disposition': session.detectedDisposition = args.disposition as DispositionCode; return { success: true };
+    case 'submit_call_summary': session.callSummary = normalizeCallSummary(args); return { success: true };
+    case 'schedule_callback': return { success: true, scheduled: args.callback_datetime };
+    case 'transfer_to_human': session.detectedDisposition = 'qualified_lead'; return { success: true };
+    default: return { success: false, error: 'Unknown function' };
+  }
+}
+
+// Get Gemini opening script - matches OpenAI's canonical opening structure
+function getGeminiOpeningScript(session: OpenAIRealtimeSession, contactInfo: any, agentConfig: any, campaignConfig: any, voiceTemplateValues: Record): string {
+  // Debug logging to verify variables are passed correctly
+  console.log(`${LOG_PREFIX} [Gemini Opening] Contact Info:`, {
+    fullName: contactInfo?.fullName,
+    firstName: contactInfo?.firstName,
+    lastName: contactInfo?.lastName,
+    jobTitle: contactInfo?.jobTitle,
+    company: contactInfo?.company || contactInfo?.companyName,
+  });
+  console.log(`${LOG_PREFIX} [Gemini Opening] Voice Template Values:`, Object.keys(voiceTemplateValues || {}).length > 0 ? voiceTemplateValues : 'empty');
+
+  const customFirstMessage = session.firstMessageOverride?.trim()
+    || agentConfig?.firstMessage
+    || campaignConfig?.openingScript
+    || campaignConfig?.script;
+
+  console.log(`${LOG_PREFIX} [Gemini Opening] Custom First Message Source:`, {
+    hasOverride: !!session.firstMessageOverride?.trim(),
+    hasAgentFirst: !!agentConfig?.firstMessage,
+    hasCampaignOpening: !!campaignConfig?.openingScript,
+    hasCampaignScript: !!campaignConfig?.script,
+    message: customFirstMessage?.substring(0, 100) || 'none',
+  });
+
+  if (customFirstMessage) {
+    // Check for canonical opening tokens (same as OpenAI)
+    const normalizedTokens = extractTemplateVariables(customFirstMessage)
+      .map(normalizeVoiceTemplateToken)
+      .filter(Boolean);
+    const usesCanonicalOpeningTokens = normalizedTokens.includes("contact.full_name")
+      || normalizedTokens.includes("contact.job_title")
+      || normalizedTokens.includes("account.name");
+
+    console.log(`${LOG_PREFIX} [Gemini Opening] Template tokens:`, normalizedTokens, 'Uses canonical:', usesCanonicalOpeningTokens);
+
+    if (usesCanonicalOpeningTokens) {
+      // Use canonical opening interpolation
+    const result = interpolateCanonicalOpening(
+      {
+        fullName: contactInfo?.fullName,
+        firstName: contactInfo?.firstName,
+        lastName: contactInfo?.lastName,
+        jobTitle: contactInfo?.jobTitle,
+      },
+      {
+        name: contactInfo?.companyName || contactInfo?.company,
+      }
+    );
+    console.log(`${LOG_PREFIX} [Gemini Opening] Canonical result: "${result}"`);
+    if (!result?.trim()) {
+      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+      return `Hello, may I speak with ${fallbackName} please?`;
+    }
+    return result;
+  }
+
+    // Custom message without canonical variables - interpolate allowed tokens
+    const result = interpolateVoiceTemplate(customFirstMessage, voiceTemplateValues);
+    console.log(`${LOG_PREFIX} [Gemini Opening] Interpolated result: "${result}"`);
+    if (!result?.trim()) {
+      const fallbackName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+      return `Hello, may I speak with ${fallbackName} please?`;
+    }
+    return result;
+  }
+
+  // Default canonical opening for gatekeeper scenarios
+  // Use the same format as OpenAI for consistency
+  const contactName = contactInfo?.fullName || contactInfo?.firstName || 'there';
+  const result = `Hello, may I speak with ${contactName} please?`;
+  console.log(`${LOG_PREFIX} [Gemini Opening] Default result: "${result}"`);
+  return result;
+}
+
+
+function sendOpeningMessage(ws: WebSocket, openingScript: string): void {
+  // Use response.create with explicit instructions to ensure the opening message is spoken exactly
+  // This is more reliable than creating a user message asking the model to "say exactly"
+  // The instructions field overrides the session instructions for this specific response
+  //
+  // CRITICAL: The model must ONLY say the exact greeting and then STOP completely.
+  // It must NOT predict, assume, or continue with phrases like "okay, great" or acknowledgements.
+  // The model must wait for the actual human to respond before saying anything else.
+  ws.send(JSON.stringify({
+    type: "response.create",
+    response: {
+      modalities: ["text", "audio"],
+      instructions: `CRITICAL INSTRUCTION: Say ONLY this exact opening message, then STOP completely and wait in ABSOLUTE SILENCE.
+
+Say exactly this and nothing more: "${openingScript}"
+
+CRITICAL RULES - VIOLATION OF ANY RULE IS UNACCEPTABLE:
+1. Do NOT add any greetings like "Hello" or "Hi" before or after unless they are part of the exact message above.
+2. Do NOT ask follow-up questions after the opening.
+3. Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement.
+4. Do NOT assume, predict, or anticipate the person's response.
+5. Do NOT continue with transition phrases.
+6. Do NOT assume the person confirmed their identity - you MUST hear them EXPLICITLY say "yes" or their name.
+7. Do NOT proceed with the pitch until you HEAR explicit confirmation.
+
+After saying this exact message, you MUST:
+- STOP speaking immediately
+- Wait in complete silence
+- Listen for the person's ACTUAL spoken response
+- The NEXT words must come from THEM, not from you
+- If you hear silence, continue waiting - do NOT fill the silence`,
+    }
+  }));
+}
+
+function scheduleSoftTimeout(session: OpenAIRealtimeSession): void {
+  const timeoutSeconds = session.agentSettings?.advanced.softTimeout.responseTimeoutSeconds ?? -1;
+  if (timeoutSeconds  {
+    if (!session.isActive) {
+      return;
+    }
+
+    if (session.responseStartTime?.getTime() !== responseStart.getTime()) {
+      return;
+    }
+
+    if (session.softTimeoutTriggered) {
+      return;
+    }
+
+    if (session.openaiWs?.readyState === WebSocket.OPEN) {
+      session.softTimeoutTriggered = true;
+      session.openaiWs.send(JSON.stringify({
+        type: "response.create",
+        response: {
+          instructions: "Provide a brief acknowledgement like \"One moment, please.\" then continue.",
+        },
+      }));
+    }
+  }, timeoutSeconds * 1000);
+}
+
+function clearSoftTimeout(session: OpenAIRealtimeSession): void {
+  if (session.responseTimeoutHandle) {
+    clearTimeout(session.responseTimeoutHandle);
+    session.responseTimeoutHandle = null;
+  }
+  session.responseStartTime = null;
+  session.softTimeoutTriggered = false;
+}
+
+async function handleOpenAIMessage(session: OpenAIRealtimeSession, message: any): Promise {
+  const { type } = message;
+  const settings = session.agentSettings ?? { systemTools: DEFAULT_SYSTEM_TOOLS, advanced: DEFAULT_ADVANCED_SETTINGS };
+  const allowTranscripts = !settings.advanced.privacy.noPiiLogging;
+
+  switch (type) {
+    // =========================================================================
+    // RESPONSE LIFECYCLE EVENTS
+    // =========================================================================
+    case "response.created":
+      // Track response ID and mark response as in progress
+      session.currentResponseId = message.response?.id || null;
+      session.isResponseInProgress = true;
+      session.audioPlaybackMs = 0;
+      session.lastAudioDeltaTimestamp = Date.now();
+      console.log(`${LOG_PREFIX} Response created (id: ${session.currentResponseId}) for call: ${session.callId}`);
+      scheduleSoftTimeout(session);
+      break;
+
+    case "response.output_item.added":
+      // Track the current output item being generated
+      if (message.item?.id) {
+        session.currentResponseItemId = message.item.id;
+        console.log(`${LOG_PREFIX} Response output item added (id: ${message.item.id}, type: ${message.item.type}) for call: ${session.callId}`);
+      }
+      break;
+
+    case "response.content_part.added":
+      // Content part started - could be audio or text
+      if (settings.advanced.clientEvents.agentResponse) {
+        console.log(`${LOG_PREFIX} Response content part added (type: ${message.part?.type}) for call: ${session.callId}`);
+      }
+      break;
+
+    case "response.audio.delta":
+      if (message.delta) {
+        // Decode base64 audio from OpenAI for tracking purposes
+        const audioBuffer = Buffer.from(message.delta, 'base64');
+
+        session.audioFrameCount++;
+        session.audioBytesSent += audioBuffer.length;
+        session.lastAudioFrameTime = new Date();
+
+        // Cost tracking: record outgoing audio
+        recordAudioOutput(session.callId, audioBuffer.length);
+
+        // Track audio playback time for truncation (G.711 ulaw: 8000 samples/sec, 1 byte/sample)
+        // Each byte = 0.125ms of audio
+        const audioDurationMs = audioBuffer.length / 8; // 8 bytes per ms at 8kHz
+        session.audioPlaybackMs += audioDurationMs;
+        session.lastAudioDeltaTimestamp = Date.now();
+
+        if (session.audioFrameCount % 10 === 0 || session.audioFrameCount === 1) {
+          const packetDuration = Math.round(audioBuffer.length / 8); 
+          console.log(`${LOG_PREFIX} Audio frames received: ${session.audioFrameCount}, bytes: ${session.audioBytesSent} (Last packet: ${audioBuffer.length} bytes / ~${packetDuration}ms), playback: ${Math.round(session.audioPlaybackMs)}ms, call: ${session.callId}`);
+        }
+
+        // Enqueue decoded μ-law bytes and let the pacer send exact 20ms (160-byte) frames.
+        // Never send partial frames and never send large OpenAI chunks as a single Telnyx media event.
+        if (session.telnyxWs?.readyState === WebSocket.OPEN) {
+          if (!session.streamSid) {
+            console.warn(`${LOG_PREFIX} WARN: No stream_id available yet - buffering audio for call: ${session.callId}`);
+            if (session.audioFrameBuffer.length  20) {
+            console.warn(`${LOG_PREFIX} WARN: Large buffer accumulating (${session.audioFrameBuffer.length} frames), possible connection issue`);
+          }
+        }
+      } else {
+        console.warn(`${LOG_PREFIX} WARN: Received empty audio delta for call: ${session.callId}`);
+      }
+      break;
+
+    case "response.audio.done":
+      console.log(`${LOG_PREFIX} Response audio complete (total: ${Math.round(session.audioPlaybackMs)}ms) for call: ${session.callId}`);
+      break;
+
+    case "response.audio_transcript.delta":
+      if (message.delta && allowTranscripts && settings.advanced.clientEvents.agentResponse) {
+        const lastTranscript = session.transcripts[session.transcripts.length - 1];
+        if (lastTranscript?.role === 'assistant') {
+          lastTranscript.text += message.delta;
+        } else {
+          session.transcripts.push({
+            role: 'assistant',
+            text: message.delta,
+            timestamp: new Date()
+          });
+        }
+      }
+      break;
+
+    case "response.audio_transcript.done":
+      if (allowTranscripts && settings.advanced.clientEvents.agentResponse) {
+        console.log(`${LOG_PREFIX} Response audio transcript complete for call: ${session.callId}`);
+      }
+      break;
+
+    case "response.text.delta":
+      // Handle text-only responses (when output_modalities includes "text")
+      if (message.delta && allowTranscripts && settings.advanced.clientEvents.agentResponse) {
+        const lastTranscript = session.transcripts[session.transcripts.length - 1];
+        if (lastTranscript?.role === 'assistant') {
+          lastTranscript.text += message.delta;
+        } else {
+          session.transcripts.push({
+            role: 'assistant',
+            text: message.delta,
+            timestamp: new Date()
+          });
+        }
+      }
+      break;
+
+    case "response.text.done":
+      if (allowTranscripts && settings.advanced.clientEvents.agentResponse) {
+        console.log(`${LOG_PREFIX} Response text complete for call: ${session.callId}`);
+      }
+      break;
+
+    case "response.content_part.done":
+      // Content part finished
+      if (settings.advanced.clientEvents.agentResponse) {
+        console.log(`${LOG_PREFIX} Response content part done for call: ${session.callId}`);
+      }
+      break;
+
+    case "response.output_item.done":
+      // Output item finished
+      console.log(`${LOG_PREFIX} Response output item done (id: ${message.item?.id}) for call: ${session.callId}`);
+      break;
+
+    case "response.done":
+      // Full response complete
+      session.isResponseInProgress = false;
+      session.currentResponseId = null;
+      session.currentResponseItemId = null;
+      console.log(`${LOG_PREFIX} Response complete for call: ${session.callId}`);
+      clearSoftTimeout(session);
+      break;
+
+    case "response.cancelled":
+      // Response was cancelled (e.g., due to user interruption)
+      session.isResponseInProgress = false;
+      console.log(`${LOG_PREFIX} Response cancelled for call: ${session.callId}`);
+      clearSoftTimeout(session);
+      break;
+
+    // =========================================================================
+    // CONVERSATION ITEM EVENTS
+    // =========================================================================
+    case "conversation.item.created":
+      console.log(`${LOG_PREFIX} Conversation item created (id: ${message.item?.id}, type: ${message.item?.type}) for call: ${session.callId}`);
+      break;
+
+    case "conversation.item.truncated":
+      // Server confirms truncation of audio item
+      console.log(`${LOG_PREFIX} Conversation item truncated (id: ${message.item_id}, audio_end_ms: ${message.audio_end_ms}) for call: ${session.callId}`);
+      break;
+
+    case "conversation.item.deleted":
+      console.log(`${LOG_PREFIX} Conversation item deleted (id: ${message.item_id}) for call: ${session.callId}`);
+      break;
+
+    case "conversation.item.input_audio_transcription.completed":
+      if (message.transcript && allowTranscripts && settings.advanced.clientEvents.userTranscript) {
+        console.log(`${LOG_PREFIX} User: ${message.transcript}`);
+
+        // INTELLIGENT AUDIO DETECTION - Determine if this is human, IVR, or music
+        const audioType = detectAudioType(message.transcript, session);
+        session.audioDetection.audioPatterns.push({
+          timestamp: new Date(),
+          transcript: message.transcript,
+          type: audioType.type,
+          confidence: audioType.confidence,
+        });
+        session.audioDetection.lastTranscriptCheckTime = new Date();
+
+        // Only process transcript if it's human speech
+        if (audioType.type === 'human') {
+          session.transcripts.push({
+            role: 'user',
+            text: message.transcript,
+            timestamp: new Date()
+          });
+        } else if (audioType.type === 'ivr' || audioType.type === 'music') {
+          console.log(`${LOG_PREFIX} 🚫 Ignoring non-human audio: ${audioType.type} (confidence: ${audioType.confidence.toFixed(2)})`);
+          // Don't add to transcripts, don't respond
+          break;
+        }
+
+        // Check for identity confirmation in user response
+        // This prevents the agent from re-asking identity mid-conversation
+        if (!session.conversationState.identityConfirmed) {
+          const identityConfirmed = detectIdentityConfirmation(message.transcript);
+          if (identityConfirmed) {
+            session.conversationState.identityConfirmed = true;
+            session.conversationState.identityConfirmedAt = new Date();
+            session.conversationState.currentState = 'RIGHT_PARTY_INTRO';
+            session.conversationState.stateHistory.push('RIGHT_PARTY_INTRO');
+            console.log(`${LOG_PREFIX} ✅ Identity CONFIRMED for call: ${session.callId} - State locked, will not re-verify`);
+
+            // Inject a system reminder to prevent identity re-verification
+            // Use setImmediate to not block the audio processing pipeline
+            setImmediate(() => {
+              injectIdentityLockReminder(session).catch(err => {
+                console.error(`${LOG_PREFIX} Error injecting identity lock:`, err);
+              });
+            });
+          }
+        }
+
+        // INTELLIGENT VOICEMAIL DETECTION
+        // Check if detected audio pattern indicates voicemail
+        if (audioType.type === 'ivr') {
+          // Check if IVR message is actually a voicemail greeting
+          const lowerTranscript = message.transcript.toLowerCase();
+          const voicemailIndicators = [
+            'leave a message',
+            'after the beep',
+            'after the tone',
+            'not available',
+            'cannot take your call',
+            'please leave',
+            'record your message',
+            'voicemail',
+            'mailbox'
+          ];
+
+          const isVoicemail = voicemailIndicators.some(phrase => lowerTranscript.includes(phrase));
+          if (isVoicemail && !session.detectedDisposition) {
+            console.log(`${LOG_PREFIX} VOICEMAIL DETECTED - Ending call: ${session.callId}`);
+            session.detectedDisposition = 'voicemail';
+            session.callOutcome = 'voicemail';
+            await endCall(session.callId, 'voicemail');
+            break;
+          }
+        }
+      }
+      break;
+
+    case "conversation.item.input_audio_transcription.failed":
+      console.warn(`${LOG_PREFIX} Input audio transcription failed for call: ${session.callId}`, message.error);
+      break;
+
+    // =========================================================================
+    // INPUT AUDIO BUFFER EVENTS
+    // =========================================================================
+    case "input_audio_buffer.committed":
+      console.log(`${LOG_PREFIX} Input audio buffer committed (item_id: ${message.item_id}) for call: ${session.callId}`);
+      break;
+
+    case "input_audio_buffer.cleared":
+      console.log(`${LOG_PREFIX} Input audio buffer cleared for call: ${session.callId}`);
+      break;
+
+    case "input_audio_buffer.speech_started":
+      console.log(`${LOG_PREFIX} Speech detected on call: ${session.callId}`);
+      session.lastUserSpeechTime = new Date();
+
+      // Handle user interruption - cancel current response and truncate
+      // IMPORTANT: Only interrupt if the AI has been speaking for at least 1.5 seconds
+      // This prevents:
+      // 1. Interrupting the opening greeting too early
+      // 2. False interruptions from echo/noise during short responses
+      // 3. The AI stopping mid-sentence on brief background sounds
+      const MIN_PLAYBACK_BEFORE_INTERRUPT_MS = 1500;
+      if (session.isResponseInProgress && session.currentResponseItemId) {
+        if (session.audioPlaybackMs >= MIN_PLAYBACK_BEFORE_INTERRUPT_MS) {
+          await handleUserInterruption(session);
+        } else {
+          console.log(`${LOG_PREFIX} Ignoring speech_started - only ${session.audioPlaybackMs}ms of audio played (need ${MIN_PLAYBACK_BEFORE_INTERRUPT_MS}ms)`);
+        }
+      }
+      break;
+
+    case "input_audio_buffer.speech_stopped":
+      console.log(`${LOG_PREFIX} Speech ended on call: ${session.callId}`);
+      session.lastUserSpeechTime = new Date();
+      // Note: With semantic_vad enabled, OpenAI will automatically commit and create response
+      // Only manually trigger if VAD is disabled
+      break;
+
+    // =========================================================================
+    // FUNCTION CALLING EVENTS
+    // =========================================================================
+    case "response.function_call_arguments.delta":
+      // Streaming function call arguments - useful for showing progress
+      break;
+
+    case "response.function_call_arguments.done":
+      await handleFunctionCall(session, message);
+      break;
+
+    // =========================================================================
+    // RATE LIMITS
+    // =========================================================================
+    case "rate_limits.updated":
+      // Track rate limits for monitoring and throttling
+      if (message.rate_limits) {
+        const limits = message.rate_limits;
+        session.rateLimits = {
+          requestsRemaining: limits.find((l: any) => l.name === 'requests')?.remaining ?? 0,
+          requestsLimit: limits.find((l: any) => l.name === 'requests')?.limit ?? 0,
+          tokensRemaining: limits.find((l: any) => l.name === 'tokens')?.remaining ?? 0,
+          tokensLimit: limits.find((l: any) => l.name === 'tokens')?.limit ?? 0,
+          resetAt: null, // Rate limits reset info if available
+        };
+
+        // Warn if approaching rate limits
+        const requestsRemaining = session.rateLimits.requestsRemaining;
+        const tokensRemaining = session.rateLimits.tokensRemaining;
+        if (requestsRemaining  {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  console.log(`${LOG_PREFIX} Handling user interruption for call: ${session.callId}`);
+
+  try {
+    // 1. Cancel the in-progress response
+    session.openaiWs.send(JSON.stringify({
+      type: "response.cancel"
+    }));
+    console.log(`${LOG_PREFIX} Sent response.cancel for call: ${session.callId}`);
+
+    // 2. Truncate the conversation item to mark how much audio was actually played
+    // This tells the model where the user interrupted so it can continue naturally
+    if (session.currentResponseItemId && session.audioPlaybackMs > 0) {
+      session.openaiWs.send(JSON.stringify({
+        type: "conversation.item.truncate",
+        item_id: session.currentResponseItemId,
+        content_index: 0, // First content part (audio)
+        audio_end_ms: Math.round(session.audioPlaybackMs)
+      }));
+      console.log(`${LOG_PREFIX} Sent conversation.item.truncate (item: ${session.currentResponseItemId}, audio_end_ms: ${Math.round(session.audioPlaybackMs)}) for call: ${session.callId}`);
+    }
+
+    // 3. Clear any buffered audio that hasn't been sent yet
+    session.audioFrameBuffer = [];
+
+    // Also clear any queued outbound audio to Telnyx.
+    session.telnyxOutboundBuffer = Buffer.alloc(0);
+    session.telnyxOutboundLastSendAt = null;
+
+    // Reset response tracking
+    session.isResponseInProgress = false;
+    session.audioPlaybackMs = 0;
+
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error handling user interruption for call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Cancel the current response without truncation.
+ * Use this for programmatic cancellation (not user interruption).
+ */
+function cancelCurrentResponse(session: OpenAIRealtimeSession): void {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  if (!session.isResponseInProgress) {
+    return;
+  }
+
+  try {
+    session.openaiWs.send(JSON.stringify({
+      type: "response.cancel"
+    }));
+    session.isResponseInProgress = false;
+    console.log(`${LOG_PREFIX} Cancelled current response for call: ${session.callId}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error cancelling response for call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Clear the input audio buffer.
+ * Useful for push-to-talk implementations or when starting fresh input.
+ */
+function clearInputAudioBuffer(session: OpenAIRealtimeSession): void {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  try {
+    session.openaiWs.send(JSON.stringify({
+      type: "input_audio_buffer.clear"
+    }));
+    console.log(`${LOG_PREFIX} Cleared input audio buffer for call: ${session.callId}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error clearing input audio buffer for call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Create an out-of-band response that doesn't affect the main conversation.
+ * Useful for background classification, moderation, or parallel processing.
+ */
+function createOutOfBandResponse(
+  session: OpenAIRealtimeSession,
+  options: {
+    instructions: string;
+    metadata?: Record;
+    outputModalities?: ('text' | 'audio')[];
+  }
+): void {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  try {
+    session.openaiWs.send(JSON.stringify({
+      type: "response.create",
+      response: {
+        conversation: "none", // Out-of-band - won't be added to conversation
+        metadata: options.metadata || {},
+        output_modalities: options.outputModalities || ["text"],
+        instructions: options.instructions,
+      }
+    }));
+    console.log(`${LOG_PREFIX} Created out-of-band response for call: ${session.callId}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error creating out-of-band response for call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Detect if user's response confirms their identity.
+ * This matches common affirmative responses to identity questions.
+ */
+function detectIdentityConfirmation(transcript: string): boolean {
+  const normalizedText = transcript.toLowerCase().trim();
+
+  // Short affirmatives that confirm identity
+  const identityConfirmPatterns = [
+    /^yes$/,
+    /^yeah$/,
+    /^yep$/,
+    /^yup$/,
+    /^speaking$/,
+    /^this is (me|him|her|they|them)$/,
+    /^that'?s me$/,
+    /^it'?s me$/,
+    /^i am$/,
+    /^i am \w+/,              // "I am Jordan", "I am John Smith"
+    /^i'?m \w+/,              // "I'm Jordan"
+    /\bi am \w+/,             // "Yes I am Jordan", "I said I am Jordan"
+    /\bi'?m \w+/,             // "Yes I'm Jordan"
+    /^that'?s correct$/,
+    /^correct$/,
+    /^right$/,
+    /^yes[,.]?\s*(this is|speaking|that'?s me|i am|i'm)/,
+    /^hi[,.]?\s*(yes|this is|speaking|i am|i'm)/,
+    /speaking$/,
+    /this is \w+(\s+\w+)?/,   // "This is John" or "This is John Smith" anywhere in text
+    /\w+ speaking$/,          // "John speaking"
+    /\w+ here$/,              // "Jordan here"
+    /^you('ve)?\s*(got|reached|found)\s*(me|him|her)/,
+    /you('re)?\s*(talking|speaking)\s*(to|with)\s*(me|him|her|\w+)/,  // "You're talking to Jordan"
+    /why\s+(are\s+)?you\s+ask/,  // "Why are you asking" implies frustration at re-asking = already confirmed
+    /i\s+(said|told|already)/,   // "I said...", "I told you...", "I already..." = frustration at repeating
+  ];
+
+  for (const pattern of identityConfirmPatterns) {
+    if (pattern.test(normalizedText)) {
+      return true;
+    }
+  }
+
+  // Check for name confirmation patterns (user says their own name)
+  // e.g., "Yes, this is John", "John here", "This is John Smith"
+  if (normalizedText.includes('yes') || normalizedText.includes('hi') || normalizedText.includes('hello')) {
+    // If they're responding with yes/hi and it's short, likely confirmation
+    if (normalizedText.length = 2 && words.length = 0.6) {
+    console.log(`${LOG_PREFIX} 👤 HUMAN SPEECH DETECTED: "${normalizedText.substring(0, 50)}..." (confidence: ${humanConfidence.toFixed(2)})`);
+    return { type: 'human', confidence: Math.min(humanConfidence, 0.95) };
+  }
+
+  // Couldn't determine with high confidence
+  console.log(`${LOG_PREFIX} ❓ UNKNOWN AUDIO: "${normalizedText.substring(0, 50)}..."`);
+  return { type: 'unknown', confidence: 0.5 };
+}
+
+/**
+ * Check if we should send the AI's greeting based on audio detection
+ * Returns true if human speech detected, false if IVR/music/hold
+ */
+function shouldSendGreeting(session: OpenAIRealtimeSession): boolean {
+  // If we already sent greeting, don't send again
+  if (session.audioDetection.hasGreetingSent) {
+    return false;
+  }
+
+  // If human already detected, allow greeting
+  if (session.audioDetection.humanDetected) {
+    return true;
+  }
+
+  // Check recent audio patterns
+  const recentPatterns = session.audioDetection.audioPatterns.slice(-5); // Last 5 patterns
+
+  if (recentPatterns.length === 0) {
+    // No data yet, wait for first transcript
+    return false;
+  }
+
+  // Count human vs non-human patterns
+  const humanCount = recentPatterns.filter(p => p.type === 'human').length;
+  const ivrMusicCount = recentPatterns.filter(p => p.type === 'ivr' || p.type === 'music').length;
+
+  // If we detect IVR or music, don't greet yet
+  if (ivrMusicCount > 0) {
+    console.log(`${LOG_PREFIX} 🚫 Not greeting - IVR/music detected (${ivrMusicCount} patterns)`);
+    return false;
+  }
+
+  // If we have at least 2 human speech patterns, it's safe to greet
+  if (humanCount >= 2) {
+    console.log(`${LOG_PREFIX} ✅ Ready to greet - ${humanCount} human speech patterns detected`);
+    session.audioDetection.humanDetected = true;
+    session.audioDetection.humanDetectedAt = new Date();
+    return true;
+  }
+
+  // Need more data
+  console.log(`${LOG_PREFIX} ⏳ Waiting for more audio data (${humanCount} human, ${ivrMusicCount} ivr/music, ${recentPatterns.length} total)`);
+  return false;
+}
+
+/**
+ * Inject a system-level reminder into the conversation to prevent identity re-verification.
+ * Uses conversation.item.create to add a system message that reinforces the identity lock.
+ */
+async function injectIdentityLockReminder(session: OpenAIRealtimeSession): Promise {
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  try {
+    // Add a system message to reinforce identity lock
+    session.openaiWs.send(JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `[SYSTEM STATE UPDATE] Identity has been CONFIRMED. The person on the line is the intended contact.
+
+CRITICAL RULES NOW IN EFFECT:
+1. NEVER ask "Am I speaking with..." or any identity verification question again
+2. NEVER return to identity confirmation - this is PERMANENTLY LOCKED
+3. If the contact says "I don't know" or hesitates, treat it as uncertainty about the TOPIC, not about WHO they are
+4. Proceed with the conversation naturally - move to introduction and context framing
+5. Any ambiguity in responses is about the subject matter, not identity
+
+Current state: RIGHT_PARTY_INTRO - proceed with acknowledging their time and explaining the call purpose.`
+          }
+        ]
+      }
+    }));
+
+    console.log(`${LOG_PREFIX} Injected identity lock reminder for call: ${session.callId}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error injecting identity lock reminder for call ${session.callId}:`, error);
+  }
+}
+
+/**
+ * Update conversation state and inject state transition reminder if needed.
+ */
+function updateConversationState(
+  session: OpenAIRealtimeSession,
+  newState: OpenAIRealtimeSession['conversationState']['currentState']
+): void {
+  const oldState = session.conversationState.currentState;
+  if (oldState === newState) return;
+
+  session.conversationState.currentState = newState;
+  session.conversationState.stateHistory.push(newState);
+  console.log(`${LOG_PREFIX} State transition: ${oldState} → ${newState} for call: ${session.callId}`);
+}
+
+function normalizeCallSummary(args: unknown): CallSummary | null {
+  if (!args || typeof args !== "object") {
+    return null;
+  }
+
+  const input = args as Record;
+  const summaryText = typeof input.summary === "string" ? input.summary.trim() : "";
+  if (!summaryText) {
+    return null;
+  }
+
+  const engagement = typeof input.engagement_level === "string" ? input.engagement_level : "";
+  const sentiment = typeof input.sentiment === "string" ? input.sentiment : "";
+  const followUp = typeof input.follow_up_consent === "string" ? input.follow_up_consent : "";
+
+  return {
+    summary: summaryText,
+    engagement_level: (["low", "medium", "high"].includes(engagement) ? engagement : "low") as CallSummary["engagement_level"],
+    sentiment: (["guarded", "neutral", "reflective", "positive"].includes(sentiment) ? sentiment : "neutral") as CallSummary["sentiment"],
+    time_pressure: Boolean(input.time_pressure),
+    primary_challenge: typeof input.primary_challenge === "string" ? input.primary_challenge.trim() : undefined,
+    follow_up_consent: (["yes", "no", "unknown"].includes(followUp) ? followUp : "unknown") as CallSummary["follow_up_consent"],
+    next_step: typeof input.next_step === "string" ? input.next_step.trim() : undefined,
+  };
+}
+
+function formatCallSummary(summary: CallSummary): string {
+  const lines: string[] = ["[AI Call Summary]", `Summary: ${summary.summary}`];
+
+  lines.push(`Engagement: ${summary.engagement_level}`);
+  lines.push(`Sentiment: ${summary.sentiment}`);
+  lines.push(`Time pressure: ${summary.time_pressure ? "yes" : "no"}`);
+  if (summary.primary_challenge) {
+    lines.push(`Primary challenge: ${summary.primary_challenge}`);
+  }
+  lines.push(`Follow-up consent: ${summary.follow_up_consent}`);
+  if (summary.next_step) {
+    lines.push(`Next step: ${summary.next_step}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatTranscriptNotes(transcripts: OpenAIRealtimeSession["transcripts"]): string | null {
+  if (!transcripts.length) {
+    return null;
+  }
+
+  const transcriptText = transcripts.map(t => `${t.role}: ${t.text}`).join("\n");
+  if (!transcriptText.trim()) {
+    return null;
+  }
+
+  return `[Transcript]\n${transcriptText}`;
+}
+
+function buildCallNotes(session: OpenAIRealtimeSession, allowPii: boolean): string | null {
+  if (!allowPii) {
+    return null;
+  }
+
+  const parts: string[] = [];
+
+  if (session.callSummary) {
+    parts.push(formatCallSummary(session.callSummary));
+  }
+
+  const transcriptBlock = formatTranscriptNotes(session.transcripts);
+  if (transcriptBlock) {
+    parts.push(transcriptBlock);
+  }
+
+  if (!parts.length) {
+    return null;
+  }
+
+  return parts.join("\n\n");
+}
+
+async function handleFunctionCall(session: OpenAIRealtimeSession, message: any): Promise {
+  const { name, call_id, arguments: argsString } = message;
+  
+  try {
+    const args = JSON.parse(argsString || "{}");
+    console.log(`${LOG_PREFIX} Function call: ${name}`, args);
+
+    switch (name) {
+      case "submit_disposition":
+        {
+          const disposition = args.disposition as DispositionCode;
+          const confidence = args.confidence || 0;
+          const reason = args.reason || '';
+          
+          // Calculate call duration at disposition time
+          const callDurationSeconds = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+          const MINIMUM_QUALIFIED_DURATION = 30; // seconds
+          
+          // QUALITY GATE: Warn and log if AI is marking short calls as qualified
+          if (disposition === 'qualified_lead' && callDurationSeconds  0.7 && callDurationSeconds  {
+            if (session.isActive && !session.isEnding) {
+              console.log(`${LOG_PREFIX} Auto-ending call ${session.callId} after disposition: ${disposition}`);
+              endCall(session.callId, disposition === 'voicemail' ? 'voicemail' : 'completed');
+            }
+          }, hangupDelay);
+        }
+        break;
+
+      case "end_call":
+        {
+          const reason = args.reason || 'Call ended by AI';
+          console.log(`${LOG_PREFIX} AI requested call end for ${session.callId}: ${reason}`);
+          
+          if (session.openaiWs?.readyState === WebSocket.OPEN) {
+            session.openaiWs.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id,
+                output: JSON.stringify({ success: true, message: "Call ending" })
+              }
+            }));
+          }
+          
+          // End call immediately
+          const outcome = session.detectedDisposition === 'voicemail' ? 'voicemail' : 'completed';
+          await endCall(session.callId, outcome);
+        }
+        break;
+
+      case "submit_call_summary": {
+        const summary = normalizeCallSummary(args);
+        if (summary) {
+          session.callSummary = summary;
+          console.log(`${LOG_PREFIX} Call summary recorded for call: ${session.callId}`);
+        } else {
+          console.warn(`${LOG_PREFIX} Call summary missing or invalid for call: ${session.callId}`);
+        }
+
+        if (session.openaiWs?.readyState === WebSocket.OPEN) {
+          session.openaiWs.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id,
+              output: JSON.stringify({ success: true, message: "Call summary recorded" })
+            }
+          }));
+          session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+        }
+        break;
+      }
+
+      case "schedule_callback":
+        console.log(`${LOG_PREFIX} Callback requested: ${args.callback_datetime}`);
+        if (session.openaiWs?.readyState === WebSocket.OPEN) {
+          session.openaiWs.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id,
+              output: JSON.stringify({ success: true, message: "Callback scheduled" })
+            }
+          }));
+          session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+        }
+        break;
+
+      case "send_dtmf":
+        {
+          const digits = args.digits;
+          const reason = args.reason || 'IVR navigation';
+          
+          if (!digits || typeof digits !== 'string' || !/^[0-9*#]+$/.test(digits)) {
+            console.error(`${LOG_PREFIX} Invalid DTMF digits: ${digits}`);
+            if (session.openaiWs?.readyState === WebSocket.OPEN) {
+              session.openaiWs.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id,
+                  output: JSON.stringify({ success: false, error: "Invalid digits. Use 0-9, *, or #" })
+                }
+              }));
+              session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+            }
+            break;
+          }
+          
+          console.log(`${LOG_PREFIX} Sending DTMF digits "${digits}" for call ${session.callId} - Reason: ${reason}`);
+          
+          // Get the call_control_id from TelnyxAiBridge
+          const { getTelnyxAiBridge } = await import('./telnyx-ai-bridge');
+          const bridge = getTelnyxAiBridge();
+          const callState = bridge.getClientStateByControlId(session.callId) || 
+                           (bridge as any).activeCalls?.get(session.callId);
+          
+          // Try to find call_control_id from session or bridge
+          let callControlId = session.callId;
+          if (callState?.callControlId) {
+            callControlId = callState.callControlId;
+          }
+          
+          const telnyxApiKey = process.env.TELNYX_API_KEY;
+          if (!telnyxApiKey) {
+            console.error(`${LOG_PREFIX} TELNYX_API_KEY not configured for DTMF`);
+            if (session.openaiWs?.readyState === WebSocket.OPEN) {
+              session.openaiWs.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id,
+                  output: JSON.stringify({ success: false, error: "DTMF service unavailable" })
+                }
+              }));
+              session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+            }
+            break;
+          }
+          
+          try {
+            const response = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/send_dtmf`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${telnyxApiKey}`,
+              },
+              body: JSON.stringify({ digits }),
+            });
+            
+            if (response.ok) {
+              console.log(`${LOG_PREFIX} ✅ DTMF "${digits}" sent successfully for call ${session.callId}`);
+              if (session.openaiWs?.readyState === WebSocket.OPEN) {
+                session.openaiWs.send(JSON.stringify({
+                  type: "conversation.item.create",
+                  item: {
+                    type: "function_call_output",
+                    call_id,
+                    output: JSON.stringify({ success: true, message: `Sent digits: ${digits}` })
+                  }
+                }));
+                session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+              }
+            } else {
+              const errorText = await response.text();
+              console.error(`${LOG_PREFIX} DTMF send failed: ${response.status} - ${errorText}`);
+              if (session.openaiWs?.readyState === WebSocket.OPEN) {
+                session.openaiWs.send(JSON.stringify({
+                  type: "conversation.item.create",
+                  item: {
+                    type: "function_call_output",
+                    call_id,
+                    output: JSON.stringify({ success: false, error: "Failed to send DTMF" })
+                  }
+                }));
+                session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+              }
+            }
+          } catch (dtmfError) {
+            console.error(`${LOG_PREFIX} DTMF send error:`, dtmfError);
+            if (session.openaiWs?.readyState === WebSocket.OPEN) {
+              session.openaiWs.send(JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                  type: "function_call_output",
+                  call_id,
+                  output: JSON.stringify({ success: false, error: "DTMF transmission error" })
+                }
+              }));
+              session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+            }
+          }
+        }
+        break;
+
+      case "transfer_to_human":
+        {
+          const rationale = args.rationale_for_transfer || args.reason || 'Not specified';
+          const summary = args.conversation_summary || 'No summary provided';
+          const sentiment = args.prospect_sentiment || 'neutral';
+          const urgency = args.urgency || 'medium';
+          const keyTopics = args.key_topics || [];
+          const attempted = args.attempted_resolution || 'None';
+
+          console.log(`${LOG_PREFIX} Transfer to human requested for call ${session.callId}`);
+          console.log(`${LOG_PREFIX}   Rationale: ${rationale}`);
+          console.log(`${LOG_PREFIX}   Sentiment: ${sentiment}, Urgency: ${urgency}`);
+          console.log(`${LOG_PREFIX}   Summary: ${summary}`);
+          if (keyTopics.length > 0) {
+            console.log(`${LOG_PREFIX}   Key Topics: ${keyTopics.join(', ')}`);
+          }
+
+          // Store handoff context in session for potential UI display
+          (session as any).handoffContext = {
+            rationale,
+            summary,
+            sentiment,
+            urgency,
+            keyTopics,
+            attemptedResolution: attempted,
+            timestamp: new Date().toISOString(),
+          };
+
+          session.detectedDisposition = 'qualified_lead';
+
+          if (session.openaiWs?.readyState === WebSocket.OPEN) {
+            session.openaiWs.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id,
+                output: JSON.stringify({
+                  success: true,
+                  message: "Transfer initiated. Human agent will be briefed with conversation context.",
+                  handoff_context: {
+                    rationale,
+                    summary,
+                    sentiment,
+                    urgency,
+                  }
+                })
+              }
+            }));
+            session.openaiWs.send(JSON.stringify({ type: "response.create" }));
+          }
+        }
+        break;
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error handling function call ${name || 'unknown'} for call ${session.callId}:`, error, 'args:', argsString);
+  }
+}
+
+async function checkForVoicemailDetection(session: OpenAIRealtimeSession, transcript: string): Promise {
+  // FIRST: Check for unclear/garbled audio
+  // Patterns that indicate transcription quality issues rather than voicemail
+  const unclearPatterns = [
+    /^(how|what|why|who|where|when)\s+(how|what|why|who|where|when)/, // Repeated words (garbled)
+    /^[a-z]\s+[a-z](\s+[a-z])?$/, // Just single letters
+    /^\s*$/, // Empty or whitespace only
+    /^[^a-z]*$/i, // No words/only special chars
+  ];
+  
+  const lowerTranscript = transcript.trim().toLowerCase();
+  const isUnclear = unclearPatterns.some(pattern => pattern.test(lowerTranscript));
+  
+  if (isUnclear && !session.detectedDisposition) {
+    console.log(`${LOG_PREFIX} Unclear/garbled audio detected for call: ${session.callId}, transcript: "${transcript}"`);
+    // Don't set disposition yet - let the agent ask for clarification
+    // This stays in STATE_IDENTITY_CHECK and asks: "Sorry, I didn't catch that—could you say it again?"
+    return;
+  }
+
+  // SECOND: Only after audio quality passes, check for voicemail
+  const voicemailPhrases = [
+    "leave a message",
+    "leave your message",
+    "after the beep",
+    "after the tone",
+    "not available",
+    "cannot take your call",
+    "please leave",
+    "record your message",
+    "voicemail",
+    "answering machine"
+  ];
+  
+  const isVoicemail = voicemailPhrases.some(phrase => lowerTranscript.includes(phrase));
+  
+  if (isVoicemail && !session.detectedDisposition) {
+    console.log(`${LOG_PREFIX} Voicemail detected for call: ${session.callId}`);
+    session.detectedDisposition = 'voicemail';
+    session.callOutcome = 'voicemail';
+    await endCall(session.callId, 'voicemail');
+  }
+}
+
+
+async function handleTelnyxMedia(session: OpenAIRealtimeSession, message: any): Promise {
+  // Route audio to the appropriate provider (Google Gemini or OpenAI)
+  const geminiProvider = (session as any).geminiProvider;
+
+  if (session.provider === 'google' && geminiProvider) {
+    // Route to Gemini provider
+    if (!geminiProvider.isConnected) {
+      return;
+    }
+
+    if (message.media?.payload) {
+      session.telnyxInboundFrames += 1;
+      session.telnyxInboundLastTime = new Date();
+
+      if (session.telnyxInboundFrames === 1) {
+        console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} (Gemini provider)`);
+      } else if (session.telnyxInboundFrames % 25 === 0) {
+        console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId} (Gemini)`);
+      }
+
+      // Send audio to Gemini provider (transcoding handled internally)
+      const audioBuffer = Buffer.from(message.media.payload, 'base64');
+      geminiProvider.sendAudio(audioBuffer);
+
+      // Track bytes for cost tracking
+      const bytes = audioBuffer.length;
+      session.audioBytesSent += bytes;
+      recordAudioInput(session.callId, bytes);
+
+      // Track how many frames/bytes we push between logs
+      const now = Date.now();
+      session.openaiAppendsSinceLastLog += 1;
+      session.openaiAppendBytesSinceLastLog += bytes;
+
+      if (!session.openaiAppendLastLogTime) {
+        session.openaiAppendLastLogTime = new Date();
+      } else {
+        const elapsed = now - session.openaiAppendLastLogTime.getTime();
+        if (elapsed >= 1000) {
+          console.log(`${LOG_PREFIX} Gemini audio rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms for call: ${session.callId}`);
+          session.openaiAppendsSinceLastLog = 0;
+          session.openaiAppendBytesSinceLastLog = 0;
+          session.openaiAppendLastLogTime = new Date(now);
+        }
+      }
+    }
+    return;
+  }
+
+  // Default: Route to OpenAI provider
+  if (!session.openaiWs || session.openaiWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  if (message.media?.payload) {
+    session.telnyxInboundFrames += 1;
+    session.telnyxInboundLastTime = new Date();
+
+    // DIAGNOSTIC: Decode audio to inspect chunk size and header bytes
+    const audioBytes = Buffer.from(message.media.payload, 'base64');
+
+    if (session.telnyxInboundFrames === 1) {
+      const first8Hex = audioBytes.subarray(0, 8).toString('hex');
+      console.log(`${LOG_PREFIX} First inbound audio frame received from Telnyx for call: ${session.callId} bytes=${audioBytes.length} first8=${first8Hex}`);
+      // Check for WAV header (RIFF) - indicates container audio mixed with raw PCM
+      const first4 = audioBytes.subarray(0, 4).toString('ascii');
+      if (first4 === 'RIFF') {
+        console.error(`${LOG_PREFIX} WARNING: Received WAV container instead of raw G.711 audio! call=${session.callId}`);
+      }
+    } else if (session.telnyxInboundFrames % 25 === 0) {
+      const first8Hex = audioBytes.subarray(0, 8).toString('hex');
+      console.log(`${LOG_PREFIX} Telnyx inbound frames: ${session.telnyxInboundFrames} bytes=${audioBytes.length} first8=${first8Hex} (last ${session.telnyxInboundLastTime?.toISOString()}) for call: ${session.callId}`);
+    }
+
+    const audioMessage = {
+      type: "input_audio_buffer.append",
+      audio: message.media.payload,
+    };
+    session.openaiWs.send(JSON.stringify(audioMessage));
+
+    // Track how many frames/bytes we push to OpenAI between logs
+    const now = Date.now();
+    const bytes = Buffer.from(message.media.payload, 'base64').length;
+    session.openaiAppendsSinceLastLog += 1;
+    session.openaiAppendBytesSinceLastLog += bytes;
+    session.audioBytesSent += bytes;
+
+    // Cost tracking: record incoming audio
+    recordAudioInput(session.callId, bytes);
+
+    if (!session.openaiAppendLastLogTime) {
+      session.openaiAppendLastLogTime = new Date();
+    } else {
+      const elapsed = now - session.openaiAppendLastLogTime.getTime();
+      if (elapsed >= 1000) {
+        console.log(`${LOG_PREFIX} OpenAI append rate: ${session.openaiAppendsSinceLastLog} frames / ${session.openaiAppendBytesSinceLastLog} bytes over ${elapsed}ms (stream ${session.streamSid}) for call: ${session.callId}`);
+        session.openaiAppendsSinceLastLog = 0;
+        session.openaiAppendBytesSinceLastLog = 0;
+        session.openaiAppendLastLogTime = new Date(now);
+      }
+    }
+  }
+}
+
+function flushAudioBuffer(session: OpenAIRealtimeSession): void {
+  if (session.audioFrameBuffer.length === 0 || session.telnyxWs?.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  console.log(`${LOG_PREFIX} ðŸ“¤ Flushing ${session.audioFrameBuffer.length} buffered audio frames to Telnyx`);
+  
+  while (session.audioFrameBuffer.length > 0) {
+    const frame = session.audioFrameBuffer.shift();
+    if (!frame) continue;
+    enqueueTelnyxOutboundAudio(session, frame);
+  }
+
+  ensureTelnyxOutboundPacer(session);
+}
+
+async function endCall(callId: string, outcome: 'completed' | 'no_answer' | 'voicemail' | 'error'): Promise {
+  const session = activeSessions.get(callId);
+  if (!session || !session.isActive) return;
+
+  // Idempotent guard - prevent double execution from multiple close handlers
+  if (session.isEnding) {
+    console.log(`${LOG_PREFIX} Call ${callId} already ending, skipping duplicate endCall`);
+    return;
+  }
+  session.isEnding = true;
+  session.isActive = false;
+  session.callOutcome = outcome;
+
+  stopTelnyxOutboundPacer(session);
+  session.telnyxOutboundBuffer = Buffer.alloc(0);
+
+  console.log(`${LOG_PREFIX} Ending call: ${callId}, outcome: ${outcome}, disposition: ${session.detectedDisposition}`);
+
+  // Finalize cost tracking and log detailed breakdown
+  const costMetrics = finalizeCostTracking(callId);
+  if (costMetrics) {
+    console.log(`${LOG_PREFIX} Call ${callId} final cost: $${costMetrics.costs.total.toFixed(4)}`);
+  }
+
+  // Close OpenAI WebSocket if still open (check state before closing)
+  if (session.openaiWs && session.openaiWs.readyState === WebSocket.OPEN) {
+    session.openaiWs.close();
+  }
+
+  // Close Telnyx WebSocket to terminate the call (this triggers Telnyx to hangup)
+  if (session.telnyxWs && session.telnyxWs.readyState === WebSocket.OPEN) {
+    console.log(`${LOG_PREFIX} Closing Telnyx WebSocket to terminate call ${callId}`);
+    session.telnyxWs.close();
+  }
+
+  const disposition = session.detectedDisposition || mapOutcomeToDisposition(outcome);
+  let dispositionProcessed = false;
+  let dispositionResult: Awaited> | null = null;
+
+  // Check if this is a test session
+  const isTestCall = session.isTestSession || session.callAttemptId?.startsWith('test-attempt-');
+
+  if (session.callAttemptId && disposition) {
+    try {
+      const callDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000);
+      const noPiiLogging = session.agentSettings?.advanced.privacy.noPiiLogging;
+      const notes = buildCallNotes(session, !noPiiLogging);
+
+      if (isTestCall) {
+        // Handle test call post-call analysis
+        console.log(`${LOG_PREFIX} Processing post-call analysis for test call ${callId}`);
+
+        // Extract test call ID from the callAttemptId (format: test-attempt-{testCallId})
+        const testCallId = session.callAttemptId.replace(/^test-attempt-/, '');
+
+        // Build AI performance metrics from session state
+        const aiPerformanceMetrics = {
+          identityConfirmed: session.conversationState?.identityConfirmed ?? false,
+          gatekeeperHandled: session.conversationState?.stateHistory?.includes('GATEKEEPER') ?? false,
+          pitchDelivered: session.conversationState?.stateHistory?.includes('CONTEXT_FRAMING') ?? false,
+          objectionHandled: session.conversationState?.stateHistory?.includes('ACKNOWLEDGEMENT') ?? false,
+          closingAttempted: session.conversationState?.stateHistory?.includes('CLOSE') ?? false,
+          conversationStatesReached: session.conversationState?.stateHistory ?? [],
+          responseLatencyAvgMs: 0, // Could be calculated from response times if tracked
+          tokensUsed: (costMetrics?.textInputTokens ?? 0) + (costMetrics?.textOutputTokens ?? 0),
+          estimatedCost: costMetrics?.costs.total ?? 0,
+          audioInputSeconds: costMetrics?.audioInputSeconds ?? 0,
+          audioOutputSeconds: costMetrics?.audioOutputSeconds ?? 0,
+        };
+
+        // Build transcript turns from session transcripts
+        const transcriptTurns = session.transcripts.map(t => ({
+          role: t.role === 'assistant' ? 'agent' : 'contact',
+          text: t.text,
+          timestamp: t.timestamp.toISOString(),
+        }));
+
+        // Build full transcript text
+        const fullTranscript = session.transcripts
+          .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+          .join('\n');
+
+        // Update the test call record with post-call data
+        await db.update(campaignTestCalls).set({
+          status: 'completed',
+          endedAt: new Date(),
+          durationSeconds: callDuration,
+          disposition: disposition,
+          callSummary: session.callSummary?.summary || notes,
+          transcriptTurns: transcriptTurns,
+          fullTranscript: fullTranscript,
+          aiPerformanceMetrics: aiPerformanceMetrics,
+          updatedAt: new Date(),
+        }).where(eq(campaignTestCalls.id, testCallId));
+
+        dispositionProcessed = true;
+        console.log(`${LOG_PREFIX} ✅ Test call ${callId} post-call analysis saved to campaignTestCalls`);
+        console.log(`${LOG_PREFIX} Test call summary: ${session.callSummary?.summary || 'No summary generated'}`);
+        console.log(`${LOG_PREFIX} Test call disposition: ${disposition}`);
+        console.log(`${LOG_PREFIX} Test call duration: ${callDuration}s`);
+        console.log(`${LOG_PREFIX} Test call transcripts: ${session.transcripts.length} turns`);
+      } else {
+        // Handle real call post-call processing
+        // First verify the call attempt record exists before updating
+        const [existingAttempt] = await db
+          .select({ id: dialerCallAttempts.id })
+          .from(dialerCallAttempts)
+          .where(eq(dialerCallAttempts.id, session.callAttemptId))
+          .limit(1);
+
+        if (!existingAttempt) {
+          console.warn(`${LOG_PREFIX} Call attempt ${session.callAttemptId} not found in database - skipping post-call processing`);
+          // Still release the lock if we have a queue item
+          if (session.queueItemId) {
+            await releaseQueueLock(session.queueItemId);
+          }
+          return;
+        }
+
+        // Build full transcript for conversation intelligence
+        const fullTranscript = session.transcripts.length > 0
+          ? session.transcripts
+              .map(t => `${t.role === 'assistant' ? 'Agent' : 'Contact'}: ${t.text}`)
+              .join('\n')
+          : '';
+
+        // Build transcript turns for structured analysis
+        const transcriptTurns = session.transcripts.map(t => ({
+          role: t.role === 'assistant' ? 'agent' : 'contact',
+          text: t.text,
+          timestamp: t.timestamp.toISOString(),
+        }));
+
+        // Build AI analysis from call summary and conversation state
+        const aiAnalysis = session.callSummary ? {
+          summary: session.callSummary.summary,
+          sentiment: session.callSummary.sentiment,
+          outcome: session.callSummary.outcome,
+          keyTopics: session.callSummary.keyTopics || [],
+          nextSteps: session.callSummary.nextSteps || [],
+          conversationState: {
+            identityConfirmed: session.identityConfirmed,
+            currentState: session.currentState,
+            stateHistory: session.stateHistory || []
+          }
+        } : null;
+
+        // Create call session record for comprehensive conversation intelligence
+        let callSessionId: string | null = null;
+        if (!noPiiLogging) {
+          try {
+            const [callSession] = await db.insert(callSessions).values({
+              telnyxCallId: session.telnyxCallControlId || undefined,
+              fromNumber: session.fromNumber,
+              toNumberE164: session.toNumber,
+              startedAt: session.callStartedAt || new Date(),
+              endedAt: new Date(),
+              durationSec: callDuration,
+              status: 'completed' as const,
+              agentType: 'ai' as const,
+              aiAgentId: session.virtualAgentId || 'openai-realtime',
+              aiConversationId: session.openaiSessionId || undefined,
+              aiTranscript: fullTranscript || undefined,
+              aiAnalysis: aiAnalysis as any,
+              aiDisposition: disposition,
+              campaignId: session.campaignId,
+              contactId: session.contactId,
+              queueItemId: session.queueItemId,
+            }).returning();
+
+            callSessionId = callSession.id;
+            console.log(`${LOG_PREFIX} ✅ Created call session ${callSessionId} with full conversation intelligence`);
+          } catch (sessionError) {
+            console.error(`${LOG_PREFIX} Failed to create call session:`, sessionError);
+          }
+        }
+
+        // Update call attempt with comprehensive data
+        await db.update(dialerCallAttempts).set({
+          callEndedAt: new Date(),
+          callDurationSeconds: callDuration,
+          disposition: disposition,
+          notes: notes || (session.callSummary?.summary ? `Summary: ${session.callSummary.summary}` : undefined),
+          callSessionId: callSessionId || undefined,
+          updatedAt: new Date()
+        }).where(eq(dialerCallAttempts.id, session.callAttemptId));
+
+        // Process disposition through the engine (this handles lock release)
+        dispositionResult = await processDisposition(session.callAttemptId, disposition, 'openai_realtime_agent');
+        dispositionProcessed = true;
+
+        // CRITICAL FOR SYSTEMATIC RELEASE: Trigger immediate replenishment
+        // This ensures the orchestrator fills the newly freed concurrency slot within 1s
+        if (session.campaignId) {
+          triggerCampaignReplenish(session.campaignId).catch(err => {
+            console.warn(`${LOG_PREFIX} Failed to trigger replenishment for campaign ${session.campaignId}:`, err);
+          });
+        }
+
+        console.log(`${LOG_PREFIX} Call ${callId} completed with disposition: ${disposition}`);
+
+        // Create call producer tracking record for quality analysis and learning
+        if (callSessionId && !noPiiLogging) {
+          try {
+            // Calculate quality score based on conversation metrics
+            let qualityScore: number | null = null;
+            if (session.transcripts.length > 0) {
+              // Basic quality scoring: weighted by call duration, transcript length, and conversation flow
+              const transcriptQuality = Math.min(100, (session.transcripts.length / 10) * 50); // Up to 50 points for transcript depth
+              const durationQuality = Math.min(50, (callDuration / 60) * 50); // Up to 50 points for duration (normalized to 1 min)
+              qualityScore = Math.round(transcriptQuality + durationQuality);
+            }
+
+            // Extract detected intents from conversation state
+            const intentsDetected = session.stateHistory?.map(state => ({
+              state: state,
+              timestamp: new Date().toISOString(),
+            })) || [];
+
+            await db.insert(callProducerTracking).values({
+              callSessionId: callSessionId,
+              campaignId: session.campaignId!,
+              contactId: session.contactId || undefined,
+              producerType: 'ai' as const,
+              virtualAgentId: session.virtualAgentId || undefined,
+              handoffStage: 'ai_initial' as const,
+              intentsDetected: intentsDetected.length > 0 ? intentsDetected as any : undefined,
+              transcriptAnalysis: aiAnalysis as any,
+              qualityScore: qualityScore?.toString() || undefined,
+            });
+
+            console.log(`${LOG_PREFIX} ✅ Created call producer tracking record with quality score: ${qualityScore || 'N/A'}`);
+          } catch (trackingError) {
+            console.error(`${LOG_PREFIX} Failed to create call producer tracking:`, trackingError);
+          }
+        }
+
+        // Save OpenAI real-time transcripts directly to the lead record (if lead was created)
+        // This ensures AI QA analysis can run immediately without waiting for Telnyx recording sync
+        if (dispositionResult?.leadId && session.transcripts.length > 0 && !noPiiLogging) {
+          try {
+            await db.update(leads).set({
+              transcript: fullTranscript,
+              transcriptionStatus: 'completed',
+              updatedAt: new Date(),
+            }).where(eq(leads.id, dispositionResult.leadId));
+
+            console.log(`${LOG_PREFIX} ✅ Saved ${session.transcripts.length} transcript turns to lead ${dispositionResult.leadId}`);
+          } catch (transcriptError) {
+            console.error(`${LOG_PREFIX} Failed to save transcripts to lead:`, transcriptError);
+          }
+        }
+
+        if (!noPiiLogging && shouldAutoTranscribeDisposition(disposition)) {
+          await scheduleEngagedCallTranscription({
+            callAttemptId: session.callAttemptId,
+            leadId: dispositionResult?.leadId ?? null,
+          });
+        }
+
+        await handlePostCallArtifacts({
+          callAttemptId: session.callAttemptId,
+          campaignId: session.campaignId,
+          contactId: session.contactId,
+          disposition,
+          callSummary: session.callSummary,
+        });
+      }
+    } catch (error) {
+      console.error(`${LOG_PREFIX} Error processing disposition:`, error);
+    }
+  }
+
+  // If disposition processing failed or was skipped, release the lock manually
+  // to prevent the contact from being stuck in 'in_progress' state
+  // Skip for test sessions as they don't have real queue items
+  if (!dispositionProcessed && session.queueItemId && !isTestCall) {
+    console.log(`${LOG_PREFIX} Disposition not processed, releasing lock manually for queue item: ${session.queueItemId}`);
+    await releaseQueueLock(session.queueItemId);
+  }
+
+  if (session.streamSid) {
+    streamIdToCallId.delete(session.streamSid);
+  }
+  
+  // Clean up from persistent session store
+  await updateCallSessionStatus(callId, 'ended', {
+    endedAt: new Date().toISOString(),
+  }).catch(err => {
+    console.warn(`${LOG_PREFIX} Failed to update session store on call end:`, err);
+  });
+  
+  activeSessions.delete(callId);
+}
+
+function mapOutcomeToDisposition(outcome: string): DispositionCode {
+  switch (outcome) {
+    case 'voicemail':
+      return 'voicemail';
+    case 'no_answer':
+      return 'no_answer';
+    case 'error':
+      return 'invalid_data';
+    default:
+      return 'no_answer';
+  }
+}
+
+function shouldAutoTranscribeDisposition(disposition: DispositionCode): boolean {
+  return ENGAGED_DISPOSITIONS.has(disposition);
+}
+
+async function scheduleEngagedCallTranscription(options: {
+  callAttemptId: string;
+  leadId: string | null;
+}): Promise {
+  try {
+    // Handle Test Calls
+    if (options.callAttemptId && options.callAttemptId.startsWith('test-attempt-')) {
+      const testCallId = options.callAttemptId.replace(/^test-attempt-/, '');
+      
+      const [testCall] = await db
+        .select({
+          phoneDialed: campaignTestCalls.testPhoneNumber,
+          campaignId: campaignTestCalls.campaignId,
+          contactFirstName: campaignTestCalls.testContactName,
+        })
+        .from(campaignTestCalls)
+        .where(eq(campaignTestCalls.id, testCallId))
+        .limit(1);
+
+      if (!testCall) {
+        console.warn(`${LOG_PREFIX} Unable to schedule transcription: test call ${testCallId} not found (derived from ${options.callAttemptId})`);
+        return;
+      }
+
+      await scheduleAutoRecordingSync({
+        leadId: options.leadId || undefined,
+        callAttemptId: options.callAttemptId,
+        contactFirstName: testCall.contactFirstName,
+        agentId: null,
+        telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
+        dialedNumber: testCall.phoneDialed,
+        campaignId: testCall.campaignId,
+      });
+      return;
+    }
+
+    const [attempt] = await db
+      .select({
+        phoneDialed: dialerCallAttempts.phoneDialed,
+        campaignId: dialerCallAttempts.campaignId,
+        contactFirstName: contacts.firstName,
+        agentId: dialerCallAttempts.humanAgentId,
+      })
+      .from(dialerCallAttempts)
+      .leftJoin(contacts, eq(dialerCallAttempts.contactId, contacts.id))
+      .where(eq(dialerCallAttempts.id, options.callAttemptId))
+      .limit(1);
+
+    if (!attempt) {
+      console.warn(`${LOG_PREFIX} Unable to schedule transcription: call attempt ${options.callAttemptId} not found`);
+      return;
+    }
+
+    if (!attempt.phoneDialed) {
+      console.warn(`${LOG_PREFIX} Unable to schedule transcription: missing dialed number for call attempt ${options.callAttemptId}`);
+      return;
+    }
+
+    await scheduleAutoRecordingSync({
+      leadId: options.leadId || undefined,
+      callAttemptId: options.callAttemptId,
+      contactFirstName: attempt.contactFirstName || null,
+      agentId: attempt.agentId || null,
+      telnyxCallId: getTelnyxCallId(options.callAttemptId) || null,
+      dialedNumber: attempt.phoneDialed,
+      campaignId: attempt.campaignId || null,
+    });
+
+    // Helper to get telnyxCallId from session/bridge
+    function getTelnyxCallId(callAttemptId: string): string | null {
+      try {
+        const { getTelnyxAiBridge } = require('./telnyx-ai-bridge');
+        const bridge = getTelnyxAiBridge();
+        const callState = bridge.getClientStateByControlId(callAttemptId) || (bridge.activeCalls?.get(callAttemptId));
+        if (callState?.callControlId) {
+          return callState.callControlId;
+        }
+      } catch (err) {
+        // Ignore errors, fallback to null
+      }
+      return null;
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error scheduling call transcription:`, error);
+  }
+}
+
+async function handlePostCallArtifacts(params: {
+  callAttemptId: string;
+  campaignId: string;
+  contactId: string;
+  disposition: DispositionCode;
+  callSummary: CallSummary | null;
+}): Promise {
+  try {
+    const [contact] = await db
+      .select({
+        accountId: contacts.accountId,
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        jobTitle: contacts.jobTitle,
+      })
+      .from(contacts)
+      .where(eq(contacts.id, params.contactId))
+      .limit(1);
+
+    if (!contact?.accountId) {
+      return;
+    }
+
+    const callOutcome = mapDispositionToCallOutcome(params.disposition, params.callSummary);
+    const recap = buildAutoCallRecap({
+      contactName: contact.fullName || contact.firstName || undefined,
+      jobTitle: contact.jobTitle || undefined,
+      disposition: params.disposition,
+      callOutcome,
+      summary: params.callSummary,
+    });
+
+    const keyNotes = [
+      params.callSummary?.summary,
+      params.callSummary?.primary_challenge,
+      params.callSummary?.next_step,
+    ].filter((note): note is string => Boolean(note && note.trim()));
+
+    await recordCallMemoryNotes({
+      accountId: contact.accountId,
+      contactId: params.contactId,
+      callAttemptId: params.callAttemptId,
+      summary: recap.text,
+      payload: {
+        disposition: params.disposition,
+        call_summary: params.callSummary,
+        call_recap: recap.meta,
+      },
+    });
+
+    if (params.disposition === "do_not_call" || params.disposition === "invalid_data") {
+      return;
+    }
+
+    if (params.disposition === "not_interested" && params.callSummary?.follow_up_consent !== "yes") {
+      return;
+    }
+
+    const followupEmail = await generatePostCallFollowupEmail({
+      accountId: contact.accountId,
+      contactId: params.contactId,
+      campaignId: params.campaignId,
+      callOutcome,
+      keyNotes,
+      recipient: {
+        name: contact.fullName || contact.firstName || "there",
+        role: contact.jobTitle || "",
+      },
+    });
+
+    await saveCallFollowupEmail({
+      accountId: contact.accountId,
+      contactId: params.contactId,
+      campaignId: params.campaignId,
+      callAttemptId: params.callAttemptId,
+      payload: followupEmail,
+    });
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to create post-call artifacts:`, error);
+  }
+}
+
+function buildAutoCallRecap(options: {
+  contactName?: string;
+  jobTitle?: string;
+  disposition: DispositionCode;
+  callOutcome: string;
+  summary: CallSummary | null;
+}): { text: string; meta: Record } {
+  const engagement = options.summary?.engagement_level || "unknown";
+  const sentiment = options.summary?.sentiment || "unknown";
+  const timePressure = options.summary?.time_pressure ? "yes" : "no";
+  const primaryChallenge = options.summary?.primary_challenge || "Not captured";
+  const followUpConsent = options.summary?.follow_up_consent || "unknown";
+  const nextStep = options.summary?.next_step || "None recorded";
+  const introHighlight = options.summary?.summary || `Call completed with disposition ${options.disposition}.`;
+
+  const lines: string[] = [
+    "[Call Recap]",
+    `Reached: ${options.contactName || "Contact"}${options.jobTitle ? ` (${options.jobTitle})` : ""}`,
+    `Disposition: ${options.disposition}`,
+    `Intro/Highlights: ${introHighlight}`,
+    `Response: engagement ${engagement}, sentiment ${sentiment}, time pressure ${timePressure}`,
+    `Outcome: ${options.callOutcome}${nextStep !== "None recorded" ? ` | Next step: ${nextStep}` : ""}`,
+    `Challenge: ${primaryChallenge}`,
+    `Follow-up consent: ${followUpConsent}`,
+  ];
+
+  return {
+    text: lines.join("\n"),
+    meta: {
+      contact_name: options.contactName,
+      job_title: options.jobTitle,
+      disposition: options.disposition,
+      call_outcome: options.callOutcome,
+      engagement,
+      sentiment,
+      time_pressure: options.summary?.time_pressure ?? null,
+      primary_challenge: options.summary?.primary_challenge || null,
+      follow_up_consent: options.summary?.follow_up_consent || null,
+      next_step: options.summary?.next_step || null,
+      summary: options.summary?.summary || null,
+    },
+  };
+}
+
+function mapDispositionToCallOutcome(
+  disposition: DispositionCode,
+  summary: CallSummary | null
+): string {
+  if (disposition === "voicemail") return "left_voicemail";
+  if (disposition === "not_interested") return "not_interested";
+  if (summary?.follow_up_consent === "yes") return "requested_email";
+  return "spoke_briefly";
+}
+
+/**
+ * Validate that the session identifiers exist and belong together
+ * Also verifies lock ownership to prevent cross-run contamination
+ */
+async function validateSessionIdentifiers(
+  callAttemptId: string,
+  queueItemId: string,
+  contactId: string,
+  campaignId: string,
+  runId: string
+): Promise {
+  try {
+    // Verify call attempt exists and matches the provided identifiers
+    const [callAttempt] = await db
+      .select()
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.id, callAttemptId))
+      .limit(1);
+
+    if (!callAttempt) {
+      return { valid: false, error: `Call attempt ${callAttemptId} not found` };
+    }
+
+    // Verify the call attempt belongs to the specified run, campaign, and contact
+    if (callAttempt.dialerRunId !== runId) {
+      return { valid: false, error: `Call attempt does not belong to run ${runId}` };
+    }
+
+    if (callAttempt.campaignId !== campaignId) {
+      return { valid: false, error: `Call attempt does not belong to campaign ${campaignId}` };
+    }
+
+    if (callAttempt.contactId !== contactId) {
+      return { valid: false, error: `Call attempt does not belong to contact ${contactId}` };
+    }
+
+    if (callAttempt.queueItemId !== queueItemId) {
+      return { valid: false, error: `Call attempt queue item mismatch` };
+    }
+
+    // Verify dialer run exists and is active
+    const [dialerRun] = await db
+      .select()
+      .from(dialerRuns)
+      .where(eq(dialerRuns.id, runId))
+      .limit(1);
+
+    if (!dialerRun) {
+      return { valid: false, error: `Dialer run ${runId} not found` };
+    }
+
+    if (dialerRun.status !== 'active') {
+      return { valid: false, error: `Dialer run is not active (status: ${dialerRun.status})` };
+    }
+
+    // Verify queue item exists and is locked
+    const [queueItem] = await db
+      .select()
+      .from(campaignQueue)
+      .where(eq(campaignQueue.id, queueItemId))
+      .limit(1);
+
+    if (!queueItem) {
+      return { valid: false, error: `Queue item ${queueItemId} not found` };
+    }
+
+    if (queueItem.status !== 'in_progress') {
+      return { valid: false, error: `Queue item is not locked (status: ${queueItem.status})` };
+    }
+
+    // Verify lock ownership - the queue item must be locked by the same agent as the call attempt AND the run
+    const expectedVirtualAgentId = callAttempt.virtualAgentId;
+    if (queueItem.virtualAgentId !== expectedVirtualAgentId) {
+      return { valid: false, error: `Queue item locked by different agent (expected: ${expectedVirtualAgentId}, actual: ${queueItem.virtualAgentId})` };
+    }
+
+    // Verify run's virtualAgentId matches the queue item lock (for AI runs)
+    if (dialerRun.virtualAgentId && dialerRun.virtualAgentId !== queueItem.virtualAgentId) {
+      return { valid: false, error: `Run virtualAgentId mismatch with queue lock (run: ${dialerRun.virtualAgentId}, queue: ${queueItem.virtualAgentId})` };
+    }
+
+    // Verify lock has not expired
+    if (queueItem.lockExpiresAt && new Date(queueItem.lockExpiresAt)  {
+  if (!queueItemId) return;
+  
+  try {
+    // Increment lockVersion to maintain optimistic locking semantics
+    await db.update(campaignQueue).set({
+      status: 'queued',
+      agentId: null,
+      virtualAgentId: null,
+      lockExpiresAt: null,
+      lockVersion: sql`COALESCE(${campaignQueue.lockVersion}, 0) + 1`,
+      updatedAt: new Date()
+    }).where(eq(campaignQueue.id, queueItemId));
+    
+    console.log(`${LOG_PREFIX} Released lock on queue item: ${queueItemId}`);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error releasing queue lock:`, error);
+  }
+}
+
+async function getCampaignConfig(campaignId: string): Promise {
+  if (!campaignId) return null;
+
+  try {
+    const [campaign] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, campaignId))
+      .limit(1);
+
+    if (!campaign) return null;
+
+    const aiSettings = campaign.aiAgentSettings as any || {};
+    
+    // Extract organization name from persona.companyName (primary source for campaigns)
+    const companyName = aiSettings?.persona?.companyName;
+    
+    return {
+      id: campaign.id,
+      script: campaign.callScript,
+      voice: aiSettings?.persona?.voice || 'marin',
+      openingScript: aiSettings?.scripts?.opening,
+      qualificationCriteria: campaign.qualificationQuestions,
+      // Organization name - explicitly extract for prompt building
+      organizationName: companyName,
+      companyName: companyName,
+      // Agent name from persona
+      agentName: aiSettings?.persona?.name,
+      // New campaign context fields (Foundation + Campaign Layer Architecture)
+      campaignObjective: campaign.campaignObjective,
+      productServiceInfo: campaign.productServiceInfo,
+      talkingPoints: campaign.talkingPoints as string[] | null,
+      targetAudienceDescription: campaign.targetAudienceDescription,
+      campaignObjections: campaign.campaignObjections as Array | null,
+      successCriteria: campaign.successCriteria,
+      campaignContextBrief: campaign.campaignContextBrief,
+      // Max call duration enforcement (campaign-level)
+      maxCallDurationSeconds: campaign.maxCallDurationSeconds,
+      ...aiSettings
+    };
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error fetching campaign config:`, error);
+    return null;
+  }
+}
+
+async function getContactInfo(contactId: string): Promise {
+  if (!contactId) return null;
+  
+  try {
+    const [contact] = await db
+      .select({
+        id: contacts.id,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        fullName: contacts.fullName,
+        jobTitle: contacts.jobTitle,
+        email: contacts.email,
+        accountId: contacts.accountId,
+        company: accounts.name,
+        companyName: accounts.name,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(eq(contacts.id, contactId))
+      .limit(1);
+    
+    return contact || null;
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Error fetching contact info:`, error);
+    return null;
+  }
+}
+
+function buildVoiceTemplateValues({
+  baseValues,
+  contactInfo,
+  callerId,
+  calledNumber,
+  orgName,
+}: {
+  baseValues?: Record | null;
+  contactInfo?: any;
+  callerId?: string | null;
+  calledNumber?: string | null;
+  orgName?: string | null;
+}): Record {
+  const values: Record = { ...(baseValues ?? {}) };
+  const fullName = contactInfo?.fullName?.trim()
+    || [contactInfo?.firstName, contactInfo?.lastName].filter(Boolean).join(" ").trim();
+
+  if (fullName && !values["contact.full_name"]) values["contact.full_name"] = fullName;
+  if (contactInfo?.firstName && !values["contact.first_name"]) values["contact.first_name"] = contactInfo.firstName;
+  if (contactInfo?.lastName && !values["contact.last_name"]) values["contact.last_name"] = contactInfo.lastName;
+  if (contactInfo?.jobTitle && !values["contact.job_title"]) values["contact.job_title"] = contactInfo.jobTitle;
+  if (contactInfo?.email && !values["contact.email"]) values["contact.email"] = contactInfo.email;
+
+  const companyName = contactInfo?.companyName || contactInfo?.company;
+  if (companyName && !values["account.name"]) values["account.name"] = companyName;
+
+  // Include org.name for template interpolation
+  if (orgName && !values["org.name"]) values["org.name"] = orgName;
+
+  if (!values["system.caller_id"] && callerId) values["system.caller_id"] = callerId;
+  if (!values["system.called_number"] && calledNumber) values["system.called_number"] = calledNumber;
+  if (!values["system.time_utc"]) values["system.time_utc"] = new Date().toISOString();
+
+  return values;
+}
+
+/**
+ * Apply voice agent personality configuration to a prompt
+ * Based on OpenAI Voice Agents Guide best practices
+ */
+function applyPersonalityConfiguration(
+  basePrompt: string,
+  agentSettings: VoiceAgentSettings | null
+): string {
+  if (!agentSettings) return basePrompt;
+
+  const sections: string[] = [];
+
+  // Add personality section if configured
+  if (agentSettings.personality) {
+    const personalitySection = buildPersonalityPromptSection(agentSettings.personality);
+    sections.push(personalitySection);
+    sections.push('---\n');
+  }
+
+  // Add conversation states if configured
+  if (agentSettings.conversationStates && agentSettings.conversationStates.length > 0) {
+    const statesSection = buildConversationStatesSection(agentSettings.conversationStates);
+    sections.push(statesSection);
+    sections.push('\n---\n');
+  }
+
+  // Add filler words instructions if configured
+  if (agentSettings.fillerWords) {
+    const fillerSection = buildFillerWordsInstructions(agentSettings.fillerWords);
+    sections.push(fillerSection);
+    sections.push('\n---\n');
+  }
+
+  // If we have personality config, prepend it to the base prompt
+  if (sections.length > 0) {
+    return sections.join('\n') + '\n' + basePrompt;
+  }
+
+  return basePrompt;
+}
+
+/**
+ * Get provider-specific voice control layer from knowledge blocks or legacy constants
+ * This function integrates with the new knowledge block system while maintaining backward compatibility.
+ */
+async function getProviderVoiceControlLayer(
+  provider: 'openai' | 'google',
+  campaignId: string | null,
+  useCondensed: boolean = true
+): Promise {
+  try {
+    const assembled = await assembleProviderPrompt({
+      provider,
+      campaignId: campaignId || undefined,
+      useCondensedPrompt: useCondensed,
+    });
+
+    if (assembled.source === 'blocks') {
+      console.log(`${LOG_PREFIX} Using knowledge blocks for ${provider} voice control (${assembled.totalTokens} tokens)`);
+      return { content: assembled.prompt, source: 'blocks' };
+    }
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} Failed to get knowledge blocks for ${provider}, using legacy:`, error);
+  }
+
+  // Fallback to legacy
+  return { content: '', source: 'legacy' };
+}
+
+async function buildSystemPrompt(
+  campaignConfig: any,
+  contactInfo: any,
+  agentPrompt?: string,
+  useCondensedPrompt: boolean = true,  // Default to condensed for cost optimization
+  foundationCapabilities?: string[],    // Foundation agent capabilities
+  agentSettings?: VoiceAgentSettings | null,  // Voice agent personality/conversation config
+  callAttemptId?: string | null,
+  attemptNumber?: number,
+  isTestSession: boolean = false,
+  provider: 'openai' | 'google' = 'openai'  // Voice provider for prompt optimization
+): Promise {
+  // Try to get provider-specific knowledge blocks first
+  const providerKnowledge = await getProviderVoiceControlLayer(
+    provider,
+    campaignConfig?.id || null,
+    useCondensedPrompt
+  );
+
+  const useKnowledgeBlocks = providerKnowledge.source === 'blocks' && providerKnowledge.content.length > 0;
+  if (useKnowledgeBlocks) {
+    console.log(`${LOG_PREFIX} Building prompt with knowledge blocks for ${provider}`);
+  }
+
+  const contactId = contactInfo?.id;
+  
+  // Allow missing contactId (warn only)
+  if (!contactId) {
+    console.warn(`${LOG_PREFIX} Missing contactId - call planning context will be limited.`);
+  }
+
+  const accountId = contactInfo?.accountId;
+  let accountContextSection: string | null = null;
+  let callPlanContextSection: string | null = null;
+
+  // Check if campaign requires account intelligence (default: false for backward compatibility)
+  const requireIntelligence = campaignConfig?.requireAccountIntelligence ?? false;
+
+  // Skip intelligence if:
+  // 1. Campaign doesn't require it (requireAccountIntelligence = false), OR
+  // 2. Either ID is missing
+  if (!requireIntelligence) {
+    console.log(`${LOG_PREFIX} Campaign does not require account intelligence - using basic company context.`);
+
+    // Even without full intelligence, use basic company info (industry, description) for lightweight personalization
+    if (accountId) {
+      try {
+        const accountProfile = await getAccountProfileData(accountId);
+        if (accountProfile) {
+          // Build minimal account context from company profile (industry, description)
+          const basicContext: string[] = [];
+
+          if (accountProfile.industry) {
+            basicContext.push(`Industry: ${accountProfile.industry}`);
+          }
+
+          if (accountProfile.description) {
+            basicContext.push(`About the company: ${accountProfile.description}`);
+          }
+
+          if (accountProfile.employeeCount) {
+            basicContext.push(`Company size: ${accountProfile.employeeCount} employees`);
+          }
+
+          if (accountProfile.revenue) {
+            basicContext.push(`Revenue: $${accountProfile.revenue}`);
+          }
+
+          if (basicContext.length > 0) {
+            accountContextSection = `\n## Account Background\n\n${basicContext.join('\n')}\n`;
+            console.log(`${LOG_PREFIX} Using basic company context (industry, description) for lightweight personalization.`);
+          }
+        }
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Failed to load basic company context:`, error);
+        // Continue without basic context - not critical
+      }
+    }
+  } else if (!accountId || !contactId) {
+    console.warn(`${LOG_PREFIX} Missing accountId or contactId - skipping account intelligence and call planning.`);
+  } else {
+    console.log(`${LOG_PREFIX} Campaign requires account intelligence - loading/generating...`);
+    const accountIntelligenceRecord = await getOrBuildAccountIntelligence(accountId);
+    const accountMessagingBriefRecord = await getOrBuildAccountMessagingBrief({
+      accountId,
+      campaignId: campaignConfig?.id || null,
+      intelligenceRecord: accountIntelligenceRecord,
+    });
+
+    // Load account profile data for including in context
+    const accountProfile = await getAccountProfileData(accountId);
+
+    accountContextSection = buildAccountContextSection(
+      accountIntelligenceRecord.payloadJson as AccountIntelligencePayload,
+      accountMessagingBriefRecord.payloadJson as AccountMessagingBriefPayload,
+      accountProfile
+    );
+
+    const accountCallBriefRecord = await getOrBuildAccountCallBrief({
+      accountId,
+      campaignId: campaignConfig?.id || null,
+    });
+    const participantContext = await buildParticipantCallContext(contactId);
+    const participantCallPlanRecord = await getOrBuildParticipantCallPlan({
+      accountId,
+      contactId,
+      campaignId: campaignConfig?.id || null,
+      attemptNumber: attemptNumber || 1,
+      callAttemptId: callAttemptId || null,
+      accountCallBrief: accountCallBriefRecord,
+    });
+    const memoryNotes = await getCallMemoryNotes(accountId, contactId);
+    callPlanContextSection = buildCallPlanContextSection({
+      accountCallBrief: accountCallBriefRecord.payloadJson as any,
+      participantCallPlan: participantCallPlanRecord.payloadJson as any,
+      participantContext,
+      memoryNotes,
+    });
+  }
+
+  // =====================================================================
+  // FOUNDATION + CAMPAIGN + CONTACT LAYER ARCHITECTURE
+  // =====================================================================
+  //
+  // Priority order:
+  // 1. Custom agent prompt (agentPrompt) - Used directly with minimal layering
+  // 2. Foundation agent prompt with Campaign Context layering (NEW)
+  // 3. Canonical fallback prompt
+  //
+  // Layer structure:
+  // - Foundation Layer (Virtual Agent): Core capabilities, methodology, professional standards
+  // - Campaign Layer: Goals, product info, talking points, objections (injected at runtime)
+  // - Contact Layer: Per-call personalization (name, company, title, etc.)
+  // =====================================================================
+
+  // PATH 1: Custom agent prompt provided - use it DIRECTLY without layering
+  // This allows well-structured agentic prompts to work exactly as designed
+  // (e.g., prompts tested in OpenAI Realtime Preview)
+  if (agentPrompt?.trim()) {
+    let prompt = agentPrompt.trim();
+
+    // Layer campaign context from new fields if available
+    const campaignContextSection = buildCampaignContextSection({
+      objective: campaignConfig?.campaignObjective,
+      productInfo: campaignConfig?.productServiceInfo,
+      talkingPoints: campaignConfig?.talkingPoints,
+      targetAudience: campaignConfig?.targetAudienceDescription,
+      objections: campaignConfig?.campaignObjections,
+      successCriteria: campaignConfig?.successCriteria,
+      brief: campaignConfig?.campaignContextBrief,
+    });
+
+    console.log(`${LOG_PREFIX} 🔍 DEBUG CAMPAIGN CONTEXT (PATH 1):`, {
+      hasCampaignConfig: !!campaignConfig,
+      campaignId: campaignConfig?.id,
+      objective: !!campaignConfig?.campaignObjective,
+      brief: !!campaignConfig?.campaignContextBrief,
+      sectionLength: campaignContextSection?.length || 0,
+      talkingPointsCount: campaignConfig?.talkingPoints?.length || 0
+    });
+
+    if (campaignContextSection) {
+      console.log(`${LOG_PREFIX} ✅ Injected Campaign Context (Length: ${campaignContextSection.length})`);
+      prompt += `\n\n---\n\n${campaignContextSection}`;
+    } else {
+      console.warn(`${LOG_PREFIX} ⚠️ No Campaign Context generated to inject in custom prompt`);
+    }
+
+    if (accountContextSection) {
+      prompt += `\n\n---\n\n${accountContextSection}`;
+    }
+    if (callPlanContextSection) {
+      prompt += `\n\n---\n\n${callPlanContextSection}`;
+    }
+
+    // Layer contact context
+    const contactContextSection = buildContactContextSection(contactInfo);
+    if (contactContextSection) {
+      prompt += `\n\n---\n\n${contactContextSection}`;
+    }
+
+    // Apply personality configuration (prepends personality/tone/conversation flow if configured)
+    prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
+
+    // Apply control layer based on useCondensedPrompt setting
+    // This ensures proper call handling even with custom prompts
+    let finalPrompt = ensureVoiceAgentControlLayer(prompt, useCondensedPrompt);
+
+    // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+    // Gemini tends to be more literal with system instructions and may introduce itself with org name
+    if (provider === 'google') {
+      const geminiPreamble = `
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+
+
+`;
+      finalPrompt = geminiPreamble + finalPrompt;
+      console.log(`${LOG_PREFIX} Added Gemini compliance preamble to prevent org name disclosure`);
+    }
+
+    const tokenEstimate = estimateTokenCount(finalPrompt);
+    console.log(`${LOG_PREFIX} Using foundation agent prompt with campaign context layering (${finalPrompt.length} chars, ~${tokenEstimate} tokens) - condensed=${useCondensedPrompt}`);
+    return finalPrompt;
+  }
+
+  // =====================================================================
+  // PATH 2: KNOWLEDGE BLOCKS PATH - Provider-specific prompt from knowledge blocks
+  // When knowledge blocks are available and have content, use them as the foundation
+  // This allows prompts to be edited through the UI without code changes
+  // =====================================================================
+  if (useKnowledgeBlocks) {
+    console.log(`${LOG_PREFIX} Using provider-specific knowledge blocks path for ${provider}`);
+
+    let prompt = providerKnowledge.content;
+
+    // Layer campaign context from new fields if available
+    const campaignContextSection = buildCampaignContextSection({
+      objective: campaignConfig?.campaignObjective,
+      productInfo: campaignConfig?.productServiceInfo,
+      talkingPoints: campaignConfig?.talkingPoints,
+      targetAudience: campaignConfig?.targetAudienceDescription,
+      objections: campaignConfig?.campaignObjections,
+      successCriteria: campaignConfig?.successCriteria,
+      brief: campaignConfig?.campaignContextBrief,
+    });
+
+    if (campaignContextSection) {
+      console.log(`${LOG_PREFIX} Injected Campaign Context into knowledge blocks prompt (Length: ${campaignContextSection.length})`);
+      prompt += `\n\n---\n\n${campaignContextSection}`;
+    }
+
+    // Add account intelligence context
+    if (accountContextSection) {
+      prompt += `\n\n---\n\n${accountContextSection}`;
+    }
+
+    // Add call plan context
+    if (callPlanContextSection) {
+      prompt += `\n\n---\n\n${callPlanContextSection}`;
+    }
+
+    // Add contact context (per-call personalization)
+    const contactContextSection = buildContactContextSection(contactInfo);
+    if (contactContextSection) {
+      prompt += `\n\n---\n\n${contactContextSection}`;
+    }
+
+    // Apply personality configuration (prepends personality/tone/conversation flow if configured)
+    prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
+
+    // Apply organization intelligence and training rules
+    let finalPrompt = await buildAgentSystemPrompt(prompt);
+
+    // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+    if (provider === 'google') {
+      const geminiPreamble = `
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+
+
+`;
+      finalPrompt = geminiPreamble + finalPrompt;
+      console.log(`${LOG_PREFIX} Added Gemini compliance preamble (knowledge blocks path)`);
+    }
+
+    const tokenEstimate = estimateTokenCount(finalPrompt);
+    console.log(`${LOG_PREFIX} Using knowledge blocks prompt with provider=${provider} (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
+    return finalPrompt;
+  }
+
+  // =====================================================================
+  // PATH 3: CANONICAL SYSTEM PROMPT STRUCTURE (Legacy fallback)
+  // This follows the required flow: Personality → Environment → Tone → Goal → Call Flow → Guardrails
+  // =====================================================================
+
+  const agentName = campaignConfig?.agentName || 'the calling agent';
+  const orgName = campaignConfig?.organizationName || campaignConfig?.companyName || 'our organization';
+  const firstName = contactInfo?.firstName || 'the contact';
+  const fullName = contactInfo?.fullName || `${contactInfo?.firstName || ''} ${contactInfo?.lastName || ''}`.trim() || 'the contact';
+  const contactEmail = contactInfo?.email || '';
+
+  const basePrompt = `# Personality
+
+You are ${agentName}, a professional outbound caller representing **${orgName}**.
+
+You sound like a senior B2B professional who understands the domain.
+You are thoughtful, confident, and forward-looking.
+You speak like someone who is calm, credible, and comfortable discussing industry topics.
+
+You never sound scripted, hype-driven, or salesy.
+You sound like a peer speaking to another peer.
+
+---
+
+# Environment
+
+You are making cold calls to business leaders.
+You only have access to the phone and your conversational ability.
+
+The current time is {{system.time_utc}}.
+The caller ID is {{system.caller_id}}.
+The destination number is {{system.called_number}}.
+
+---
+
+# Tone
+
+Your voice is calm, composed, and professional.
+Speak clearly and slightly slowly.
+Use natural pauses.
+Ask one question at a time and always wait for the response.
+Never interrupt.
+Never rush.
+Never sound pushy or overly enthusiastic.
+
+You should sound present, human, and respectful of the person's time.
+
+---
+
+# Goal
+
+Your primary objective is to confirm that you are speaking directly with ${firstName} and to have a short, thoughtful, and memorable conversation.
+
+This is **not a sales call**.
+
+**CRITICAL COMPLIANCE REQUIREMENT: Do not explain the purpose of the call, mention the company you represent, or provide ANY context until the right person is EXPLICITLY confirmed.**
+
+---
+
+## Call Flow Logic
+
+### CRITICAL: Turn-Taking Rules
+**NEVER speak until the other person finishes responding.** After asking ANY question:
+- You MUST wait in complete silence for their actual response
+- Do NOT say "okay", "great", "perfect", "I understand" or ANY acknowledgement until you HEAR their actual spoken response
+- Do NOT assume, predict, or anticipate what they will say
+- Do NOT continue speaking after your question ends
+- The next words must come from THEM, not from you
+
+---
+
+### 1. Identity Detection (RIGHT-PARTY VERIFICATION)
+Begin every call by asking to speak with ${firstName}.
+**After asking, STOP speaking and wait in silence for their response.**
+
+Listen carefully and classify the response.
+
+**You MUST NOT disclose the purpose, topic, or context of the call until identity is confirmed.**
+
+Right Party is confirmed ONLY when the person explicitly states:
+- "Yes, this is [Name]" / "[Name] speaking" / "That's me" / "Speaking"
+- Clear, unambiguous self-identification
+
+Ambiguity, hesitation, or deflection = NOT confirmed. Ask one clarifying question, then end politely if still unclear.
+
+---
+
+### 2. Right Party Detected
+If the person confirms they are ${fullName}:
+
+Proceed naturally and communicate the following ideas in your own words, while keeping the meaning intact:
+
+- Thank them for taking the call and acknowledge their time.
+- Explain that you're calling from **${orgName}** and that you're speaking with a small number of leaders.
+- Clearly state that this is not a sales call.
+- Explain the purpose of the conversation briefly.
+- Ask one reflective, open-ended question.
+- Listen carefully and allow them to speak without interruption.
+- Acknowledge their perspective thoughtfully, without correcting or persuading.
+- Politely ask whether they would be open to receiving follow-up information.
+- Confirm the email address (${contactEmail}) only if they agree.
+- Emphasize that this is entirely optional and permission-based.
+- Close the call warmly, thanking them for their time and leaving a positive impression.
+
+---
+
+### 3. Gatekeeper Detected (STRICT COMPLIANCE)
+If the person indicates they are not ${firstName} or sounds like a gatekeeper:
+
+- Be polite and respectful.
+- Ask to be connected: "May I speak with ${firstName}?" or "Could you connect me?"
+
+**When Asked "Who is calling?" or "Where are you calling from?":**
+- Respond confidently: "This is [Your Name] calling from ${orgName}."
+
+**When Asked "What is this regarding?" or "What's the purpose of the call?":**
+- Keep it VAGUE. Do NOT give specific details.
+- Say: "It's related to one of our demand generation services" OR "It's regarding some of the services we offer."
+- Do NOT mention specific products, campaigns, meeting requests, or detailed purposes.
+- If pressed further: "I'd be happy to discuss the details with ${firstName} directly. Is ${firstName} available?"
+
+- Make NO MORE than two polite attempts.
+- If refused or access denied → Thank them sincerely and END THE CALL immediately.
+
+---
+
+### 4. Call Transfer
+If you are connected to ${firstName} after a transfer:
+
+- Restart the introduction calmly.
+- Continue the conversation following the same flow.
+
+---
+
+### 5. IVR / Automated Phone System Detected
+If you hear an automated phone system (IVR), menu prompts, or "press X for...":
+
+**Use the send_dtmf function to navigate:**
+- Listen carefully to ALL menu options before pressing any keys
+- ONLY press keys when explicitly prompted by the IVR
+- Wait for the IVR to finish speaking before pressing the next digit
+
+**Navigation strategies:**
+- If there's a "dial-by-name directory": Spell the contact's last name using keypad letters
+- If there's an "operator" option: Press 0 to reach a human
+- If you hear "enter extension": Only enter if you know the exact extension
+- If unsure: Press 0 for operator or wait for the next menu
+
+**Common DTMF patterns:**
+- Menu selection: send_dtmf("1", "Selecting option 1 for sales")
+- Extension: send_dtmf("1234", "Dialing extension 1234")
+- Operator: send_dtmf("0", "Requesting operator")
+- Confirm: send_dtmf("#", "Confirming selection")
+
+**Do NOT:**
+- Guess extension numbers
+- Spam random keys
+- Press keys before the IVR finishes speaking
+
+---
+
+# Guardrails
+
+Once the right person is confirmed, do not re-check or re-confirm identity later in the conversation.
+If the contact says "I don't know" or hesitates, treat it as uncertainty about the topic — not about who they are.
+
+If a person asks whether you are an AI or automated system:
+- Acknowledge honestly and confidently.
+- Do not apologize for being AI.
+- Do not explain technology or how you work.
+- Clearly state that the message and intent are created by real humans to address real business challenges.
+- Ask briefly if they are comfortable continuing.
+- Pause and wait for their response.
+
+Use language similar to:
+"Yes — I'm an automated assistant. I'm calling today to share a message created by real people, focused on real challenges leaders are thinking about. If you're comfortable continuing, I'll keep this very brief."
+
+If the person expresses discomfort or asks to stop:
+- Apologize politely.
+- End the call calmly.
+
+---
+
+# Tools
+
+## send_dtmf
+Use this to navigate IVR systems by sending DTMF tones (keypad digits).
+- digits: The key(s) to press (0-9, *, #). Can be single or multiple.
+- reason: Brief explanation (e.g., "Selecting option 1 for sales")
+
+**Examples:**
+- send_dtmf("1", "Selecting menu option 1")
+- send_dtmf("0", "Requesting operator")
+- send_dtmf("1234", "Dialing extension 1234")
+- send_dtmf("#", "Confirming selection")
+
+## submit_disposition
+Call this when you determine the call outcome. REQUIRED at end of every call.
+
+**QUALIFICATION CRITERIA (STRICT - All must be met for qualified_lead):**
+1. ✅ Identity CONFIRMED - you verified you're speaking to the right person
+2. ✅ Meaningful conversation - at least 30+ seconds of actual dialogue (not just greetings)
+3. ✅ Clear interest signals - ONE OR MORE of:
+   - Asked specific questions about the offer/product/service
+   - Explicitly requested follow-up materials, demo, or meeting
+   - Shared relevant business challenges or pain points
+   - Asked about pricing, timeline, or next steps
+
+**NOT qualified_lead if:**
+- ❌ Only said "yes", "sure", "okay" without elaboration
+- ❌ Call was under 30 seconds
+- ❌ No questions asked by prospect
+- ❌ Identity was never confirmed
+- ❌ Conversation was entirely one-sided (you talking, them just listening)
+
+**Disposition codes:**
+- qualified_lead: All 3 criteria above met. Prospect engaged and interested.
+- not_interested: Prospect politely declined or showed no engagement
+- do_not_call: Prospect explicitly asked not to be called again
+- voicemail: Reached voicemail or answering machine
+- no_answer: Call connected but no meaningful human interaction
+- callback_requested: Prospect asked to be called back
+
+## end_call
+Use this to explicitly hang up the call. Call flow:
+1. Say your goodbye/closing statement
+2. Call submit_disposition with the appropriate outcome
+3. Call end_call to terminate the connection
+
+**When to use:**
+- After completing a successful conversation (say goodbye first)
+- When voicemail/answering machine is detected (no goodbye needed)
+- When gatekeeper blocks you after 2 attempts
+- When prospect says "please stop calling" (comply immediately)
+- When IVR has no path to reach the contact
+
+## submit_call_summary
+Call this after submit_disposition when a human conversation occurred.
+Provide a concise summary plus engagement level, sentiment, time pressure, and follow-up consent.
+
+## schedule_callback
+Call this when prospect requests a specific callback time.
+Before calling: confirm the date/time with the prospect.
+
+## transfer_to_human
+Call this when prospect explicitly asks to speak with a human OR when the situation requires human intervention.
+
+IMPORTANT: Capture comprehensive context for smooth handoff:
+- rationale_for_transfer: Why this transfer is needed
+- conversation_summary: Brief summary of what's been discussed and any info collected
+- prospect_sentiment: Their emotional state (positive, neutral, guarded, frustrated, angry)
+- urgency: How urgent is this (low, medium, high, critical)
+- key_topics: Main topics or concerns they mentioned
+- attempted_resolution: What you tried before requesting transfer
+
+Before calling: say "I understand. Let me connect you with someone who can help. Just a moment please."`;
+
+  let prompt = basePrompt;
+
+  // Add foundation capabilities if provided
+  if (foundationCapabilities && foundationCapabilities.length > 0) {
+    const capabilitiesSection = buildFoundationPromptSections(foundationCapabilities);
+    if (capabilitiesSection) {
+      prompt += `\n\n---\n\n${capabilitiesSection}`;
+    }
+  }
+
+  // Add campaign context from new fields (Foundation + Campaign Layer Architecture)
+  const campaignContextSection = buildCampaignContextSection({
+    objective: campaignConfig?.campaignObjective,
+    productInfo: campaignConfig?.productServiceInfo,
+    talkingPoints: campaignConfig?.talkingPoints,
+    targetAudience: campaignConfig?.targetAudienceDescription,
+    objections: campaignConfig?.campaignObjections,
+    successCriteria: campaignConfig?.successCriteria,
+    brief: campaignConfig?.campaignContextBrief,
+  });
+
+  if (campaignContextSection) {
+    prompt += `\n\n---\n\n${campaignContextSection}`;
+  }
+
+  // Legacy: Add old-style campaign-specific context if new fields not populated
+  if (!campaignContextSection) {
+    if (campaignConfig?.qualificationCriteria) {
+      prompt += `\n\n---\n\n# Qualification Criteria\n${campaignConfig.qualificationCriteria}`;
+    }
+
+    if (campaignConfig?.script) {
+      prompt += `\n\n---\n\n# Additional Context\n${campaignConfig.script}`;
+    }
+  }
+
+  if (accountContextSection) {
+    prompt += `\n\n---\n\n${accountContextSection}`;
+  }
+  if (callPlanContextSection) {
+    prompt += `\n\n---\n\n${callPlanContextSection}`;
+  }
+
+  // Add contact context (per-call personalization)
+  const contactContextSection = buildContactContextSection(contactInfo);
+  if (contactContextSection) {
+    prompt += `\n\n---\n\n${contactContextSection}`;
+  }
+
+  // Apply personality configuration (prepends personality/tone/conversation flow if configured)
+  prompt = applyPersonalityConfiguration(prompt, agentSettings || null);
+
+  let finalPrompt = await buildAgentSystemPrompt(prompt);
+
+  // For Gemini: Add critical compliance preamble to prevent premature org name disclosure
+  if (provider === 'google') {
+    const geminiPreamble = `
+## CRITICAL COMPLIANCE RULES (MUST FOLLOW)
+
+1. **NEVER disclose or say the organization name** until the right person's identity is EXPLICITLY confirmed.
+2. **NEVER introduce yourself with your company name** at the start of the call.
+3. After your opening greeting, **STOP speaking completely** and wait for the person's response.
+4. Do NOT assume, predict, or continue speaking after asking a question.
+5. Do NOT say "okay", "great", "perfect" or any acknowledgement until you hear their actual response.
+6. The person must EXPLICITLY confirm their identity before you proceed with any context.
+7. Focus on the CAMPAIGN CONTEXT section - this is the primary purpose of the call.
+
+
+`;
+    finalPrompt = geminiPreamble + finalPrompt;
+    console.log(`${LOG_PREFIX} Added Gemini compliance preamble (canonical path)`);
+  }
+
+  const tokenEstimate = estimateTokenCount(finalPrompt);
+  console.log(`${LOG_PREFIX} Using canonical system prompt with layered architecture (${finalPrompt.length} chars, ~${tokenEstimate} tokens)`);
+  return finalPrompt;
+}
+
+export function getActiveSessionCount(): number {
+  return activeSessions.size;
+}
+
+export function getSessionStatus(callId: string): OpenAIRealtimeSession | null {
+  return activeSessions.get(callId) || null;
+}
+
+export async function terminateSession(callId: string): Promise {
+  const session = activeSessions.get(callId);
+  if (!session) return false;
+  
+  await endCall(callId, 'completed');
+  return true;
+}
+
+export function getRealtimeStatus(): {
+  activeSessions: number;
+  websocketPath: string;
+  provider: string;
+  model: string;
+  sessions: Array;
+} {
+  const sessionStates = Array.from(activeSessions.values()).map((session) => {
+    const openaiState = session.openaiWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.openaiWs.readyState] : 'NULL';
+    const telnyxState = session.telnyxWs ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][session.telnyxWs.readyState] : 'NULL';
+
+    return {
+      callId: session.callId,
+      runId: session.runId,
+      campaignId: session.campaignId,
+      queueItemId: session.queueItemId,
+      callAttemptId: session.callAttemptId,
+      contactId: session.contactId,
+      streamSid: session.streamSid,
+      isActive: session.isActive,
+      isEnding: session.isEnding,
+      startTime: session.startTime.toISOString(),
+      audioFrameCount: session.audioFrameCount,
+      audioBytesSent: session.audioBytesSent,
+      lastAudioFrameTime: session.lastAudioFrameTime ? session.lastAudioFrameTime.toISOString() : null,
+      telnyxInboundFrames: session.telnyxInboundFrames,
+      telnyxInboundLastTime: session.telnyxInboundLastTime ? session.telnyxInboundLastTime.toISOString() : null,
+      openaiState,
+      telnyxState,
+      bufferedFrames: session.audioFrameBuffer.length,
+      // New interruption/response tracking fields
+      isResponseInProgress: session.isResponseInProgress,
+      currentResponseId: session.currentResponseId,
+      audioPlaybackMs: Math.round(session.audioPlaybackMs),
+      rateLimits: session.rateLimits ? {
+        requestsRemaining: session.rateLimits.requestsRemaining,
+        tokensRemaining: session.rateLimits.tokensRemaining,
+      } : null,
+    };
+  });
+
+  return {
+    activeSessions: sessionStates.length,
+    websocketPath: '/openai-realtime-dialer',
+    provider: 'openai',
+    model: 'gpt-4o-realtime-preview-2024-12-17',
+    sessions: sessionStates,
+  };
+}
+
+function startAudioHealthMonitor(session: OpenAIRealtimeSession): void {
+  const logHealth = () => {
+    if (!session.isActive) {
+      console.log(`${LOG_PREFIX} Health monitor skipped - session ${session.callId} is not active`);
+      return;
+    }
+
+    const now = new Date();
+    const elapsedSeconds = Math.round((now.getTime() - session.startTime.getTime()) / 1000);
+    const timeSinceLastAudio = session.lastAudioFrameTime
+      ? Math.round((now.getTime() - session.lastAudioFrameTime.getTime()) / 1000)
+      : elapsedSeconds;
+    const endAfterSilenceRaw = Number(session.agentSettings?.advanced.conversational.endConversationAfterSilenceSeconds);
+    const agentMaxDurationRaw = Number(session.agentSettings?.advanced.conversational.maxConversationDurationSeconds);
+    const campaignMaxDurationRaw = Number(session.campaignMaxCallDurationSeconds);
+    const endAfterSilenceSeconds = Number.isFinite(endAfterSilenceRaw) ? endAfterSilenceRaw : -1;
+    const agentMaxDurationSeconds = Number.isFinite(agentMaxDurationRaw) ? agentMaxDurationRaw : -1;
+    const campaignMaxDurationSeconds = Number.isFinite(campaignMaxDurationRaw) ? campaignMaxDurationRaw : -1;
+
+    // Use the more restrictive (minimum) of agent and campaign max durations
+    // Campaign max duration takes priority for strict enforcement
+    let effectiveMaxDuration = -1;
+    if (campaignMaxDurationSeconds >= 0 && agentMaxDurationSeconds >= 0) {
+      effectiveMaxDuration = Math.min(campaignMaxDurationSeconds, agentMaxDurationSeconds);
+    } else if (campaignMaxDurationSeconds >= 0) {
+      effectiveMaxDuration = campaignMaxDurationSeconds;
+    } else if (agentMaxDurationSeconds >= 0) {
+      effectiveMaxDuration = agentMaxDurationSeconds;
+    }
+
+    // Enhanced logging for max duration debugging
+    if (effectiveMaxDuration >= 0) {
+      console.log(`${LOG_PREFIX} Max Duration Check [${session.callId}]: elapsed=${elapsedSeconds}s, limit=${effectiveMaxDuration}s, isActive=${session.isActive}, disposition=${session.detectedDisposition || 'none'}`);
+    }
+
+    const timeSinceUserSpeech = session.lastUserSpeechTime
+      ? Math.round((now.getTime() - session.lastUserSpeechTime.getTime()) / 1000)
+      : null;
+
+    if (endAfterSilenceSeconds >= 0 && timeSinceUserSpeech !== null && timeSinceUserSpeech > endAfterSilenceSeconds) {
+      console.warn(`${LOG_PREFIX} Ending call ${session.callId} after ${timeSinceUserSpeech}s of user silence`);
+      endCall(session.callId, 'completed');
+      return;
+    }
+
+    if (effectiveMaxDuration >= 0 && elapsedSeconds > effectiveMaxDuration) {
+      const source = campaignMaxDurationSeconds >= 0 && campaignMaxDurationSeconds  0 && timeSinceLastAudio > 15) {
+      console.warn(`${LOG_PREFIX} âš ï¸  No audio received for ${timeSinceLastAudio}s on call ${session.callId}`);
+    }
+
+    // Alert if audio production seems slow - DISABLED (False positive during listening/silence periods)
+    /* 
+    const framesPerSecond = session.audioFrameCount / (elapsedSeconds + 1);
+    if (session.audioFrameCount > 10 && framesPerSecond  50) {
+      console.error(`${LOG_PREFIX} âŒ CRITICAL: ${session.audioFrameBuffer.length} frames buffered - Telnyx stream may be broken!`);
+    }
+    
+    // Try to recover if Telnyx disconnected but OpenAI is still active
+    if (session.openaiWs?.readyState === WebSocket.OPEN && session.telnyxWs?.readyState !== WebSocket.OPEN) {
+      console.error(`${LOG_PREFIX} âŒ CRITICAL: OpenAI connected but Telnyx disconnected - audio cannot reach caller!`);
+      // This is a critical error - the call should probably be terminated
+      if (session.audioFrameBuffer.length > 100) {
+        console.error(`${LOG_PREFIX} âŒ Buffer overflow - terminating call to prevent memory issues`);
+        endCall(session.callId, 'error');
+      }
+    }
+  };
+
+  // Immediate health log on start
+  logHealth();
+
+  const healthCheckInterval = setInterval(() => {
+    if (!session.isActive) {
+      clearInterval(healthCheckInterval);
+      return;
+    }
+    logHealth();
+  }, 5000);
+}
+
+export {
+  startAudioHealthMonitor,
+  cancelCurrentResponse,
+  clearInputAudioBuffer,
+  createOutOfBandResponse,
+  handleUserInterruption,
+};

@@ -1,0 +1,152 @@
+2025-11-08 17:50:50.24
+12a3887d
+User
+12:50:50 PM [express] GET /api/dashboard/stats 304 in 2ms :: {"totalAccounts":57315,"totalContacts":6…
+2025-11-08 17:50:50.60
+12a3887d
+User
+12:50:50 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b 304 in 39m…
+2025-11-08 17:50:50.65
+12a3887d
+User
+12:50:50 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 304 …
+2025-11-08 17:50:50.67
+12a3887d
+User
+[DB Pool] Client connected | Total: 4, Idle: 1, Waiting: 0
+2025-11-08 17:50:50.74
+12a3887d
+User
+12:50:50 PM [express] GET /api/custom-fields 304 in 164ms :: [{"id":"347c52f5-f20b-46d0-917f-c33337bb…
+2025-11-08 17:50:51.27
+12a3887d
+User
+12:50:51 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+2025-11-08 17:50:54.48
+12a3887d
+User
+12:50:54 PM [express] GET /api/dashboard/stats 200 in 2ms :: {"totalAccounts":57315,"totalContacts":6…
+2025-11-08 17:50:54.88
+12a3887d
+User
+12:50:54 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b 304 in 34m…
+2025-11-08 17:50:54.90
+12a3887d
+User
+12:50:54 PM [express] GET /api/custom-fields 304 in 63ms :: [{"id":"347c52f5-f20b-46d0-917f-c33337bb3…
+2025-11-08 17:50:54.92
+12a3887d
+User
+12:50:54 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 304 …
+2025-11-08 17:50:54.97
+12a3887d
+User
+[DB Pool] Client connected | Total: 5, Idle: 3, Waiting: 0
+2025-11-08 17:50:55.55
+12a3887d
+User
+12:50:55 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+2025-11-08 17:51:10.11
+12a3887d
+User
+[DB Pool] Client removed | Total: 4, Idle: 2, Waiting: 0
+2025-11-08 17:51:10.11
+12a3887d
+User
+[DB Pool] Client removed | Total: 3, Idle: 1, Waiting: 0
+2025-11-08 17:51:11.21
+12a3887d
+User
+[DB Pool] Client removed | Total: 2, Idle: 1, Waiting: 0
+2025-11-08 17:51:42.01
+12a3887d
+User
+[EmailSequenceProcessor] Found 0 emails ready to send
+2025-11-08 17:51:43.51
+12a3887d
+User
+[DB Pool] Client connected | Total: 3, Idle: 1, Waiting: 0
+2025-11-08 17:52:02.32
+12a3887d
+User
+[DB Pool] Client removed | Total: 2, Idle: 1, Waiting: 0
+2025-11-08 17:52:03.12
+12a3887d
+User
+12:52:03 PM [express] GET /api/dashboard/stats 304 in 2ms :: {"totalAccounts":57315,"totalContacts":6…
+2025-11-08 17:52:03.59
+12a3887d
+User
+[DB Pool] Client connected | Total: 4, Idle: 1, Waiting: 0
+2025-11-08 17:52:03.62
+12a3887d
+User
+12:52:03 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b 304 in 129…
+2025-11-08 17:52:03.64
+12a3887d
+User
+12:52:03 PM [express] GET /api/custom-fields 304 in 163ms :: [{"id":"347c52f5-f20b-46d0-917f-c33337bb…
+2025-11-08 17:52:04.28
+12a3887d
+User
+12:52:04 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+2025-11-08 17:52:07.95
+12a3887d
+User
+12:52:07 PM [express] GET /api/dashboard/stats 200 in 2ms :: {"totalAccounts":57315,"totalContacts":6…
+2025-11-08 17:52:08.30
+12a3887d
+User
+12:52:08 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b 304 in 35m…
+2025-11-08 17:52:08.33
+12a3887d
+User
+12:52:08 PM [express] GET /api/custom-fields 304 in 61ms :: [{"id":"347c52f5-f20b-46d0-917f-c33337bb3…
+2025-11-08 17:52:08.37
+12a3887d
+User
+12:52:08 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 304 …
+2025-11-08 17:52:08.97
+12a3887d
+User
+12:52:08 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+2025-11-08 17:52:23.31
+12a3887d
+User
+[DB Pool] Client removed | Total: 3, Idle: 2, Waiting: 0
+2025-11-08 17:52:23.91
+12a3887d
+User
+[DB Pool] Client removed | Total: 2, Idle: 1, Waiting: 0
+2025-11-08 17:52:53.52
+12a3887d
+User
+12:52:53 PM [express] GET /api/dashboard/stats 304 in 1ms :: {"totalAccounts":57315,"totalContacts":6…
+2025-11-08 17:52:53.92
+12a3887d
+User
+12:52:53 PM [express] GET /api/custom-fields 304 in 66ms :: [{"id":"347c52f5-f20b-46d0-917f-c33337bb3…
+2025-11-08 17:52:53.98
+12a3887d
+User
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+2025-11-08 17:52:53.98
+12a3887d
+User
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+2025-11-08 17:52:53.98
+12a3887d
+User
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+2025-11-08 17:52:54.01
+12a3887d
+User
+12:52:54 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b 304 in 162…
+2025-11-08 17:52:54.06
+12a3887d
+User
+12:52:54 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 304 …
+2025-11-08 17:52:54.69
+12a3887d
+User
+12:52:54 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…

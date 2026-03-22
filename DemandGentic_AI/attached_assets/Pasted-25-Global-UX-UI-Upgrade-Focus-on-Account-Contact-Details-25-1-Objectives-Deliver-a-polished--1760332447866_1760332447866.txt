@@ -1,0 +1,128 @@
+25) Global UX/UI Upgrade — Focus on Account & Contact Details
+
+25.1 Objectives
+
+Deliver a polished, professional, and pleasantly beautiful UI with special attention to Account and Contact details pages. Emphasize one‑click actions (LinkedIn, website, call, email), clean information hierarchy, and modern interaction patterns while preserving accessibility and performance.
+
+25.2 Visual Language & Components
+	•	Design System: Tailwind + shadcn/ui + lucide-react icons; 8px spacing grid; rounded‑2xl surfaces; soft shadows; high-contrast text.
+	•	Typography: Inter or Open Sans; headings text-2xl/semibold, section labels text-sm/medium, body text-sm.
+	•	Color Tokens: Neutral background; brand accent for primary actions; success/info/warn/error semantic colors. Light & dark themes.
+	•	Cards: Soft elevation for sections (Overview, Activity, Related Lists). Use concise headers with action chips.
+	•	Badges/Chips: For statuses (DNC, Unsubscribed, Accept‑All, Risky), ICP/Tier, AI confidence.
+
+25.3 Account Details Page — Layout & Interactions
+
+Header Bar (sticky):
+	•	Left: Logo/avatar (auto-fetched favicon or initials) + Account Name + Primary Industry badge; optional Tier chip.
+	•	Right (Icon Row with Tooltips):
+	•	LinkedIn: clickable icon → opens linkedin_url in new tab.
+	•	Website: globe icon → opens https://{domain} in new tab.
+	•	Click‑to‑Call Main: phone icon → triggers Telnyx softphone (/telephony/call?to={main_phone_e164}) with fallback to tel:.
+	•	Click‑to‑Email: envelope icon → mailto: composer (brand sender profile prefilled when possible).
+	•	Copy Domain: copy icon with toast confirmation.
+
+Primary Sections (two‑column on desktop, one‑column on mobile):
+	1.	Overview Card
+	•	Fields: Industry (verified + secondary), Size, Revenue, HQ (address chip with maps deep link), Technologies Installed, LinkedIn Specialties.
+	•	AI Suggestions: inline pill linking to AI Enrichment tab when pending.
+	2.	Contacts (Related)
+	•	Table with key columns (Name, Title, Email, Phone, Last Engagement). Multi‑select bulk actions: Add to List, Add to Campaign, Export.
+	3.	Activity Timeline
+	•	Unified events (emails, calls, leads, QA) with icons and filters; infinite scroll; Today separators.
+	4.	Lists & Segments
+	•	Badges for memberships; quick manage: Add/Remove.
+	5.	Notes & Attachments
+	•	Rich notes editor; file uploads with previews.
+	6.	Custom Fields
+	•	Auto‑rendered from registry; grouped; editable inline.
+
+Right Rail (contextual):
+	•	Quick Actions: Create Task, Add to Campaign, Create Segment from filters, Export.
+	•	Health & Compliance: DNC/Unsub counts, bounce risk, consent summary.
+	•	ABM Snapshot: Domain Set memberships, account penetration chart.
+
+Micro‑interactions:
+	•	Hover states on icons; tooltips with keyboard hints; subtle card entrance animations.
+	•	Skeleton loaders for sections; optimistic UI on quick edits; toasts for success/error.
+
+25.4 Contact Details Page — Layout & Interactions
+
+Header Bar (sticky):
+	•	Left: Avatar (initials) + Full Name + Job Title + Seniority badge.
+	•	Right (Icon Row with Tooltips):
+	•	LinkedIn: opens linkedin_url.
+	•	Website (Account): globe → opens parent account website.
+	•	Click‑to‑Call Direct: phone → Telnyx softphone (/telephony/call?to={direct_phone_e164}) with tel: fallback.
+	•	Click‑to‑Email: envelope → mailto: or in‑app composer with sender profile and template picker.
+	•	Copy Email: copy icon; obfuscate on hover in public demos.
+
+Primary Sections:
+	1.	Profile
+	•	Email verification status pill (Valid / Risky / Invalid / Bounced).
+	•	Department, Location, Timezone, Consent Basis (with source & timestamp).
+	•	Related Account mini‑card (name, industry) with View Account link.
+	2.	Activity Timeline
+	•	Same unified stream; filters by channel and date.
+	3.	Campaign Participation
+	•	Cards for latest Email and Call campaigns; per‑contact performance (opens, clicks, connects, disposition).
+	4.	Lists & Segments
+	•	Membership chips with quick add/remove.
+	5.	Notes & Tasks
+	•	Quick log, schedule callback, assign owner.
+	6.	Custom Fields
+	•	Auto‑rendered, inline editable.
+
+Inline Actions:
+	•	Add to List / Segment popover with create‑new option.
+	•	Assign to Campaign (email/phone) with preview counts.
+	•	Mark DNC / Unsubscribe with confirmation and audit note.
+
+25.5 Iconography & Clickable Actions
+
+Use lucide-react icons with accessible labels and tooltips:
+	•	Linkedin → opens LinkedIn URL
+	•	Globe → opens domain website
+	•	Phone → triggers Telnyx softphone (fallback tel:)
+	•	Mail → opens composer / mailto:
+	•	Copy → copies to clipboard
+	•	MapPin → opens maps deep link
+	•	ShieldCheck → compliance summary
+
+Accessibility:
+	•	All icons: aria-label, title tooltips, role="button", keyboard reachable.
+	•	Color contrast AA minimum; focus rings visible; escape closes dialogs.
+
+25.6 Data Density, Tables & States
+	•	Tables: sticky headers, compact row height, column chooser, saved views, CSV export.
+	•	Empty States: contextual copy + primary CTA (e.g., “No contacts yet — Import CSV”).
+	•	Loading: skeletons for header and cards; progressive content reveal.
+	•	Errors: inline banners with retry; field‑level validation messages.
+
+25.7 Click‑to‑Call / Email — Technical Notes
+	•	Call: POST /telephony/call → provision Telnyx token → open embedded softphone with to number. Fallback tel:{E164} on mobile.
+	•	Email: In‑app composer supports templates + personalization; otherwise mailto: with subject prefill. Enforce mandatory unsubscribe in campaign context.
+	•	Website/LinkedIn: always open in new tab with rel="noopener noreferrer".
+
+25.8 Theming & Brand Polish
+	•	Support brand presets per tenant (primary color, logo, favicon).
+	•	Optional compact mode for power users; font scaling controls.
+	•	Motion: use Framer Motion for subtle transitions (<150ms) and reduced‑motion preference.
+
+25.9 Acceptance Criteria
+	•	LinkedIn and Website icons appear on Account & Contact headers; open correct URLs.
+	•	Click‑to‑Call and Click‑to‑Email work from both pages with proper fallbacks.
+	•	Details pages render Overview, Activity, Related, Notes, Custom Fields with clean hierarchy.
+	•	Badges show verification, consent, suppression statuses clearly.
+	•	All interactive elements are keyboard navigable and pass contrast checks.
+	•	Bulk actions accessible from Related Contacts table (add to list, assign to campaign, export).
+
+25.10 Implementation Checklist (Dev)
+	•	Reusable Header Action Bar component for Account/Contact with props for URLs, phones, emails.
+	•	DetailsLayout component (two‑column responsive grid) + SectionCard component.
+	•	IconButton with built‑in tooltip, aria, and loading states.
+	•	ActivityTimeline shared widget (virtualized list).
+	•	RelatedTable with bulk actions and selection API.
+	•	Unit tests for action handlers (call/email/link clicks) and accessibility.
+
+Outcome: A consistent, elegant details experience that feels premium and enables one‑click productivity, while remaining compliant, accessible, and fast.

@@ -1,0 +1,1039 @@
+import { Router, Request, Response } from "express";
+import { verifyApiKey, verifyHmac } from "../lib/webhookVerify";
+import { db } from "../db";
+import { contentEvents, insertContentEventSchema, leads, calls, campaignQueue, suppressionPhones, campaignSuppressionAccounts, callSessions, activityLog, campaignTestCalls, dialerCallAttempts } from "@shared/schema";
+import { z } from "zod";
+import crypto from "crypto";
+import { eq, or, and, sql } from "drizzle-orm";
+import { mapTelnyxHangupCause, shouldTriggerSuppression } from "../lib/contact-suppression";
+import { updateContactSuppression } from "../services/disposition-engine";
+import { setAmdResultForSession } from "../services/voice-dialer";
+// Autonomous dialer temporarily disabled — lazy-import to avoid startup crash
+// import { autonomousDialerEvents } from "../services/autonomous-ai-dialer";
+
+/**
+ * Helper function to handle test call webhook events
+ * Updates campaignTestCalls table based on call events
+ */
+async function handleTestCallEvent(eventType: string, payload: any, clientState: any): Promise {
+  if (!clientState?.is_test_call || !clientState?.test_call_id) {
+    return false; // Not a test call
+  }
+
+  const testCallId = clientState.test_call_id;
+  console.log(`[Telnyx Webhook] Processing test call event: ${eventType} for test call ${testCallId}`);
+
+  try {
+    switch (eventType) {
+      case 'call.initiated':
+        console.log(`[Telnyx Webhook] Test call ${testCallId} initiated`);
+        break;
+
+      case 'call.answered':
+        console.log(`[Telnyx Webhook] Test call ${testCallId} answered`);
+        await db.update(campaignTestCalls)
+          .set({
+            status: 'in_progress',
+            answeredAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTestCalls.id, testCallId));
+        break;
+
+      case 'call.hangup':
+      case 'call.ended':
+        console.log(`[Telnyx Webhook] Test call ${testCallId} ended`);
+        await db.update(campaignTestCalls)
+          .set({
+            status: 'completed',
+            endedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTestCalls.id, testCallId));
+        break;
+
+      case 'call.machine.detection.ended':
+        const amdResult = payload?.result || payload?.machine_detection_result;
+        console.log(`[Telnyx Webhook] Test call ${testCallId} AMD result: ${amdResult}`);
+        await db.update(campaignTestCalls)
+          .set({
+            customVariables: sql`COALESCE(${campaignTestCalls.customVariables}, '{}'::jsonb) || ${JSON.stringify(
+              { amdResult }
+            )}::jsonb`,
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTestCalls.id, testCallId));
+        break;
+    }
+    return true; // Handled as test call
+  } catch (error) {
+    console.error(`[Telnyx Webhook] Error handling test call event:`, error);
+    return true; // Still mark as test call even if update failed
+  }
+}
+
+const router = Router();
+
+// Webhook event payload schema
+const webhookEventSchema = z.object({
+  api_key: z.string(),
+  event: z.enum(["page_view", "form_submission"]),
+  data: z.object({
+    content_type: z.string().optional(),
+    content_id: z.string().optional(),
+    slug: z.string().optional(),
+    title: z.string().optional(),
+    community: z.string().optional(),
+    contact_id: z.string().optional(),
+    email: z.string().optional(),
+    url: z.string().optional(),
+    form_id: z.string().optional(),
+    fields: z.record(z.any()).optional(),
+    ts: z.string()
+  })
+});
+
+/**
+ * Webhook receiver for Resources Centre events (page_view, form_submission)
+ * Security: HMAC-SHA256 signature validation + API key
+ * Deduplication: unique constraint on uniq_key
+ */
+router.post("/resources-centre", async (req, res) => {
+  try {
+    const {
+      WEBHOOK_API_KEY,
+      WEBHOOK_SHARED_SECRET,
+      SIG_TTL_SECONDS = "300"
+    } = process.env;
+
+    if (!WEBHOOK_API_KEY || !WEBHOOK_SHARED_SECRET) {
+      console.error("Missing webhook configuration");
+      return res.status(500).json({ status: "error", message: "Webhook not configured" });
+    }
+
+    // Verify API key
+    if (!verifyApiKey(req, WEBHOOK_API_KEY)) {
+      console.warn("Webhook: Invalid API key");
+      return res.status(401).json({ status: "error", message: "Invalid API key" });
+    }
+
+    // Verify HMAC signature
+    if (!verifyHmac(req, WEBHOOK_SHARED_SECRET, Number(SIG_TTL_SECONDS))) {
+      console.warn("Webhook: Invalid signature or expired timestamp");
+      return res.status(401).json({ status: "error", message: "Invalid signature" });
+    }
+
+    // Validate payload
+    const validation = webhookEventSchema.safeParse(req.body);
+    if (!validation.success) {
+      console.warn("Webhook: Invalid payload", validation.error);
+      return res.status(400).json({ status: "error", message: "Invalid payload" });
+    }
+
+    const { event, data } = validation.data;
+
+    // Build deduplication key
+    const now = new Date(data.ts || Date.now());
+    const dayBucket = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+    const minuteBucket = `${dayBucket}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
+
+    let uniqKey = event;
+    if (event === "page_view") {
+      // Dedupe: same content + same contact + same day
+      uniqKey += `|${data.content_id || ""}|${data.contact_id || ""}|${dayBucket}`;
+    } else if (event === "form_submission") {
+      // Dedupe: same form + same contact/email + same minute
+      uniqKey += `|${data.form_id || ""}|${data.contact_id || data.email || ""}|${minuteBucket}`;
+    } else {
+      uniqKey += `|${minuteBucket}`;
+    }
+
+    // Insert event (ON CONFLICT DO NOTHING via unique constraint)
+    try {
+      await db.insert(contentEvents).values({
+        eventName: event,
+        contentType: data.content_type || null,
+        contentId: data.content_id || null,
+        slug: data.slug || null,
+        title: data.title || null,
+        community: data.community || null,
+        contactId: data.contact_id || null,
+        email: data.email || null,
+        url: data.url || null,
+        payloadJson: data,
+        ts: new Date(data.ts),
+        uniqKey
+      });
+
+      console.log(`Webhook: Stored ${event} event for ${data.contact_id || data.email || "anonymous"}`);
+    } catch (e: any) {
+      // If duplicate key, silently succeed (deduplication working)
+      if (e.code === "23505" || e.message?.includes("unique constraint")) {
+        console.log(`Webhook: Duplicate ${event} event ignored (dedupe)`);
+      } else {
+        throw e;
+      }
+    }
+
+    return res.json({ status: "ok" });
+  } catch (e: any) {
+    console.error("Webhook error:", e);
+    return res.status(500).json({ status: "error", message: e.message });
+  }
+});
+
+/**
+ * Telnyx webhook schema for recording.completed events
+ */
+const telnyxWebhookSchema = z.object({
+  data: z.object({
+    event_type: z.string(),
+    id: z.string(),
+    occurred_at: z.string(),
+    payload: z.object({
+      call_control_id: z.string(),
+      call_leg_id: z.string(),
+      call_session_id: z.string(),
+      recording_urls: z.object({
+        mp3: z.string().optional(),
+        wav: z.string().optional(),
+      }),
+      public_recording_urls: z.object({
+        mp3: z.string().optional(),
+        wav: z.string().optional(),
+      }).optional(),
+    }),
+  }),
+  meta: z.object({
+    attempt: z.number().optional(),
+    delivered_to: z.string().optional(),
+  }).optional(),
+});
+
+/**
+ * Verify Telnyx webhook signature
+ */
+function verifyTelnyxSignature(
+  body: string,
+  signature: string | undefined,
+  timestamp: string | undefined,
+  publicKey: string
+): boolean {
+  if (!signature || !timestamp) {
+    return false;
+  }
+
+  // Telnyx uses timestamp|body format for signature
+  const signedPayload = `${timestamp}|${body}`;
+  
+  try {
+    const verify = crypto.createVerify('sha256');
+    verify.update(signedPayload);
+    verify.end();
+    
+    // Signature is base64 encoded
+    return verify.verify(publicKey, signature, 'base64');
+  } catch (error) {
+    console.error('[Telnyx Webhook] Signature verification error:', error);
+    return false;
+  }
+}
+
+/**
+ * Telnyx webhook endpoint for Call Control and recording events
+ * Handles: recording.completed, call.speak.ended, call.gather.ended, call.answered, call.hangup
+ * 
+ * Security: Verifies Telnyx signature using public key (optional)
+ * 
+ * To configure in Telnyx dashboard:
+ * 1. Go to Portal > Call Control Apps > Your App > Settings
+ * 2. Add webhook URL: https://your-domain.replit.app/api/webhooks/telnyx
+ * 3. Enable required events
+ */
+router.post("/telnyx", async (req, res) => {
+  try {
+    console.log(`[Telnyx Webhook] Received event:`, JSON.stringify(req.body).substring(0, 500));
+    
+    const TELNYX_PUBLIC_KEY = process.env.TELNYX_PUBLIC_KEY;
+    
+    // If public key is configured, verify signature for security
+    if (TELNYX_PUBLIC_KEY) {
+      const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
+      const timestamp = req.headers['telnyx-timestamp-ed25519'] as string | undefined;
+      
+      const bodyString = JSON.stringify(req.body);
+      const isValid = verifyTelnyxSignature(bodyString, signature, timestamp, TELNYX_PUBLIC_KEY);
+      
+      if (!isValid) {
+        console.warn('[Telnyx Webhook] Invalid signature');
+        return res.status(401).json({ error: "Invalid signature" });
+      }
+    }
+
+    // Extract event data - handle different Telnyx payload formats
+    const eventData = req.body.data || req.body;
+    let eventType = eventData.event_type || req.body.event_type;
+    const payload = eventData.payload || eventData;
+    const callbackSource = payload.CallbackSource || payload.callback_source;
+    const callStatus = payload.CallStatus || payload.call_status;
+
+    // Normalize call control id for TeXML/Twilio-style callbacks
+    if (!payload.call_control_id) {
+      payload.call_control_id = payload.CallSid || payload.CallSidLegacy || payload.call_control_id;
+    }
+
+    if (!eventType && callbackSource === 'call-progress-events') {
+      payload.call_leg_id = payload.call_leg_id || payload.CallLegId;
+      payload.status = payload.status || callStatus;
+
+      // Map CallStatus to appropriate event type
+      if (callStatus === 'in-progress') {
+        eventType = 'call.answered';
+      } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
+        eventType = 'call.hangup';
+      } else {
+        // For ringing, queued, etc. - just log and ignore
+        console.log(`[Telnyx Webhook] call-progress event (CallStatus=${callStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `call_status_${callStatus}` });
+      }
+      console.log(`[Telnyx Webhook] call-progress event (CallStatus=${callStatus}) -> ${eventType}`);
+    }
+
+    // Handle Cost/Billing events (no event_type)
+    if (!eventType && payload.CallbackSource === 'call-cost-events') {
+      return res.json({ status: "ignored", reason: "cost_event" });
+    }
+
+    // Handle TeXML status callbacks without callbackSource
+    if (!eventType && callStatus) {
+      payload.call_leg_id = payload.call_leg_id || payload.CallLegId;
+      payload.status = payload.status || callStatus;
+
+      if (callStatus === 'in-progress') {
+        eventType = 'call.answered';
+      } else if (['completed', 'failed', 'busy', 'no-answer', 'canceled'].includes(callStatus)) {
+        eventType = 'call.hangup';
+      } else {
+        console.log(`[Telnyx Webhook] call-status event (CallStatus=${callStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `call_status_${callStatus}` });
+      }
+      console.log(`[Telnyx Webhook] call-status event (CallStatus=${callStatus}) -> ${eventType}`);
+    }
+
+    // Handle TeXML recording callbacks without event_type
+    const recordingStatusRaw = payload.RecordingStatus || payload.recording_status;
+    if (!eventType && recordingStatusRaw) {
+      const recordingStatus = String(recordingStatusRaw).toLowerCase();
+      if (recordingStatus === 'completed') {
+        eventType = 'recording.completed';
+
+        const directRecordingUrl = payload.RecordingUrl || payload.RecordingURL || payload.recording_url;
+        if (!payload.recording_urls && directRecordingUrl) {
+          const urlLower = typeof directRecordingUrl === 'string' ? directRecordingUrl.toLowerCase() : '';
+          const recordingUrls: { mp3?: string; wav?: string } = {};
+
+          if (urlLower.endsWith('.wav')) {
+            recordingUrls.wav = directRecordingUrl;
+          } else if (urlLower.endsWith('.mp3')) {
+            recordingUrls.mp3 = directRecordingUrl;
+          } else if (typeof directRecordingUrl === 'string') {
+            recordingUrls.mp3 = directRecordingUrl;
+          }
+
+          payload.recording_urls = recordingUrls;
+        }
+      } else {
+        console.log(`[Telnyx Webhook] recording status (${recordingStatus}) - ignoring`);
+        return res.json({ status: "ignored", reason: `recording_status_${recordingStatus}` });
+      }
+    }
+
+    if (!eventType) {
+      console.log(`[Telnyx Webhook] Received payload without event_type:`, JSON.stringify(payload).substring(0, 200));
+      return res.json({ status: "ignored", reason: "missing_event_type" });
+    }
+
+    console.log(`[Telnyx Webhook] Processing event: ${eventType}`);
+
+    // Decode client_state once for use throughout webhook processing
+    let decodedClientState: any = null;
+    if (payload?.client_state) {
+      try {
+        decodedClientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+      } catch (e) {
+        // Not base64 encoded or invalid JSON - ignore
+      }
+    }
+
+    // Handle test call events (updates campaignTestCalls table)
+    // Test calls are identified by is_test_call flag in client_state
+    const isTestCall = await handleTestCallEvent(eventType, payload, decodedClientState);
+    if (isTestCall) {
+      console.log(`[Telnyx Webhook] Processed as test call event`);
+      // Continue processing - test calls also need AI bridge handling
+    }
+
+    // Import AI bridge for handling AI call events
+    const { getTelnyxAiBridge } = await import('../services/telnyx-ai-bridge');
+    const bridge = getTelnyxAiBridge();
+
+    // Handle different event types
+    switch (eventType) {
+      case 'call.answered':
+        console.log(`[Telnyx Webhook] Call answered: ${payload.call_control_id}`);
+
+        // Always mark the call as answered in the bridge for polling to detect
+        bridge.markCallAnswered(payload.call_control_id);
+
+        // Check if this is an OpenAI Realtime call by looking at client_state
+        let clientState: any = null;
+        if (payload.client_state) {
+          try {
+            clientState = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+          } catch (e) {
+            // Not base64 encoded or invalid JSON
+          }
+        }
+
+        // TeXML calls handle streaming automatically via 
+        // The TeXML endpoint returns XML with  directive that auto-connects to WebSocket
+        if (clientState?.provider === 'openai_realtime') {
+          console.log(`[Telnyx Webhook] OpenAI Realtime TeXML call answered: ${payload.call_control_id}`);
+          console.log(`[Telnyx Webhook] Streaming handled automatically by TeXML  verb`);
+          return res.json({ status: "ok", event_type: eventType });
+        }
+
+        // TeXML calls handle voice via Gemini Live native audio through /voice-dialer WebSocket
+        // No TTS greeting needed here - the  verb auto-connects to Gemini
+        void bridge.handleSimpleWebhookEvent('answered', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for answered (${payload.call_control_id}):`, err);
+        });
+        return res.json({ status: "ok", event_type: eventType });
+
+      case 'call.speak.ended':
+        console.log(`[Telnyx Webhook] Speak ended: ${payload.call_control_id}`);
+        void bridge.handleSimpleWebhookEvent('speak_ended', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for speak_ended (${payload.call_control_id}):`, err);
+        });
+        return res.json({ status: "ok", event_type: eventType });
+
+      case 'call.gather.ended':
+        console.log(`[Telnyx Webhook] Gather ended: ${payload.call_control_id}, speech: ${payload.speech?.result}`);
+        void bridge.handleSimpleWebhookEvent('gather_ended', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for gather_ended (${payload.call_control_id}):`, err);
+        });
+        return res.json({ status: "ok", event_type: eventType });
+
+      case 'call.hangup': {
+        console.log(`[Telnyx Webhook] Call hangup: ${payload.call_control_id}`);
+
+        // Handle pre-connect hangups (busy, rejected, etc.) for contact suppression
+        // These happen before the AI can process disposition, so we handle them here
+        const hangupCause = payload.hangup_cause || payload.sip_hangup_cause || 'normal_clearing';
+        const mappedOutcome = mapTelnyxHangupCause(hangupCause);
+
+        // Only apply suppression for pre-connect failures (busy, rejected, no_answer, etc.)
+        if (shouldTriggerSuppression(mappedOutcome)) {
+          // Try to get contact_id from client_state
+          let clientStateData: any = null;
+          if (payload?.client_state) {
+            try {
+              clientStateData = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+            } catch (e) {
+              // Not base64 encoded or invalid JSON, ignore
+            }
+          }
+
+          // Fallback: get from bridge's state map
+          if (!clientStateData) {
+            clientStateData = bridge.getClientStateByControlId?.(payload.call_control_id);
+          }
+
+          if (clientStateData?.contact_id) {
+            try {
+              await updateContactSuppression(clientStateData.contact_id, mappedOutcome);
+              console.log(`[Telnyx Webhook] Pre-connect hangup: ${hangupCause} -> ${mappedOutcome}, suppression applied for contact ${clientStateData.contact_id}`);
+            } catch (err) {
+              console.error(`[Telnyx Webhook] Failed to update contact suppression:`, err);
+            }
+          }
+        }
+
+        // Update call_sessions record with hangup status
+        // This ensures agent console calls show as completed in recordings dashboard
+        if (payload.call_control_id) {
+          try {
+            await db
+              .update(callSessions)
+              .set({
+                status: 'completed',
+                endedAt: new Date(),
+              })
+              .where(eq(callSessions.telnyxCallId, payload.call_control_id));
+            console.log(`[Telnyx Webhook] Updated call_sessions for hangup: ${payload.call_control_id}`);
+          } catch (err) {
+            console.error(`[Telnyx Webhook] Failed to update call_sessions on hangup:`, err);
+          }
+        }
+
+        void bridge.handleSimpleWebhookEvent('hangup', payload).catch((err) => {
+          console.error(`[Telnyx Webhook] Async bridge handling failed for hangup (${payload.call_control_id}):`, err);
+        });
+
+        return res.json({ status: "ok", event_type: eventType });
+      }
+
+      case 'call.machine.detection.ended': {
+        // Handle machine/voicemail detection - enforce "NEVER leave voicemail" rule
+        const amdResult = payload?.result || payload?.machine_detection_result;
+        const amdConfidence = payload?.confidence || payload?.machine_detection_confidence || 0;
+        console.log(`[Telnyx Webhook] Machine detection result: ${amdResult} (confidence: ${amdConfidence}) for call ${payload.call_control_id}`);
+
+        // PHASE 1: Notify voice-dialer of AMD result to bridge webhook and WebSocket session
+        // This ensures the voice-dialer session receives AMD detection even if it fires before session starts
+        try {
+          setAmdResultForSession(payload.call_control_id, amdResult, amdConfidence);
+          console.log(`[Telnyx Webhook] AMD result forwarded to voice-dialer for call ${payload.call_control_id}`);
+        } catch (amdErr) {
+          console.error(`[Telnyx Webhook] Failed to forward AMD result to voice-dialer:`, amdErr);
+        }
+
+        // CRITICAL: Use startsWith('machine') to catch ALL machine results (machine, machine_start, machine_end_*)
+        if (amdResult?.startsWith('machine') || amdResult === 'fax') {
+          // Machine/voicemail detected - hang up immediately and record disposition
+          try {
+            const telnyxApiKey = process.env.TELNYX_API_KEY;
+            
+            // Hang up immediately to avoid leaving voicemail
+            await fetch(`https://api.telnyx.com/v2/calls/${payload.call_control_id}/actions/hangup`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${telnyxApiKey}`,
+              },
+              body: JSON.stringify({ client_state: payload?.client_state }),
+            });
+            console.log(`[Telnyx Webhook] Hung up machine-detected call ${payload.call_control_id}`);
+            
+            // Try to get client_state from webhook payload first
+            let clientStateData: any = null;
+            if (payload?.client_state) {
+              try {
+                clientStateData = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+            
+            // Fallback: get client_state from bridge's state map if not in webhook
+            if (!clientStateData) {
+              clientStateData = bridge.getClientStateByControlId(payload.call_control_id);
+              if (clientStateData) {
+                console.log(`[Telnyx Webhook] Retrieved client state from bridge for call ${payload.call_control_id}`);
+              }
+            }
+            
+            // Record voicemail disposition
+            if (clientStateData?.queue_item_id) {
+              const { db } = await import('../db');
+              const { campaignQueue } = await import('@shared/schema');
+              const { eq } = await import('drizzle-orm');
+              
+              // Schedule retry in 3-7 days (random) - voicemail retry logic
+              const retryDays = 3 + Math.floor(Math.random() * 5);
+              const nextAttemptAt = new Date();
+              nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+              
+              await db.update(campaignQueue)
+                .set({
+                  status: 'queued',
+                  nextAttemptAt,
+                  agentId: null,
+                  virtualAgentId: null,
+                  lockExpiresAt: null,
+                  updatedAt: new Date()
+                })
+                .where(eq(campaignQueue.id, clientStateData.queue_item_id));
+              console.log(`[Telnyx Webhook] 📠 VOICEMAIL DETECTED: Queue ${clientStateData.queue_item_id} | Contact: ${clientStateData.contact_id || 'unknown'} | Retry: ${nextAttemptAt.toISOString()} | Confidence: ${amdConfidence}`);
+
+              // Insert activity log for voicemail detection
+              try {
+                if (clientStateData.contact_id) {
+                  await db.insert(activityLog).values({
+                    entityType: 'contact',
+                    entityId: clientStateData.contact_id,
+                    eventType: 'voicemail_detected',
+                    payload: {
+                      callControlId: payload.call_control_id,
+                      queueItemId: clientStateData.queue_item_id,
+                      campaignId: clientStateData.campaign_id || null,
+                      amdResult: amdResult,
+                      amdConfidence: amdConfidence,
+                      nextAttemptAt: nextAttemptAt.toISOString(),
+                      retryDays: retryDays,
+                    },
+                    createdBy: null,
+                  });
+                }
+              } catch (logErr) {
+                console.error('[Telnyx Webhook] Failed to log voicemail_detected activity:', logErr);
+              }
+            } else {
+              console.log(`[Telnyx Webhook] AMD detected machine but no queue_item_id available for disposition`);
+            }
+
+          } catch (hangupErr) {
+            console.error(`[Telnyx Webhook] Failed to process machine-detected call:`, hangupErr);
+          }
+        } else if (amdResult === 'human' || amdResult === 'human_residence' || amdResult === 'human_business') {
+          console.log(`[Telnyx Webhook] 👤 HUMAN DETECTED: Call ${payload.call_control_id} | Type: ${amdResult} | Confidence: ${amdConfidence} - continuing with AI conversation`);
+
+          // Try to get client_state for activity logging
+          let clientStateData: any = null;
+          if (payload?.client_state) {
+            try {
+              clientStateData = JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf-8'));
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+
+          // Insert activity log for human detection
+          try {
+            if (clientStateData?.contact_id) {
+              await db.insert(activityLog).values({
+                entityType: 'contact',
+                entityId: clientStateData.contact_id,
+                eventType: 'amd_human_detected',
+                payload: {
+                  callControlId: payload.call_control_id,
+                  campaignId: clientStateData.campaign_id || null,
+                  amdResult: amdResult,
+                  amdConfidence: amdConfidence,
+                },
+                createdBy: null,
+              });
+            }
+          } catch (logErr) {
+            console.error('[Telnyx Webhook] Failed to log amd_human_detected activity:', logErr);
+          }
+          // Human detected - the AI conversation will continue normally via the WebSocket stream
+        }
+        return res.json({ status: "ok", event_type: eventType, amd_result: amdResult });
+      }
+
+      case 'recording.completed':
+        // Handle recording completed (existing logic)
+        break;
+
+      default:
+        // Log for traceability but don't treat as error
+        console.log(`[Telnyx Webhook] Event type: ${eventType} (no handler)`);
+        return res.json({ status: "ignored", event_type: eventType });
+    }
+
+    // Recording completed handling (heavy path): acknowledge immediately, process async
+    if (eventType !== 'recording.completed') {
+      return res.json({ status: "ignored", event_type: eventType });
+    }
+
+    res.json({ status: "accepted", event_type: eventType });
+
+    void (async () => {
+      const { call_control_id, recording_urls, public_recording_urls } = payload;
+
+      // Prefer public URLs, fallback to signed URLs (mp3 preferred over wav)
+      const recordingUrl =
+        public_recording_urls?.mp3 ||
+        public_recording_urls?.wav ||
+        recording_urls.mp3 ||
+        recording_urls.wav;
+
+      if (!recordingUrl) {
+        console.warn('[Telnyx Webhook] No recording URL in payload');
+        return;
+      }
+
+      // Extract stable Telnyx recording ID from the event payload
+      const recordingEventData = (req.body as any)?.data;
+      const telnyxRecordingId: string | undefined =
+        payload.recording_id || payload.id || recordingEventData?.id || undefined;
+
+      console.log(`[Telnyx Webhook] Processing recording.completed for call_control_id: ${call_control_id}, recording_id: ${telnyxRecordingId || 'none'}`);
+
+      // Import recording storage service for permanent S3 storage
+      const { storeRecordingFromWebhook, isRecordingStorageEnabled } = await import('../services/recording-storage');
+
+      // DE-DUPLICATION: Check if recording already exists for this call
+      // This prevents duplicate recordings when both recording.completed and call.recording.saved fire
+      const existingSession = await db
+        .select({ id: callSessions.id, recordingUrl: callSessions.recordingUrl })
+        .from(callSessions)
+        .where(eq(callSessions.telnyxCallId, call_control_id))
+        .limit(1);
+
+      if (existingSession.length > 0 && existingSession[0].recordingUrl) {
+        console.log(`[Telnyx Webhook] ⏭️ Recording already exists for call ${call_control_id}, skipping duplicate`);
+        return;
+      }
+
+      // Update leads table
+      // Set recordingStatus to 'pending' - storeRecordingFromWebhook() will update to 'stored' or 'failed'
+      const updatedLeads = await db
+        .update(leads)
+        .set({
+          recordingUrl,
+          recordingStatus: 'pending',
+          ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
+        })
+        .where(eq(leads.telnyxCallId, call_control_id))
+        .returning({ id: leads.id });
+
+      // Update calls table (for manual calls) - calls table doesn't have recordingStatus
+      const updatedCalls = await db
+        .update(calls)
+        .set({
+          recordingUrl
+        })
+        .where(eq(calls.telnyxCallId, call_control_id))
+        .returning({ id: calls.id });
+
+      // Update call_sessions table (for AI calls and recordings dashboard)
+      // This is CRITICAL for the recordings dashboard which queries call_sessions
+      // NOTE: We set recordingStatus to 'pending' here - the storeCallSessionRecording()
+      // function will update it to 'stored' or 'failed' after S3 upload completes.
+      // This prevents false 'stored' status when S3 upload fails.
+      const updatedSessions = await db
+        .update(callSessions)
+        .set({
+          recordingUrl,
+          recordingStatus: 'pending',
+          ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
+        })
+        .where(eq(callSessions.telnyxCallId, call_control_id))
+        .returning({ id: callSessions.id, campaignId: callSessions.campaignId });
+
+      // Update dialer_call_attempts table (for human agent calls)
+      // This ensures recordings are linked to the call attempt for lead creation
+      const updatedCallAttempts = await db
+        .update(dialerCallAttempts)
+        .set({
+          recordingUrl,
+          updatedAt: new Date(),
+          ...(telnyxRecordingId ? { telnyxRecordingId } : {}),
+        })
+        .where(eq(dialerCallAttempts.telnyxCallId, call_control_id))
+        .returning({ id: dialerCallAttempts.id });
+
+      const totalUpdated = updatedLeads.length + updatedCalls.length + updatedSessions.length + updatedCallAttempts.length;
+
+      if (totalUpdated === 0) {
+        console.log(`[Telnyx Webhook] No matching lead/call/session found for call_control_id: ${call_control_id}`);
+        return;
+      }
+
+      console.log(`[Telnyx Webhook] ✅ Updated ${totalUpdated} record(s) with recording URL (leads: ${updatedLeads.length}, calls: ${updatedCalls.length}, sessions: ${updatedSessions.length}, callAttempts: ${updatedCallAttempts.length})`);
+
+      // Store recordings permanently in GCS (async, don't block webhook response)
+      // CRITICAL: This downloads from Telnyx and uploads to our GCS bucket for permanent storage
+      if (isRecordingStorageEnabled()) {
+        // Import storeCallSessionRecording for call_sessions GCS storage
+        const { storeCallSessionRecording } = await import('../services/recording-storage');
+
+        console.log(`[Telnyx Webhook] 🔄 Initiating GCS storage for ${updatedLeads.length} lead(s) and ${updatedSessions.length} session(s)...`);
+
+        // Store lead recordings in background (with single retry on failure)
+        for (const lead of updatedLeads) {
+          storeRecordingFromWebhook(lead.id, recordingUrl).then(() => {
+            console.log(`[Telnyx Webhook] ✅ GCS storage succeeded for lead ${lead.id}`);
+          }).catch(async (err) => {
+            console.error(`[Telnyx Webhook] ❌ Failed to store recording for lead ${lead.id} (will retry in 10s):`, err.message);
+            setTimeout(async () => {
+              try {
+                await storeRecordingFromWebhook(lead.id, recordingUrl);
+                console.log(`[Telnyx Webhook] ✅ Retry succeeded for lead ${lead.id}`);
+              } catch (retryErr: any) {
+                console.error(`[Telnyx Webhook] ❌❌ FINAL FAILURE for lead ${lead.id}:`, retryErr.message);
+              }
+            }, 10000);
+          });
+        }
+
+        // Store call session recordings in background (with single retry on failure)
+        for (const session of updatedSessions) {
+          storeCallSessionRecording(session.id, recordingUrl).then(() => {
+            console.log(`[Telnyx Webhook] ✅ GCS storage succeeded for session ${session.id}`);
+          }).catch(async (err) => {
+            console.error(`[Telnyx Webhook] ❌ Failed to store recording for session ${session.id} (will retry in 10s):`, err.message);
+            setTimeout(async () => {
+              try {
+                await storeCallSessionRecording(session.id, recordingUrl);
+                console.log(`[Telnyx Webhook] ✅ Retry succeeded for session ${session.id}`);
+              } catch (retryErr: any) {
+                console.error(`[Telnyx Webhook] ❌❌ FINAL FAILURE for session ${session.id}:`, retryErr.message);
+              }
+            }, 10000);
+          });
+        }
+      } else {
+        console.warn(`[Telnyx Webhook] ⚠️ GCS storage is DISABLED - recordings will only have Telnyx URLs (will expire)`);
+      }
+
+      // TRANSCRIPTION FALLBACK: Trigger transcription for call attempts missing transcripts
+      // This ensures we get transcripts even when Gemini real-time transcription fails
+      if (updatedCallAttempts.length > 0) {
+        const { checkTranscriptStatus, attemptFallbackTranscription } = await import('../services/transcription-reliability');
+
+        for (const attempt of updatedCallAttempts) {
+          // Schedule transcription check after a short delay (5s) to allow DB writes to commit
+          setTimeout(async () => {
+            try {
+              const status = await checkTranscriptStatus(attempt.id);
+              if (!status.hasTranscript) {
+                console.log(`[Telnyx Webhook] 🎤 Call attempt ${attempt.id} missing transcript - triggering fallback`);
+                const result = await attemptFallbackTranscription(attempt.id, recordingUrl, call_control_id);
+                if (result.success) {
+                  console.log(`[Telnyx Webhook] ✅ Fallback transcription succeeded for ${attempt.id}`);
+                } else {
+                  console.log(`[Telnyx Webhook] ⏳ Fallback transcription queued for ${attempt.id}: ${result.error}`);
+                }
+              } else {
+                console.log(`[Telnyx Webhook] ✅ Call attempt ${attempt.id} already has transcript (source: ${status.transcriptSource})`);
+              }
+            } catch (e) {
+              console.error(`[Telnyx Webhook] ❌ Fallback transcription error for ${attempt.id}:`, e);
+            }
+          }, 5000);
+        }
+      }
+
+      console.log(`[Telnyx Webhook] recording.completed async processing finished (updated=${totalUpdated})`);
+    })().catch((err) => {
+      console.error('[Telnyx Webhook] recording.completed async processing failed:', err);
+    });
+
+    return;
+
+  } catch (error: any) {
+    console.error('[Telnyx Webhook] Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// ElevenLabs Integration Removed - Using Voice Dialer exclusively
+// ============================================================================
+// All AI agent disposition handling is performed by Voice Dialer (Gemini/OpenAI)
+// See server/services/voice-dialer.ts for unified disposition handling
+
+// Signature verification removed - ElevenLabs integration discontinued
+
+// Disposition mapping removed - ElevenLabs integration discontinued
+
+
+
+// ============================================================================
+// ElevenLabs Endpoints Removed - Using Voice Dialer exclusively
+// ============================================================================
+// All AI agent disposition handling is performed by Voice Dialer (Gemini/OpenAI)
+// See server/services/voice-dialer.ts
+
+/**
+ * Telnyx Recording Sync - Fetch recordings from Telnyx and update call_sessions
+ * Uses Telnyx V1 API to look up recordings by dialed number
+ */
+router.post("/sync-telnyx-recordings", async (req: Request, res: Response) => {
+  try {
+    const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
+    if (!TELNYX_API_KEY) {
+      return res.status(400).json({ error: "TELNYX_API_KEY not configured" });
+    }
+
+    console.log(`[Telnyx Recording Sync] Starting sync...`);
+
+    // Find call_sessions without recording_url from the last 24 hours
+    const sessionsResult = await db.execute(sql`
+      SELECT id, to_number_e164, campaign_id, contact_id, created_at, ai_conversation_id
+      FROM call_sessions
+      WHERE recording_url IS NULL
+        AND agent_type = 'ai'
+        AND created_at > NOW() - INTERVAL '24 hours'
+      ORDER BY created_at DESC
+      LIMIT 100
+    `);
+
+    const sessions = sessionsResult.rows as any[];
+    console.log(`[Telnyx Recording Sync] Found ${sessions.length} sessions without recordings`);
+
+    if (sessions.length === 0) {
+      return res.json({ status: "ok", message: "No sessions need recording sync", synced: 0 });
+    }
+
+    let synced = 0;
+    let errors = 0;
+
+    // Fetch recordings from Telnyx V1 API
+    for (const session of sessions) {
+      try {
+        const phoneNumber = session.to_number_e164;
+        if (!phoneNumber) continue;
+
+        // Query Telnyx V1 API for recordings to this number
+        const response = await fetch(
+          `https://api.telnyx.com/v1/recordings?to=${encodeURIComponent(phoneNumber)}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${TELNYX_API_KEY}`,
+              'Accept': 'application/json'
+            }
+          }
+        );
+
+        if (!response.ok) {
+          console.log(`[Telnyx Recording Sync] API error for ${phoneNumber}: ${response.status}`);
+          continue;
+        }
+
+        const data = await response.json();
+        const recordings = data.data || [];
+
+        if (recordings.length === 0) continue;
+
+        // Find the most recent recording for this phone number
+        // Filter by time window (within 5 minutes of session creation)
+        const sessionTime = new Date(session.created_at).getTime();
+        const matchingRecording = recordings.find((r: any) => {
+          const recordingTime = new Date(r.created_at).getTime();
+          const timeDiff = Math.abs(recordingTime - sessionTime);
+          return timeDiff  {
+  try {
+    const timestamp = new Date().toISOString();
+    const eventData = req.body.data || req.body;
+    const eventType = eventData.event_type || req.body.event_type || 'unknown';
+    const payload = eventData.payload || eventData;
+    
+    // Log the failover event
+    console.log(`[Telnyx Failover] ⚠️ Received failover webhook at ${timestamp}`);
+    console.log(`[Telnyx Failover] Event Type: ${eventType}`);
+    console.log(`[Telnyx Failover] Call Control ID: ${payload.call_control_id || payload.CallSid || 'N/A'}`);
+    console.log(`[Telnyx Failover] Payload:`, JSON.stringify(req.body).substring(0, 1000));
+    
+    // Log headers for debugging
+    const relevantHeaders = {
+      'telnyx-signature-ed25519': req.headers['telnyx-signature-ed25519'],
+      'telnyx-timestamp-ed25519': req.headers['telnyx-timestamp-ed25519'],
+      'content-type': req.headers['content-type'],
+      'x-forwarded-for': req.headers['x-forwarded-for'],
+    };
+    console.log(`[Telnyx Failover] Headers:`, JSON.stringify(relevantHeaders));
+    
+    // Store in activity log for later analysis
+    const telnyxFailoverEntityId =
+      payload.call_session_id || payload.call_control_id || payload.CallSid || crypto.randomUUID();
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'call_session',
+        entityId: telnyxFailoverEntityId,
+        eventType: 'note_added',
+        payload: {
+          context: 'telnyx_failover',
+          rawEventType: eventType,
+          callControlId: payload.call_control_id || payload.CallSid,
+          callSessionId: payload.call_session_id,
+          body: req.body,
+          headers: relevantHeaders,
+          timestamp,
+        },
+        createdBy: null,
+        createdAt: new Date(),
+      });
+    } catch (dbError) {
+      console.error('[Telnyx Failover] Failed to log to DB:', dbError);
+    }
+    
+    // Always return 200 to prevent Telnyx from retrying
+    return res.json({ 
+      status: "received",
+      message: "Failover webhook received and logged",
+      timestamp,
+      eventType,
+    });
+  } catch (error: any) {
+    console.error('[Telnyx Failover] Error processing webhook:', error);
+    // Still return 200 to prevent retries
+    return res.json({ 
+      status: "error",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * TeXML AI Call Failover Endpoint
+ * 
+ * Failover for the TeXML application webhook.
+ * Returns a simple voice response to inform the caller.
+ */
+router.post("/texml/ai-call-failover", async (req, res) => {
+  try {
+    const timestamp = new Date().toISOString();
+    
+    console.log(`[TeXML Failover] ⚠️ Received failover at ${timestamp}`);
+    console.log(`[TeXML Failover] Payload:`, JSON.stringify(req.body).substring(0, 1000));
+    
+    // Log to activity log
+    const texmlFailoverEntityId = req.body.CallSid || req.body.callSid || crypto.randomUUID();
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'call_session',
+        entityId: texmlFailoverEntityId,
+        eventType: 'note_added',
+        payload: {
+          context: 'texml_failover',
+          callSid: req.body.CallSid || req.body.callSid,
+          from: req.body.From,
+          to: req.body.To,
+          body: req.body,
+          timestamp,
+        },
+        createdBy: null,
+        createdAt: new Date(),
+      });
+    } catch (dbError) {
+      console.error('[TeXML Failover] Failed to log to DB:', dbError);
+    }
+    
+    // Return TeXML response that gracefully handles the failover
+    res.set('Content-Type', 'application/xml');
+    return res.send(`
+
+  We're experiencing technical difficulties. Please try again later.
+  
+`);
+  } catch (error: any) {
+    console.error('[TeXML Failover] Error:', error);
+    res.set('Content-Type', 'application/xml');
+    return res.send(`
+
+  
+`);
+  }
+});
+
+// ==================== CATCH-ALL FOR UNKNOWN WEBHOOK ENDPOINTS ====================
+// This prevents 401 errors for webhook paths that don't exist but are being hit by external services
+router.all("*", (req, res) => {
+  console.log(`[Webhooks] Received request to unknown endpoint: ${req.method} ${req.path}`);
+  console.log(`[Webhooks] Headers:`, JSON.stringify(req.headers, null, 2));
+  console.log(`[Webhooks] Body preview:`, JSON.stringify(req.body)?.slice(0, 500));
+  
+  // Return 200 OK to acknowledge receipt (prevents retries from external services)
+  res.status(200).json({ 
+    status: "received", 
+    message: "Webhook endpoint not configured",
+    path: req.path,
+    method: req.method
+  });
+});
+
+export default router;

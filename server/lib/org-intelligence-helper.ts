@@ -280,7 +280,7 @@ async function maybeSummarizeWithGemini(
     } else {
       // Fallback to Google AI Studio with API key (for local development)
       const { GoogleGenAI } = await import("@google/genai");
-      const model = process.env.ORG_LEARNING_GEMINI_MODEL || "gemini-2.0-flash";
+      const model = process.env.ORG_LEARNING_GEMINI_MODEL || "gemini-2.5-flash";
       const genai = new GoogleGenAI({ apiKey: geminiKey });
 
       const result = await genai.models.generateContent({

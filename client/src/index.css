@@ -48,20 +48,20 @@
     background: #718096;
   }
 
-  /* Reserve space for the fixed AgentX side panel when open/collapsed (desktop). */
-  .agentx-shell {
+  /* Reserve space for the fixed AgentC side panel when open/collapsed (desktop). */
+  .agentc-shell {
     padding-right: 0px;
     transition: padding-right 150ms ease;
   }
 
   @media (min-width: 1024px) {
-    .agentx-shell {
-      padding-right: var(--agentx-panel-offset, 0px);
+    .agentc-shell {
+      padding-right: var(--agentc-panel-offset, 0px);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .agentx-shell {
+    .agentc-shell {
       transition: none;
     }
   }

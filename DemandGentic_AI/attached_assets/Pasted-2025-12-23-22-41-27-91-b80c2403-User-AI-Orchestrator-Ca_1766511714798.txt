@@ -1,0 +1,148 @@
+2025-12-23 22:41:27.91
+b80c2403
+User
+[AI Orchestrator] Campaign 4187fb46-c634-42d1-aeb1-d3833f325856: 0/50 in progress, 50 slots available
+2025-12-23 22:41:27.91
+b80c2403
+User
+[AI Orchestrator] Campaign 4187fb46-c634-42d1-aeb1-d3833f325856: 0/50 in progress, 50 slots available
+2025-12-23 22:41:28.71
+b80c2403
+User
+[AI Orchestrator] Found 150 queued items for campaign 4187fb46-c634-42d1-aeb1-d3833f325856
+2025-12-23 22:41:28.71
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Wed 3:00 Australia/Brisbane, hours: 09:00-17:00))
+2025-12-23 22:41:28.81
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Tue 17:00 Europe/London, hours: 09:00-17:00))
+2025-12-23 22:41:28.81
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Tue 17:00 Europe/London, hours: 09:00-17:00))
+2025-12-23 22:41:29.11
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Tue 17:00 Europe/London, hours: 09:00-17:00))
+2025-12-23 22:41:29.11
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Wed 1:00 Asia/Singapore, hours: 09:00-17:00))
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] Phone filtering: 0 with valid phones, 0 skipped (no phone)
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] Australia/Brisbane: 0/1 callable
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] Europe/London: 0/148 callable
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] After compliance: 0 eligible, 0 removed
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] UK breakdown: 0 mobile (+447), 0 landline (+441/2/3)
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] Business hours check: 150 contacts skipped (outside their local business hours)
+2025-12-23 22:41:30.01
+b80c2403
+User
+[AI Orchestrator] Asia/Singapore: 0/1 callable
+2025-12-23 22:41:30.41
+b80c2403
+User
+[Queue:ai-campaign-orchestrator] Job replenish-4187fb46-c634-42d1-aeb1-d3833f325856-1766508895581 started processing
+2025-12-23 22:41:30.41
+b80c2403
+User
+[Queue:ai-campaign-orchestrator] Job replenish-4187fb46-c634-42d1-aeb1-d3833f325856-1766508893023 completed
+2025-12-23 22:41:31.41
+b80c2403
+User
+[AI Orchestrator] Campaign 4187fb46-c634-42d1-aeb1-d3833f325856: 0/50 in progress, 50 slots available
+2025-12-23 22:41:32.11
+b80c2403
+User
+[AI Orchestrator] Found 150 queued items for campaign 4187fb46-c634-42d1-aeb1-d3833f325856
+2025-12-23 22:41:32.11
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Tue 17:00 Europe/London, hours: 09:00-17:00))
+2025-12-23 22:41:32.11
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Wed 3:00 Australia/Brisbane, hours: 09:00-17:00))
+2025-12-23 22:41:32.11
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Tue 17:00 Europe/London, hours: 09:00-17:00))
+2025-12-23 22:41:32.11
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Tue 17:00 Europe/London, hours: 09:00-17:00))
+2025-12-23 22:41:32.44
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Unknown timezone (country: Estonia))
+2025-12-23 22:41:32.44
+b80c2403
+User
+[AI Orchestrator] Skipping contact (Outside hours (Wed 1:00 Asia/Singapore, hours: 09:00-17:00))
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] After compliance: 0 eligible, 0 removed
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] Australia/Brisbane: 0/1 callable
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] Asia/Singapore: 0/1 callable
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] Phone filtering: 0 with valid phones, 0 skipped (no phone)
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] Europe/London: 0/147 callable
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] UK breakdown: 0 mobile (+447), 0 landline (+441/2/3)
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] unknown: 0/1 callable
+2025-12-23 22:41:32.45
+b80c2403
+User
+[AI Orchestrator] Business hours check: 150 contacts skipped (outside their local business hours)
+2025-12-23 22:41:32.46
+b80c2403
+User
+[AUTH] Authorization header present: true
+2025-12-23 22:41:32.46
+b80c2403
+User
+[AUTH] Authentication successful for user: 3400e9b5-3d22-4759-8b99-808c99d8b5a7
+2025-12-23 22:41:32.46
+b80c2403
+User
+[AUTH] requireAuth called for: GET /api/leads
+2025-12-23 22:41:32.74
+b80c2403
+User
+[Queue:ai-campaign-orchestrator] Job replenish-4187fb46-c634-42d1-aeb1-d3833f325856-1766508895581 completed

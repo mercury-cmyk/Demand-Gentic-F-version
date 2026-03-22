@@ -1,0 +1,168 @@
+Pasted-Updated-Filter-Categories-Comprehensive-1-Contact-Fields-Purpose-Demographic-behavioral-and-c-1760312212678_1760312212679.txt
+Updated Filter Categories (Comprehensive)
+1. Contact Fields
+
+Purpose: Demographic, behavioral, and compliance data about individual contacts.
+Applies To: Contacts Module | Campaign Audience Selection | Segments | QA Portal | Client Portal
+Example Fields:
+
+full_name, first_name, last_name
+
+job_title, department, seniority_level
+
+email, email_verification_status (valid | invalid | risky | bounced)
+
+direct_phone, phone_verified_at
+
+city, state, country
+
+linkedin_url, intent_topics[], tags[]
+
+consent_basis, consent_source, consent_ts
+
+2. Account Fields
+
+Purpose: Firmographic, enrichment, and ABM targeting data for companies.
+Applies To: Accounts | Contacts (via joins) | Campaign Audience Selection | Reports
+Example Fields:
+
+account.name, account.domain
+
+account.industry, account.annual_revenue, account.employees_size_range
+
+account.staff_count, account.hq_city, account.hq_country
+
+account.linkedin_url, account.linkedin_specialties
+
+account.technologies_installed, account.intent_topics[]
+
+account.tier, account.ICP_match, account.owner_id, account.tags[]
+
+3. Suppression Fields
+
+Purpose: Compliance and communication opt-out filters.
+Applies To: Contacts | Campaign Pre-Send Validation | Bulk Exports
+Example Fields:
+
+email_suppressed (true/false)
+
+dnc_flag (true/false)
+
+suppression_reason, suppression_date
+
+consent_withdrawn
+
+4. Email Marketing Campaign Fields
+
+Purpose: Engagement and deliverability metrics from email campaign activity.
+Applies To: Contacts | Campaigns | Segments | Reports
+Example Fields:
+
+campaign_name
+
+email_sent, email_delivered, email_opened, email_clicked
+
+email_not_sent, email_not_opened, email_not_clicked
+
+email_soft_bounced, email_hard_bounced, email_never_soft_bounced
+
+last_email_sent_at, last_opened_at, last_clicked_at
+
+5. Telemarketing Campaign Fields
+
+Purpose: Call activity tracking and qualification metrics.
+Applies To: Contacts | Campaigns | QA Portal | Reports
+Example Fields:
+
+telemarketing_campaign_name
+
+caller_name
+
+call_disposition (Qualified, Not Interested, DNC, Callback, Voicemail)
+
+call_comments
+
+qualifying_question (with selected values)
+
+asset_name
+
+call_date_time, call_duration
+
+recording_available (true/false)
+
+6. QA (Lead Review) Fields
+
+Purpose: Track internal lead review status and quality feedback.
+Applies To: Leads | QA Portal | Client Portal Reports
+Example Fields:
+
+qa_status (In Review | Accepted | Rejected)
+
+qa_comments
+
+qa_rejection_reason
+
+qa_approved_at
+
+qa_reviewer
+
+7. List / Segment Fields
+
+Purpose: Identify membership within lists and segments for campaign targeting and exclusions.
+Applies To: Contacts | Accounts | Campaign Audience Builder
+Example Fields:
+
+included_in_list (List Name/ID)
+
+not_included_in_list
+
+included_in_segment
+
+not_included_in_segment
+
+8. Client Portal Fields (NEW)
+
+Purpose: Track lead delivery outcomes and client-side feedback from the Client Portal.
+Applies To: Leads | QA Reports | Client Portal | Internal Analytics
+Example Fields:
+
+client_delivered (Boolean – Lead delivered to client)
+
+client_accepted (Boolean – Client approved lead)
+
+client_rejected (Boolean – Client rejected lead)
+
+client_comments (Text – Client feedback)
+
+client_name (String – Client organization associated with order)
+
+Integration Notes:
+
+Backed by client_delivery_projection joined to Leads and Orders.
+
+Updated asynchronously whenever client acceptance status changes.
+
+Included automatically in filter registry when visible_in_filters = true.
+
+Appears as its own collapsible panel in the Advanced Filter UI.
+
+Cross-Module Scalability Requirements
+
+Every new field created (standard or custom) with visible_in_filters=true must automatically propagate to:
+
+Advanced Filters in Contacts and Accounts
+
+Campaign Audience Selection
+
+Segments & Lists
+
+QA and Client Portal Filters
+
+Bulk Action Filters
+
+No manual schema updates required; all handled via the central Filter Field Registry.
+
+Support thousands of registered fields with <3 seconds response time on ≤5 million records.
+
+Outcome:
+This expanded, category-driven filtering framework allows complete lifecycle visibility—from contact acquisition to client delivery—and scales dynamically as new entities or fields are introduced anywhere in the platform.

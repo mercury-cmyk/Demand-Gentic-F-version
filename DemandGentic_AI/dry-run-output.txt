@@ -1,0 +1,52 @@
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+[DB] Development mode - using DATABASE_URL from environment
+[DB] Database endpoint: ep-mute-sky-ahoyd10z-pooler
+[DB] Using Neon connection pooler: YES (already configured)
+================================================================================
+  Telnyx 3-Day Recording Fetch + Google STT Two-Way Transcription
+================================================================================
+  Date range : 2026-02-09T23:30:40.399Z ΓåÆ now
+  Dry run    : true
+  Limit      : 5
+  Provider   : Google Cloud Speech-to-Text (telephony model)
+  Diarization: 2-speaker (Agent / Prospect)
+================================================================================
+
+[1/5] Fetching Telnyx recordings since 2026-02-09T23:30:40.400Z ΓÇª
+    Page 1: 250 recordings (total: 250)
+    => 250 recordings found
+
+
+[2/5] Linking 5 recordings to DB & checking transcription status ΓÇª
+
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+
+[Bonus] Scanning DB for leads/call_sessions from last 3 days missing transcription ΓÇª
+    Found 6 leads + 9419 call_sessions missing transcripts
+
+[3/5] Transcribing 5 of 9425 DB records missing structured transcripts ΓÇª
+
+[DB 1/5] Transcribing leads:b2edf32f-2bd9-4c1b-af09-fd164375089b ΓÇª
+[DB 1/5]   [DRY-RUN] Would transcribe
+[DB 2/5] Transcribing leads:29e0f5d7-92a1-4e59-b8c4-841684f9a486 ΓÇª
+[DB 2/5]   [DRY-RUN] Would transcribe
+[DB 3/5] Transcribing leads:a9f2276d-a913-4b31-b4c4-a508a846b2fd ΓÇª
+[DB 3/5]   [DRY-RUN] Would transcribe
+[DB 4/5] Transcribing leads:454887ab-83fb-4ef0-879a-6aa95466dc16 ΓÇª
+[DB 4/5]   [DRY-RUN] Would transcribe
+[DB 5/5] Transcribing leads:9425caef-9e91-417b-9b8e-0420f3e3417f ΓÇª
+[DB 5/5]   [DRY-RUN] Would transcribe
+
+================================================================================
+  SUMMARY
+================================================================================
+  Telnyx recordings found    : 250
+  Linked to DB records       : 0
+  Already transcribed (skip) : 0
+  No DB link (skip)          : 5
+  Downloaded & uploaded      : 0
+  Successfully transcribed   : 0
+  Failed                     : 0
+================================================================================
+
+Done.

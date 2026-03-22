@@ -744,8 +744,8 @@ export default function LeadsPage() {
 
   // Publish lead mutation - moves from approved to published (available in project management)
   const publishMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return await apiRequest('POST', `/api/leads/${id}/publish`, {});
+    mutationFn: async ({ id, force = false }: { id: string; force?: boolean }) => {
+      return await apiRequest('POST', `/api/leads/${id}/publish${force ? '?force=true' : ''}`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/leads'], refetchType: 'active' });
@@ -754,7 +754,13 @@ export default function LeadsPage() {
         description: "Lead published to project management",
       });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, variables) => {
+      if (error.message?.includes('Quality requirements not met') && !variables.force) {
+        if (window.confirm('Quality requirements not met (missing recording/transcript/AI analysis).\n\nPublish anyway? This bypasses quality checks for manually verified leads.')) {
+          publishMutation.mutate({ id: variables.id, force: true });
+          return;
+        }
+      }
       toast({
         variant: "destructive",
         title: "Error",
@@ -1556,7 +1562,7 @@ export default function LeadsPage() {
                           <Button
                             size="sm"
                             variant="default"
-                            onClick={() => publishMutation.mutate(lead.id)}
+                            onClick={() => publishMutation.mutate({ id: lead.id })}
                             disabled={publishMutation.isPending}
                             data-testid={`button-publish-${lead.id}`}
                           >

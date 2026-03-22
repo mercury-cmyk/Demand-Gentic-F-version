@@ -1,0 +1,258 @@
+You are a senior staff engineer and product architect building a telemarketing module for a B2B outbound platform (Pivotal B2B).
+
+Your task is to implement a unified campaign audience and disposition enforcement system where:
+
+• AI voice agents execute calls ONLY via PowerDialer runs  
+• Human agents execute calls ONLY via Manual Dial runs  
+• Both run types share the same campaign audience pool  
+• All outcomes are enforced by a single disposition engine  
+• Compliance, data hygiene, retry logic, caps, and QA routing are deterministic and system-controlled  
+
+The solution must be production-grade and include:
+- Data model
+- Backend services
+- Dialer orchestration
+- Disposition enforcement
+- Concurrency safety
+- Reporting hooks
+- Tests
+
+Do not ask questions. Make reasonable assumptions and proceed.
+
+────────────────────────────────
+1. CORE PRINCIPLES (NON-NEGOTIABLE)
+────────────────────────────────
+
+1. Campaigns own audiences — dialers do not.  
+2. Manual Dial and PowerDialer are execution modes, not separate campaigns.  
+3. There is exactly ONE audience pool per campaign.  
+4. Dispositions are unified across AI and human agents.  
+5. Agents select dispositions; the system enforces outcomes.  
+6. Global compliance (DNC) overrides everything.  
+7. No contact may be dialed twice concurrently.
+
+────────────────────────────────
+2. EXECUTION MODES
+────────────────────────────────
+
+Define exactly two run types:
+
+- MANUAL_DIAL  
+  • Accessible only by HUMAN agents  
+  • Agents manually initiate calls from queue  
+
+- POWER_DIAL  
+  • Accessible only by AI agents  
+  • High-throughput automated dialing  
+  • Optimized for connection rate, voicemail detection, and data hygiene  
+
+Role enforcement must be server-side and non-bypassable.
+
+────────────────────────────────
+3. CORE DISPOSITIONS (CANONICAL ENUM)
+────────────────────────────────
+
+These are the ONLY allowed dispositions across the platform:
+
+- QUALIFIED_LEAD  
+- NOT_INTERESTED  
+- DO_NOT_CALL  
+- VOICEMAIL  
+- NO_ANSWER  
+- INVALID_DATA  
+
+No free-text or custom dispositions allowed at agent level.
+
+────────────────────────────────
+4. DISPOSITION → SYSTEM ACTIONS
+────────────────────────────────
+
+Implement a centralized Disposition Engine that enforces the following:
+
+QUALIFIED_LEAD  
+• campaign_contact.state = QUALIFIED  
+• Create lead record with status = IN_QA  
+• Route to QA queue + Leads Portal  
+• Suppress from further dialing for this campaign  
+• Enforce campaign leads cap immediately  
+
+NOT_INTERESTED  
+• campaign_contact.state = REMOVED  
+• Suppress from this campaign permanently  
+
+DO_NOT_CALL  
+• Insert phone into global_dnc (idempotent)  
+• campaign_contact.state = REMOVED  
+• Suppress from ALL campaigns globally  
+• This action is irreversible without admin compliance workflow  
+
+VOICEMAIL  
+• campaign_contact.state = WAITING_RETRY  
+• Schedule next_attempt_at between:  
+  - minimum: now + 3 days  
+  - maximum: now + 7 days  
+• Increment attempts count  
+• Respect max_attempts_per_contact  
+
+NO_ANSWER  
+• Same behavior as VOICEMAIL  
+• Must be tracked separately for reporting  
+
+INVALID_DATA  
+• campaign_contact.state = REMOVED  
+• Suppress from campaign  
+• Mark phone as INVALID  
+• Flag record for data hygiene review  
+• Covers: wrong number, disconnected, not in service, malformed data  
+
+────────────────────────────────
+5. CAMPAIGN-LEVEL RULES (APPLY TO ALL RUN TYPES)
+────────────────────────────────
+
+Each campaign must enforce:
+- max_attempts_per_contact  
+- min_hours_between_attempts  
+- retry window (3–7 days)  
+- leads cap per campaign  
+- business hours by timezone  
+- global DNC suppression  
+- invalid phone suppression  
+
+Manual Dial and PowerDialer must obey the same rules.
+
+────────────────────────────────
+6. AUDIENCE STATE MACHINE
+────────────────────────────────
+
+Allowed states for campaign_contacts:
+
+- ELIGIBLE  
+- LOCKED  
+- WAITING_RETRY  
+- QUALIFIED  
+- REMOVED  
+
+Only contacts in ELIGIBLE state may be dialed.
+
+State transitions must be atomic and transactional.
+
+────────────────────────────────
+7. DATA MODEL (REQUIRED TABLES)
+────────────────────────────────
+
+Implement at minimum:
+
+contacts  
+contact_phones (status: VALID | INVALID)  
+campaigns (rules_json)  
+campaign_contacts (audience pool + state machine)  
+dialer_runs (run_type = MANUAL_DIAL | POWER_DIAL)  
+agents (type = HUMAN | AI)  
+call_attempts  
+leads  
+global_dnc  
+
+Ensure:
+- campaign_contacts is the single source of truth  
+- Unique constraints prevent duplicate dialing  
+- Indexes support eligibility queries  
+
+────────────────────────────────
+8. CONCURRENCY & LOCKING
+────────────────────────────────
+
+Implement a “get next contact” function that:
+- Selects ELIGIBLE records only  
+- Applies campaign rules  
+- Acquires row-level lock with TTL  
+- Moves state → LOCKED  
+- Prevents concurrent access  
+
+Expired locks must auto-release safely.
+
+Both dialers MUST use the same locking logic.
+
+────────────────────────────────
+9. POWERDIALER (AI AGENT FLOW)
+────────────────────────────────
+
+AI agents must:
+- Pull contacts via shared locking function  
+- Place calls via telephony provider  
+- Detect voicemail vs human pickup  
+- Detect invalid/disconnected numbers  
+- Confirm right-party before qualifying  
+- Submit one of the 6 core dispositions  
+- Immediately apply DO_NOT_CALL on opt-out intent  
+
+AI agents must never bypass compliance or retry rules.
+
+────────────────────────────────
+10. MANUAL DIAL (HUMAN FLOW)
+────────────────────────────────
+
+Human agents must:
+- Pull contacts via same locking function  
+- Manually initiate calls  
+- Select one of the 6 dispositions post-call  
+- Be unable to dial suppressed or ineligible contacts  
+
+────────────────────────────────
+11. API DESIGN (EXAMPLE)
+────────────────────────────────
+
+POST /campaigns  
+POST /campaigns/:id/runs  
+POST /runs/:id/start  
+POST /runs/:id/next-contact  
+POST /call-attempts/:id/disposition  
+GET  /leads?status=IN_QA  
+POST /dnc  
+
+All disposition submissions must invoke the Disposition Engine.
+
+────────────────────────────────
+12. REPORTING REQUIREMENTS
+────────────────────────────────
+
+Track metrics by:
+- campaign  
+- run_type  
+- agent_type  
+
+Required metrics:
+- connection rate  
+- voicemail rate  
+- no-answer rate  
+- invalid-data rate  
+- qualified rate  
+- DNC rate  
+
+────────────────────────────────
+13. ACCEPTANCE CRITERIA
+────────────────────────────────
+
+The system must prove that:
+- Manual and PowerDial share the same audience  
+- No contact can be dialed twice concurrently  
+- DO_NOT_CALL suppresses globally  
+- QUALIFIED_LEAD routes to QA and stops dialing  
+- VOICEMAIL / NO_ANSWER retry only after 3–7 days  
+- INVALID_DATA permanently removes the record  
+- AI cannot run manual dial  
+- Humans cannot run PowerDialer  
+
+────────────────────────────────
+14. DELIVERABLES
+────────────────────────────────
+
+Produce:
+1. Database migrations  
+2. Backend services  
+3. PowerDialer AI worker  
+4. Manual Dial flow  
+5. Disposition Engine  
+6. Reporting queries  
+7. Automated tests  
+
+Proceed with implementation.

@@ -1,0 +1,81 @@
+2025-11-21 01:39:03.13
+8c6d6958
+User
+9:39:03 PM [express] GET /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/stats 200 …
+
+2025-11-21 01:39:03.70
+8c6d6958
+User
+9:39:03 PM [express] GET /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/account-ca…
+2025-11-21 01:39:10.93
+8c6d6958
+User
+[AUTH] Authorization header present: true
+2025-11-21 01:39:10.93
+8c6d6958
+User
+[AUTH] requireAuth called for: POST /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/process-pending-contacts
+2025-11-21 01:39:10.93
+8c6d6958
+User
+[AUTH] Authentication successful for user: ae3698b7-9de5-4124-b6e0-f635d5dc5099
+2025-11-21 01:39:10.93
+8c6d6958
+User
+[PROCESS PENDING] Starting for campaign b9e510e5-ff63-4d4d-aaf9-77f5d962579a (triggerEmailValidation: true)
+2025-11-21 01:39:10.96
+8c6d6958
+User
+[PROCESS PENDING] Starting bulk processing for campaign b9e510e5-ff63-4d4d-aaf9-77f5d962579a
+2025-11-21 01:39:10.99
+8c6d6958
+User
+[PROCESS PENDING] Bulk processing complete: 0 contacts processed, 0 eligible, 0 ineligible
+2025-11-21 01:39:10.99
+8c6d6958
+User
+9:39:10 PM [express] POST /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/process-p…
+2025-11-21 01:39:11.07
+8c6d6958
+User
+[AUTH] Authorization header present: true
+2025-11-21 01:39:11.07
+8c6d6958
+User
+[AUTH] Authentication successful for user: ae3698b7-9de5-4124-b6e0-f635d5dc5099
+2025-11-21 01:39:11.07
+8c6d6958
+User
+[AUTH] requireAuth called for: POST /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/process-pending-contacts
+2025-11-21 01:39:11.07
+8c6d6958
+User
+[PROCESS PENDING] Starting for campaign b9e510e5-ff63-4d4d-aaf9-77f5d962579a (triggerEmailValidation: true)
+2025-11-21 01:39:11.11
+8c6d6958
+User
+[PROCESS PENDING] Starting bulk processing for campaign b9e510e5-ff63-4d4d-aaf9-77f5d962579a
+2025-11-21 01:39:11.14
+8c6d6958
+User
+[PROCESS PENDING] Bulk processing complete: 0 contacts processed, 0 eligible, 0 ineligible
+2025-11-21 01:39:11.14
+8c6d6958
+User
+9:39:11 PM [express] POST /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/process-p…
+2025-11-21 01:39:12.27
+8c6d6958
+User
+9:39:12 PM [express] GET /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/stats 304 …
+2025-11-21 01:39:13.08
+8c6d6958
+User
+9:39:13 PM [express] GET /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/stats 304 …
+2025-11-21 01:39:15.85
+8c6d6958
+User
+9:39:15 PM [express] GET /api/verification-campaigns/b9e510e5-ff63-4d4d-aaf9-77f5d962579a/account-ca…
+2025-11-21 01:39:18.13
+8c6d6958
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0

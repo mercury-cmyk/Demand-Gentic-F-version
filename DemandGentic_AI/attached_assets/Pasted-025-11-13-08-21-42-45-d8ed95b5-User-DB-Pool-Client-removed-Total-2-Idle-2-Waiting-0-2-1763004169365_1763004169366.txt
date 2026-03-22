@@ -1,0 +1,117 @@
+025-11-13 08:21:42.45
+d8ed95b5
+User
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+
+2025-11-13 08:21:42.45
+d8ed95b5
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-13 08:21:44.54
+50f5a1de
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 08:21:46.75
+d8ed95b5
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 08:22:11.65
+d8ed95b5
+User
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+2025-11-13 08:22:13.22
+d8ed95b5
+User
+[AUTH] requireAuth called for: GET /api/jobs/status
+2025-11-13 08:22:13.22
+d8ed95b5
+User
+[AUTH] Authorization header present: true
+2025-11-13 08:22:13.22
+d8ed95b5
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 08:22:13.22
+d8ed95b5
+User
+3:22:13 AM [express] GET /api/jobs/status 304 in 4ms :: {"emailValidation":{"enabled":true,"mode":"a…
+2025-11-13 08:22:15.13
+d8ed95b5
+User
+[AUTH] requireAuth called for: GET /api/oauth/microsoft/status
+2025-11-13 08:22:15.13
+d8ed95b5
+User
+[AUTH] Authorization header present: true
+2025-11-13 08:22:15.13
+d8ed95b5
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 08:22:15.17
+d8ed95b5
+User
+3:22:15 AM [express] GET /api/oauth/microsoft/status 304 in 37ms :: {"connected":false}
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[AUTH] requireAuth called for: GET /api/oauth/microsoft/authorize
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[AUTH] Authorization header present: true
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[M365 OAuth] Authorize endpoint called
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[M365 OAuth] Environment variables: {
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+clientId: 'SET',
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+clientSecret: 'SET',
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+tenantId: 'pivotal-b2b.com',
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+scopes: 'offline_access Mail.Read Mail.ReadBasic Mail.ReadWrite Mail.Send'
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+}
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[M365 OAuth] Redirect URI: https://beta-platform.pivotal-b2b.com/api/oauth/microsoft/callback
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[M365 OAuth] Generated auth URL: https://login.microsoftonline.com/pivotal-b2b.com/oauth2/v2.0/authorize?client_id=0b5fe2fe-a906-4a1a-87e9-68ed877bad71&response_type=code&redirect_uri=https%3A%2F%2Fbeta-platform.pivotal-b2b.com%2Fapi%2Foauth%2Fmicrosoft%2Fcallback&response_mode=query&scope=offline_access+Mail.Read+Mail.ReadBasic+Mail.ReadWrite+Mail.Send&state=REWj1hbILpdknBmI4fDtpUapzWGoRZiL&code_challenge=8Os7wvxu2yGMnmlKWUCTPIWeyMaaMdL1qBuS0UAi1bg&code_challenge_method=S256
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+[M365 OAuth] Returning JSON response
+2025-11-13 08:22:17.00
+d8ed95b5
+User
+3:22:17 AM [express] GET /api/oauth/microsoft/authorize 200 in 5ms :: {"authUrl":"https://login.micr…
+2025-11-13 08:22:20.76
+d8ed95b5
+User
+OAuth callback error: Error: {"error":"invalid_client","error_description":"AADSTS500112: The reply address 'http://localhost:3000/api/oauth/microsoft/callback' does not match the reply address 'https://beta-platform.pivotal-b2b.com/api/oauth/microsoft/callback' provided when requesting Authorization code. Trace ID: 79c21866-0c86-4f53-a6e9-bf48c6d86200 Correlation ID: f91352fd-ddfa-4106-9ddf-d30787e630bc Timestamp: 2025-11-13 03:22:20Z","error_codes":[500112],"timestamp":"2025-11-13 03:22:20Z","trace_id":"79c21866-0c86-4f53-a6e9-bf48c6d86200","correlation_id":"f91352fd-ddfa-4106-9ddf-d30787e630bc"}
+2025-11-13 08:22:20.76
+d8ed95b5
+User
+at exchangeAuthorizationCodeForTokens (file:///home/runner/workspace/dist/index.js:35862:11)

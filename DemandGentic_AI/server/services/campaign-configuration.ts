@@ -1,0 +1,319 @@
+import { db } from "../db";
+import { campaigns, virtualAgents, campaignAgentAssignments, campaignTypeEnum } from "@shared/schema";
+import { eq, and } from "drizzle-orm";
+
+export type CampaignType = (typeof campaignTypeEnum.enumValues)[number];
+
+export interface CampaignConfiguration {
+  type: CampaignType;
+  label: string;
+  purpose: string;
+  agentFocus: string[];
+  requirements?: string[];
+  successCriteria?: string[];
+  qualificationQuestions?: string[];
+  openingMessageTemplate?: string;
+}
+
+export const CAMPAIGN_CONFIGURATIONS: Record = {
+  content_syndication: {
+    type: "content_syndication",
+    label: "Content Syndication",
+    purpose: "Pure content distribution call. The ONLY objective is to deliver an asset to the contact. Success = they have said yes to receiving content via email. This is NOT a sales call, NOT a qualification call, NOT a discovery call. It is purely transactional content delivery.",
+    agentFocus: [
+      "Strict 7-step call framework (no deviation)",
+      "Introduce asset concisely with 1-2 value hooks only",
+      "Confirm email and get explicit consent to send",
+      "Close immediately after consent - conversation ends"
+    ],
+    requirements: [
+      "Follow the EXACT 7-step flow: (1) greeting/rapport, (2) role/company confirmation, (3) asset intro, (4) value preview, (5) email confirmation, (6) permission request, (7) close",
+      "NO discovery questions allowed",
+      "NO problem investigation allowed",
+      "NO sales pitch allowed",
+      "NO qualification allowed",
+      "NO follow-up questions after consent is given"
+    ],
+    successCriteria: [
+      "Prospect confirms they are the correct person and correct email",
+      "Prospect explicitly says yes to receiving the asset"
+    ],
+    openingMessageTemplate: "Hello, this is {{agent_name}} calling on behalf of {{company_name}}. How are you today? I have you down as {{contact.jobTitle}} at {{contact.companyName}} — is that right? Great. The reason for the call is we have a free {{asset_type}} called \"{{asset_title}}\" that covers {{asset_topic}}. One thing that really stands out is it shows {{value_point_1}}. I have your email as {{contact.email}}. Can I send that across?"
+  },
+  live_webinar: {
+    type: "live_webinar",
+    label: "Live Webinar",
+    purpose: "Invite ICP-aligned contacts, communicate relevance of the webinar topic, and drive registration.",
+    agentFocus: [
+      "Role relevance",
+      "Timing",
+      "Topic alignment"
+    ],
+    openingMessageTemplate: "Hi {{contact.firstName}}, this is specific_agent_name with {{company_name}}. We're hosting a live session on {{topic}} next week, and given your role as {{contact.jobTitle}}, I thought it might be relevant for you."
+  },
+  on_demand_webinar: {
+    type: "on_demand_webinar",
+    label: "On-Demand Webinar",
+    purpose: "Promote access to recorded content and validate topical interest.",
+    agentFocus: [
+      "Problem relevance",
+      "Learning intent"
+    ],
+    openingMessageTemplate: "Hi {{contact.firstName}}, specific_agent_name here from {{company_name}}. I'm reaching out because we have an on-demand session covering {{topic}} that has been very popular with other {{contact.jobTitle}}s."
+  },
+  high_quality_leads: {
+    type: "high_quality_leads",
+    label: "High-Quality Leads",
+    purpose: "Deliver leads meeting predefined quality thresholds.",
+    agentFocus: [
+      "Quality verification",
+      "Threshold checking"
+    ],
+    requirements: [
+      "Mandatory qualifying questions",
+      "Automatic enforcement of quality criteria"
+    ]
+  },
+  executive_dinner: {
+    type: "executive_dinner",
+    label: "Executive Dinner",
+    purpose: "Invite senior decision-makers to in-person events.",
+    agentFocus: [
+      "Seniority validation",
+      "Strategic relevance",
+      "Attendance confirmation"
+    ],
+    openingMessageTemplate: "Hello {{contact.firstName}}, I'm specific_agent_name calling on behalf of {{company_name}}. We are hosting an exclusive dinner for {{industry}} executives in {{city}} and I wanted to personally extend an invitation."
+  },
+  leadership_forum: {
+    type: "leadership_forum",
+    label: "Leadership Forum",
+    purpose: "Engage senior leaders in peer-level discussions.",
+    agentFocus: [
+      "Leadership relevance",
+      "Topic credibility"
+    ]
+  },
+  conference: {
+    type: "conference",
+    label: "Conference",
+    purpose: "Drive attendance or meetings at conferences.",
+    agentFocus: [
+      "Event relevance",
+      "Role alignment"
+    ]
+  },
+  sql: {
+    type: "sql",
+    label: "Sales Qualified Lead (SQL)",
+    purpose: "Identify leads ready for sales engagement.",
+    agentFocus: [
+      "Problem confirmation",
+      "Solution fit",
+      "Engagement readiness"
+    ],
+    requirements: [
+      "Confirmed problem or need",
+      "Solution fit",
+      "Engagement readiness"
+    ]
+  },
+  appointment_generation: {
+    type: "appointment_generation",
+    label: "Appointment Generation",
+    purpose: "Secure agreement for a specific meeting date/time with a qualified prospect.",
+    agentFocus: [
+      "Qualify interest with ONE discovery question",
+      "Propose specific meeting times (e.g., 'Would Tuesday at 10am or Thursday at 2pm work?')",
+      "Confirm meeting details and email",
+      "Handle scheduling objections"
+    ],
+    successCriteria: [
+      "Prospect agrees to a specific date/time",
+      "OR explicit agreement to receive calendar invite",
+      "Email confirmed for meeting invite"
+    ]
+  },
+  lead_qualification: {
+    type: "lead_qualification",
+    label: "Lead Qualification",
+    purpose: "Build awareness for Agentic B2B Demand (Problem Intelligence + Solution Mapping) and qualify whether demand generation leaders have a recognized gap and interest in a deeper discovery conversation.",
+    agentFocus: [
+      "Lead with awareness message: problem-first outreach instead of spray-and-pray",
+      "Ask a small number of discovery questions (max 2) to confirm fit",
+      "Secure a clear next step when interest is confirmed"
+    ],
+    requirements: [
+      "Keep discovery short and conversational (no interrogation)",
+      "Do not ask more than two qualification questions before moving to close",
+      "If not ready for a meeting, ask permission to send briefing and confirm follow-up timing"
+    ],
+    successCriteria: [
+      "Prospect acknowledges a limitation or gap in current demand generation/outbound approach",
+      "Prospect expresses interest in Problem Intelligence or Solution Mapping approach",
+      "Concrete next step agreed: booked discovery call OR explicit permission to send briefing with follow-up date"
+    ],
+    qualificationQuestions: [
+      "Are your current outbound conversion rates where you want them to be, or is there a gap?",
+      "What is the biggest challenge in your demand generation process right now?",
+      "Would it be useful to explore a problem-first approach like Problem Intelligence and Solution Mapping?"
+    ],
+    openingMessageTemplate: "May I speak with {{contact.fullName}}?"
+  },
+  data_validation: {
+    type: "data_validation",
+    label: "Data Validation",
+    purpose: "Verify accuracy of contact and account data.",
+    agentFocus: [
+      "Confirmation, not persuasion"
+    ]
+  },
+  bant_leads: {
+    type: "bant_leads",
+    label: "BANT Leads",
+    purpose: "Deliver leads qualified across BANT dimensions.",
+    requirements: [
+      "Budget",
+      "Authority",
+      "Need",
+      "Timeline"
+    ],
+    agentFocus: [
+      "Budget qualification",
+      "Authority verification",
+      "Need identification",
+      "Timeline establishment"
+    ]
+  }
+};
+
+export function getCampaignConfiguration(type: string): CampaignConfiguration | undefined {
+  return CAMPAIGN_CONFIGURATIONS[type];
+}
+
+export function generateAgentSystemPrompt(config: CampaignConfiguration, basePrompt?: string): string {
+  let prompt = basePrompt || `You are an intelligent AI agent designed for ${config.label} campaigns. `;
+  
+  prompt += `\nOBJECTIVE:\n${config.purpose}\n`;
+  
+  if (config.agentFocus && config.agentFocus.length > 0) {
+    prompt += `\nKEY FOCUS AREAS:\n`;
+    config.agentFocus.forEach(focus => {
+      prompt += `- ${focus}\n`;
+    });
+  }
+
+  if (config.requirements && config.requirements.length > 0) {
+    prompt += `\nREQUIREMENTS:\n`;
+    config.requirements.forEach(req => {
+      prompt += `- ${req}\n`;
+    });
+  }
+
+  if (config.qualificationQuestions && config.qualificationQuestions.length > 0) {
+    prompt += `\nMANDATORY QUALIFICATION QUESTIONS:\n`;
+    config.qualificationQuestions.forEach((question, index) => {
+      prompt += `${index + 1}. ${question}\n`;
+    });
+  }
+
+  if (config.successCriteria && config.successCriteria.length > 0) {
+    prompt += `\nSUCCESS CRITERIA:\n`;
+    config.successCriteria.forEach(crit => {
+      prompt += `- ${crit}\n`;
+    });
+  }
+
+  prompt += `\nBEHAVIORAL GUIDELINES:\n`;
+  prompt += `- Align your conversation with the campaign objective: ${config.purpose}\n`;
+  if (config.type === 'data_validation') {
+    prompt += `- Be concise and focused on verification. Do not attempt to sell or persuade. Check strictly for accuracy.\n`;
+  } else if (config.type === 'executive_dinner' || config.type === 'leadership_forum') {
+    prompt += `- Maintain a high level of professionalism and deference, appropriate for speaking with senior executives.\n`;
+  } else if (config.type === 'content_syndication') {
+    prompt += `- YOUR ONLY OBJECTIVE: Get the prospect to consent to receive the asset (whitepaper, guide, report, etc.) via email.\n`;
+    prompt += `- STRICT FLOW - DO NOT DEVIATE: (1) greeting, (2) confirm correct person + relevance check, (3) asset intro (title + brief description ONLY), (4) 1-2 specific value points, (5) ask for email confirmation, (6) get explicit permission to send, (7) polite close.\n`;
+    prompt += `- CRITICAL CONSTRAINTS:\n`;
+    prompt += `  * DO NOT ask about their current solution or products.\n`;
+    prompt += `  * DO NOT ask discovery questions about their problem/challenge.\n`;
+    prompt += `  * DO NOT try to qualify them on BANT, budget, timeline, decision-making, or buying intent.\n`;
+    prompt += `  * DO NOT pitch your company's solution or services.\n`;
+    prompt += `  * DO NOT try to solve their problem during this call.\n`;
+    prompt += `  * DO NOT ask follow-up questions beyond confirming email and consent.\n`;
+    prompt += `- The FRAMEWORK is fixed; only campaign context changes (asset title, topic, value points, organization name).\n`;
+    prompt += `- Asset description should be 1 sentence max: "{{asset_title}} covers {{brief_topic}}".\n`;
+    prompt += `- Close immediately after consent is given. Do NOT continue the conversation.\n`;
+    prompt += `- If they say "no" to receiving the asset, thank them and end the call politely.\n`;
+  } else if (config.type === 'lead_qualification') {
+    prompt += `- Run structured discovery: one question at a time, listen fully, and capture specific evidence.\n`;
+    prompt += `- Keep it conversational, not interrogative. Use short acknowledgments between questions.\n`;
+    prompt += `- End with a clear qualification status and explicit next step.\n`;
+  }
+
+  return prompt;
+}
+
+export async function configureCampaignAgents(campaignId: string, type: string) {
+  const config = getCampaignConfiguration(type);
+  if (!config) {
+      console.log(`[CampaignConfig] No configuration found for type: ${type}`);
+      return;
+  }
+
+  console.log(`[CampaignConfig] Configuring agents for campaign ${campaignId} with type ${type}`);
+
+  // Generate the system prompt
+  const systemPrompt = generateAgentSystemPrompt(config);
+
+  // Check if an AI (virtual) agent is already assigned
+  const existingAssignments = await db.select()
+    .from(campaignAgentAssignments)
+    .where(and(
+        eq(campaignAgentAssignments.campaignId, campaignId),
+        eq(campaignAgentAssignments.agentType, 'ai')
+    ));
+
+  let virtualAgentId: string | null = null;
+  if (existingAssignments.length > 0 && existingAssignments[0].virtualAgentId) {
+    virtualAgentId = existingAssignments[0].virtualAgentId;
+  }
+
+  const updateData: any = {
+    systemPrompt: systemPrompt,
+    name: `${config.label} Agent - ${campaignId.substring(0, 8)}`, 
+    description: `Auto-configured agent for ${config.label} campaign. Purpose: ${config.purpose}`,
+    updatedAt: new Date(),
+    isActive: true
+  };
+  
+  if (config.openingMessageTemplate) {
+      updateData.firstMessage = config.openingMessageTemplate;
+  }
+
+  if (virtualAgentId) {
+    // Update existing virtual agent
+    console.log(`[CampaignConfig] Updating existing virtual agent ${virtualAgentId}`);
+    await db.update(virtualAgents)
+      .set(updateData)
+      .where(eq(virtualAgents.id, virtualAgentId));
+  } else {
+    // Create new virtual agent
+    console.log(`[CampaignConfig] Creating new virtual agent`);
+    const [newAgent] = await db.insert(virtualAgents).values({
+      ...updateData,
+      provider: 'gemini_live', // Default to Gemini
+      voice: 'Fenrir', // Default voice
+    }).returning();
+    
+    virtualAgentId = newAgent.id;
+
+    // Assign to campaign
+    await db.insert(campaignAgentAssignments).values({
+      campaignId: campaignId,
+      virtualAgentId: newAgent.id,
+      agentType: 'ai',
+      isActive: true,
+      assignedBy: null // System assigned
+    });
+  }
+}

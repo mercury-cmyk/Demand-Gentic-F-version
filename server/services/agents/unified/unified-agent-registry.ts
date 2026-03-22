@@ -15,7 +15,7 @@ import { unifiedVoiceAgent } from './unified-voice-agent';
 import { unifiedEmailAgent } from './unified-email-agent';
 import { unifiedStrategyAgent } from './unified-strategy-agent';
 import { unifiedQAAgent } from './unified-qa-agent';
-import { unifiedAgentXAgent } from './unified-agentx-agent';
+import { unifiedAgentCAgent } from './unified-agentx-agent';
 import { unifiedMemoryAgent } from './unified-memory-agent';
 import { unifiedContentAgent } from './unified-content-agent';
 import { unifiedPipelineAgent } from './unified-pipeline-agent';
@@ -278,7 +278,7 @@ class UnifiedAgentRegistry {
     this.registerAgent('email', unifiedEmailAgent);
     this.registerAgent('strategy', unifiedStrategyAgent);
     this.registerAgent('qa', unifiedQAAgent);
-    this.registerAgent('agentx', unifiedAgentXAgent);
+    this.registerAgent('agentx', unifiedAgentCAgent);
     this.registerAgent('memory', unifiedMemoryAgent);
     this.registerAgent('content', unifiedContentAgent);
     this.registerAgent('pipeline', unifiedPipelineAgent);

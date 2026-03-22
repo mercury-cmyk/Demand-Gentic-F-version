@@ -1,0 +1,319 @@
+# Pivotal Marketing Platform — PPMS + AI Lead Intake & ABM Automation (Consolidated Spec v2.1)
+
+## 0️⃣ Objective
+
+Design and build a next‑generation **Pipeline Management Platform (PPMS)** for Pivotal B2B that fuses:
+
+* Dynamic Pipelines with integrated Accounts and Contacts
+* True Microsoft 365 OAuth Email sync (Graph API)
+* **AI-driven Account & Company Intelligence**
+* Automated, personalized **email/LinkedIn sequences**
+* **Outlook‑safe** email templates with ABM targeting
+* Modular, data-driven, GDPR/CCPA/TCPA‑compliant foundations
+
+This document **combines**:
+
+1. The **PPMS Full Implementation Prompt (v2)**, and
+2. The **Lead Intake → CRM Completion → Enrichment → AI Analysis → Personalized Outreach** workflow for partial form submissions.
+
+---
+
+## 1️⃣ Tech Stack & Foundations
+
+**Frontend**: React 18 + TypeScript + Vite + Tailwind + shadcn/ui + Zustand/Redux Toolkit
+**Backend**: Node.js 20 + Express + Prisma (PostgreSQL) + Zod
+**Auth**: NextAuth/Passport (OAuth 2.0 for Microsoft 365) + JWT sessions
+**DB**: PostgreSQL (managed)
+**Integrations**: Microsoft Graph (Mail, Calendar, Users), OpenAI/local LLM
+**Jobs**: BullMQ (Redis) for sync & sequences
+**Infra**: Docker + GitHub Actions CI/CD
+**Monitoring**: OpenTelemetry + Winston
+**Testing**: Vitest + Playwright + Pact (API contracts)
+
+---
+
+## 2️⃣ Core Functional Modules
+
+### 2.1 Pipeline Management
+
+* Full CRUD for Pipelines, Stages, Deals
+* Kanban (dnd-kit), drag‑and‑drop with optimistic updates
+* Inline edit: value, owner, stage, close date
+* Metrics: total value, win rate, velocity, monthly forecast
+
+### 2.2 Account & Contact Integration
+
+* Accounts ↔ Contacts ↔ Deals linked
+* Selecting an Account on Deal creation filters Contacts
+* **Account view**:
+
+  * Open/closed deals
+  * Contacts + activity score
+  * **AI AccountBrief** (Section 5)
+  * Email/meeting timeline (M365 sync)
+
+---
+
+## 3️⃣ Microsoft 365 Email & Calendar Integration (Graph API)
+
+### 3.1 OAuth 2.0
+
+* Auth code + PKCE; scopes: `offline_access Mail.ReadWrite Mail.Send Calendars.Read User.Read`
+* Store encrypted access/refresh; auto‑refresh; reconnect UI
+
+### 3.2 Sync
+
+* Fetch inbound/outbound tied to known domains → **Activity** objects
+* Scheduler every 6h + on‑demand `/m365/sync`
+* GDPR: store **metadata & bodyPreview only** (no full body)
+
+### 3.3 Reply Detection
+
+* Webhook subscription on `/me/messages`; replies stop sequences
+
+---
+
+## 4️⃣ Lead Capture → CRM Completion (Partial Form Flow)
+
+### 4.1 Flow Overview
+
+Form (partial) → **Intake API** → Normalize/Dedupe → **Auto‑complete from CRM** (Contacts/Accounts) → **Selective Enrichment** (only if gaps) → Create/Update Lead → emit `lead.captured` event → **AI analysis** → **Personalized outreach**.
+
+### 4.2 Minimal Form Payload → `/api/intake/lead`
+
+Required (soft): `email`, `asset_title`, `asset_type`, `consent_timestamp`, `utm{source,medium,campaign,term,content}`
+Optional: `first_name`, `last_name`, `job_title`, `company_name`, `country/state/city`
+
+**Derived**: `company_domain` from email; `source_bucket` from asset (e.g., `Exec_ABM_Guide_Q4_2025`).
+
+### 4.3 Intake Logic (server)
+
+1. Normalize & extract domain
+2. Dedupe: Contact (by email) → Lead
+3. Auto‑link Account (domain > exact name > fuzzy+country)
+4. Back‑fill Lead fields from existing Contact/Account
+5. If critical gaps remain (title/industry/domain), queue **Enrichment**
+6. Emit `lead.captured` for AI
+
+### 4.4 Enrichment Queue
+
+* Resolve domain; pull `industry`, `headcount_band`, `hq_country`, `revenue_band`, `description`, `tech_stack`; contact `job_title/seniority/phone/linkedin_url`
+* Write provenance + timestamp; throttle & cache vendor calls
+
+### 4.5 Dedupe & Merge
+
+* Email exact → same person; personal vs corporate → keep corporate primary
+* Link Lead → existing Contact where present (no duplicate contacts)
+* Mark junk/test records; quarantine table for fixes
+
+### 4.6 Compliance
+
+* Persist `consent_timestamp`, `consent_source`, `processing_basis`; mask PII in logs; AES‑256 at rest; RBAC; audit log
+
+---
+
+## 5️⃣ AI Account Analyst (Deep Account & Company Insights)
+
+### 5.1 Purpose
+
+Generate structured **AccountBrief** using internal CRM data + public signals: products, positioning, markets, buyer personas, pains/triggers, **tailored outreach angles**.
+
+### 5.2 Data Flow
+
+* **Ingest**: account domain, description, notes; linked contacts/leads
+* **Enrich**: industry normalization & product keywords
+* **Synthesize**: LLM produces AccountBrief JSON
+* **Cache** per Account; auto‑refresh every 14 days (or on demand)
+* **Expose**: `GET /ai/accounts/:id/brief`, `POST /ai/accounts/:id/analyze`
+
+### 5.3 Example Output
+
+```json
+{
+  "accountId": "acc_123",
+  "mainProducts": [{"name": "CloudOps Suite", "desc": "automation for IT workflows"}],
+  "targetMarkets": [{"segment": "Enterprise SaaS", "geo": "North America"}],
+  "buyerTitles": ["Head of IT", "VP of Engineering"],
+  "industries": ["Technology", "Software"],
+  "painHypotheses": [{"pain": "Slow lead qualification", "proof": "Hiring SDRs aggressively"}],
+  "tailoredAngles": {
+    "openingHook": "We noticed your expansion into cloud automation...",
+    "tailoredOffer": "We help streamline your sales-to-marketing pipeline...",
+    "caseStudy": "Acme Tech scaled pipeline by 40% using Content Syndication"
+  },
+  "confidence": 85
+}
+```
+
+---
+
+## 6️⃣ Automated Sequences (Email/Tasks/LinkedIn)
+
+### 6.1 Capabilities
+
+* Multi‑step sequences with delays/branches; enroll by Account/Contact
+* Stop rules: reply, unsubscribe, bounce
+* A/B: subject/body variants
+* Real send via Graph `Mail.Send`; analytics via webhooks (open/click/reply/bounce)
+
+### 6.2 Models
+
+```prisma
+model Sequence {
+  id         String @id @default(cuid())
+  name       String
+  ownerId    String
+  steps      Json    // [{id, kind:'email'|'task'|'linkedin', delay:{days}, templateId, branch}]
+  targetType String  // 'account' | 'contact'
+  status     String  // 'draft' | 'active' | 'paused'
+}
+
+model SequenceEnrollment {
+  id           String @id @default(cuid())
+  sequenceId   String
+  targetId     String
+  status       String  // 'queued'|'in_progress'|'paused'|'completed'
+  currentStep  String?
+  lastEventAt  DateTime?
+}
+```
+
+### 6.3 Personalization Tokens
+
+```
+{{contact.firstName}}, {{contact.jobTitle}}, {{account.name}}, {{account.industry}},
+{{ai.openingHook}}, {{ai.tailoredOffer}}, {{ai.caseStudy}}, {{rep.signature}}
+```
+
+---
+
+## 7️⃣ Outlook‑Safe Email Templates (ABM)
+
+### 7.1 Requirements
+
+* 600px responsive **table layout**; semantic tables (no floats)
+* **Bulletproof header**: gradient for modern clients + solid color fallback (**VML/bgcolor**) for Outlook desktop
+* List‑Unsubscribe headers
+* Minimal inline CSS; accessible typography
+
+### 7.2 Header Snippet
+
+```html
+
+
+  
+  
+
+
+  Pivotal B2B
+
+
+```
+
+---
+
+## 8️⃣ Reports & Analytics
+
+* **Pipeline**: total value, win rate, velocity, weighted forecast
+* **Email**: open/click/reply/bounce by sequence/step/rep
+* **AI Usage**: confidence distributions, refresh cadence, uplift vs. control
+* **Attribution**: asset → meeting → opportunity → revenue
+
+---
+
+## 9️⃣ Compliance & Security
+
+* GDPR/CCPA/TCPA; purpose limitation & right to delete
+* Suppression lists (opt‑out/bounce)
+* **Data minimization**: store only email metadata/bodyPreview
+* AES‑256 at rest; RBAC (admin/manager/rep); audit logs across pipeline, sequences, AI edits
+
+---
+
+## 🔟 Acceptance Criteria (Done)
+
+| Area       | Acceptance Test                               |
+| ---------- | --------------------------------------------- |
+| Pipelines  | DnD updates persist ≤300ms                    |
+| M365       | OAuth connect, sync runs, bodyPreview only    |
+| AI Analyst | AccountBrief ≥80% fields w/ confidence ≥60    |
+| Sequences  | Sends with tokens; stops on reply/unsubscribe |
+| Templates  | Render perfect on Outlook desktop + mobile    |
+| Compliance | Unsubscribes update suppression list          |
+| Reporting  | Forecast = weighted sum across deals          |
+
+---
+
+## 1️⃣1️⃣ API Endpoints
+
+| Endpoint                     | Description                                     |
+| ---------------------------- | ----------------------------------------------- |
+| **/pipelines**               | CRUD pipelines                                  |
+| **/deals**                   | CRUD deals; move stage                          |
+| **/accounts**                | CRUD accounts; fetch contacts                   |
+| **/contacts**                | CRUD contacts                                   |
+| **/m365/oauth/start**        | Begin OAuth redirect                            |
+| **/m365/oauth/callback**     | Handle OAuth callback                           |
+| **/m365/sync**               | Trigger email/calendar sync                     |
+| **/api/intake/lead**         | **Partial lead intake** (form → CRM completion) |
+| **/ai/accounts/:id/analyze** | Generate AccountBrief                           |
+| **/ai/accounts/:id/brief**   | Fetch cached AccountBrief                       |
+| **/templates**               | CRUD email templates                            |
+| **/sequences**               | CRUD & activate sequences                       |
+| **/sequences/:id/enroll**    | Enroll contacts/accounts                        |
+| **/deliver/schedule**        | Trigger sequence send queue                     |
+| **/reports/***               | Funnel/Forecast/Velocity                        |
+
+---
+
+## 1️⃣2️⃣ Implementation Phases
+
+**Sprint 1 — Foundation & Routing**: Auth, routing, Kanban, Accounts/Contacts
+**Sprint 2 — M365 OAuth + Sync**: OAuth, activity timeline, compliance gates
+**Sprint 3 — AI Account Analyst**: LLM integration, AccountBrief, Insights tab
+**Sprint 4 — Sequences Engine**: Queue, scheduler, Graph send, stop rules
+**Sprint 5 — Reports + UI Polish**: Charts, filters, accessibility, dark mode
+
+---
+
+## 1️⃣3️⃣ Field Inventory (Key New/Updated)
+
+**Lead**: `email`, `asset_title`, `asset_type`, `consent_timestamp`, `utm.*`, `first_name`, `last_name`, `job_title`, `company_name`, `company_domain`, `source_bucket`, `contact_id`, `company_id`, `geo_country`, `is_duplicate`, `merge_into_contact_id`, `needs_review`
+**Account**: `industry`, `headcount_band`, `revenue_band`, `hq_country`, `description`, `tech_stack`, `domain`
+**AI**: `ai_company_summary`, `ai_key_challenge`, `ai_talking_point`, `ai_icp_fit_score`, `ai_email_subject`, `ai_email_body`, `ai_followup_message`, `ai_linkedin_message`, `ai_analysis_timestamp`
+
+---
+
+## 1️⃣4️⃣ Orchestration Events
+
+* `lead.captured` → AI pipeline kick‑off
+* `lead.enriched` → AI re‑analyze
+* `sequence.email.sent` → analytics
+* `sequence.email.reply` → stop enrollment
+* `m365.sync.completed` → activity timeline refresh
+
+---
+
+## 1️⃣5️⃣ Example Prompts (System Templates)
+
+**AI Analyze (company)**
+
+> Analyze this company’s industry, market focus, and recent positioning. Summarize what they do, identify their biggest current marketing or revenue challenge, and suggest an ABM‑focused talking point. Use concise language and return short fields.
+
+**AI Draft Email (personalized)**
+
+> Write a short, professional B2B email to {{contact.firstName}}, {{contact.jobTitle}} at {{account.name}}. Reference {{account.industry}} and {{ai_key_challenge}}. Use Pivotal B2B’s positioning as a data‑driven ABM growth partner. CTA: 15‑minute strategy session.
+
+---
+
+## 1️⃣6️⃣ UX Requirements
+
+* Left sidebar + top metrics bar; Inter/Roboto; WCAG 2.1 AA
+* Smooth DnD animations; light/dark toggle
+* Clear empty/error states with recovery actions
+
+---
+
+## ✅ Result
+
+A unified, enterprise‑grade **Pivotal Marketing Platform** where **partial form leads** are auto‑completed by CRM data, **AI analyzes accounts**, and **personalized, Outlook‑safe outreach** is generated and executed — all tied into dynamic pipelines, Microsoft 365, and robust reporting.

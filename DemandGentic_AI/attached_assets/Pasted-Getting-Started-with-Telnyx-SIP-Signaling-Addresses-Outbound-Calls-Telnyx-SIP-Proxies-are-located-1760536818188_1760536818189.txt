@@ -1,0 +1,173 @@
+Getting Started with Telnyx
+SIP Signaling Addresses
+Outbound Calls
+Telnyx SIP Proxies are located in different regions. You can choose which region to use by configuring your SIP device to use any of the SIP proxies below:
+
+Region	FQDN	Primary IP Address	Secondary IP Address
+US	sip.telnyx.com	192.76.120.10	64.16.250.10
+Europe	sip.telnyx.eu	185.246.41.140	185.246.41.141
+Australia	sip.telnyx.com.au	103.115.244.145	103.115.244.146
+Canada	sip.telnyx.ca	192.76.120.31	64.16.250.13
+SIP Regions affect only the SIP signaling path. For selecting where the media path is anchored please refer to the Anchorsite section of this document.
+
+Please note that outbound calls from the same IP address or SIP username are limited to 50 calls every 3 seconds. Telnyx retains the right to modify this limit at their discretion.
+
+
+Inbound Calls
+You can register your SIP device on any of the SIP regions listed above and you will receive Inbound calls from the regional SIP proxy.
+
+If your device uses IP-address or FQDN authentication, then you can choose from which SIP region you will receive calls on the Inbound section of the Connections page in the Telnyx Mission Control portal. Unless you configure the region, the US region will be used.
+
+If you use an ACL or Firewall on your network, please make sure you whitelist both primary and secondary IP addresses listed above for the region you have selected, as inbound calls may come from either IP address.
+
+
+DNS Records
+The FQDNs for each region support DNS records types A, SRV and NAPTR.
+
+The DNS A records resolve to the primary IP address, while the DNS SRV and NAPTR records will allow you to use both IPs, primary and secondary, while also discovering the available transport protocols and their ports.
+
+
+Transport Protocols
+Telnyx supports the following transport protocols for SIP signaling:
+
+Transport Protocol	Port
+UDP	5060
+TCP	5060
+TLS	5061
+Media
+The RTP port range used by Telnyx is 16384 to 32768 (UDP).
+
+Telnyx uses the following media IP addresses to handle RTP streams. If you use an ACL or Firewall on your network, make sure you whitelist these IP addresses:
+
+Subnets (containing all media IPs)
+36.255.198.128/25
+50.114.136.128/25
+50.114.144.0/21
+64.16.226.0/24
+64.16.227.0/24
+64.16.228.0/24
+64.16.229.0/24
+64.16.230.0/24
+64.16.248.0/24
+64.16.249.0/24
+103.115.244.128/25
+185.246.41.128/25
+List of individual IPs
+If you need a list of individual IP addresses please email support@telnyx.com.
+
+Media Forking IP Subnets
+When using the media forking feature Telnyx will send the forked media from an IP address in one of these subnets:
+
+stream_type = raw (default)
+103.115.244.0/26 (addresses .0 to .63)
+185.246.41.0/26 (addresses .0 to .63)
+192.76.120.128/26 (addresses .128 to .191)
+192.76.120.192/27 (addresses .192 to .223)
+stream_type = decrypted
+subnets specified in Media section.
+You may need to explicitly open your firewall to allow UDP traffic from these subnets.
+
+Codecs
+Telnyx supports the following codecs:
+
+G.722
+G.711U (PCMU)
+G.711A (PCMA)
+G.729
+Opus (supported for IB and OB calls, for IB calls though it's only allowed when using TLS or TCP transport)
+H.264
+We currently support only ptime:20 for RTP.
+
+Additional Network Information
+Information on peering with Telnyx can be found on PeeringDB.
+
+Points of presence
+United States	Equinix CH1, DC2, SV1
+Canada	Equinix TR1, Cologix VAN2
+UK	Equinix LD6
+Europe	Equinix FR5, AM6
+Australia	Equinix SY1
+Singapore	Equinix SG1
+Customers can request a direct connection to the Telnyx network via Megaport.
+
+Setting Up Mission Control
+Initial setup
+Log in to Telnyx Mission Control.
+Create a Connection for your SIP device. You can choose between the following types of authentication:
+Credentials (username and password) (inbound and outbound)
+IP address (inbound and outbound)
+FQDN (inbound) + Credentials (outbound)
+FQDN (inbound) + IP address (outbound)
+Making outbound calls
+Create an Outbound Profile and assign your Connection to it.
+When using UDP or TCP, configure your SIP device to send calls to sip:sip.telnyx.com:5060.
+When using TLS, configure your SIP device to send calls to sip:sip.telnyx.com:5061.
+When using the FQDN + Credentials authentication, only Credentials will be used.
+When making calls, be sure to use a valid calling number. Numbers in +e.164 format should always be ok. Please check this article for further details.
+Receiving inbound calls
+Purchase a number and assign it to your Connection.
+If you chose Credentials authentication, you need to register your SIP device with your username and password to sip:sip.telnyx.com:5060 before receiving calls.
+When using IP Authentication Telnyx will initiate a call from the IP address 192.76.120.10 to your Connection using UDP transport by default. If you prefer TCP or TLS transport you can edit the SIP Transport Protocol option for Inbound Calls in the Connections page.
+When using IP authentication, you can enter multiple IP addresses and set different priorities. Telnyx will attempt to connect calls to each IP address following the priorities order and the No Ringback Timeout setting. More advanced routing settings can be configured from the Numbers page under Routing options.
+When using FQDN + Credentials authentication, Telnyx will route calls to the resolved FQDN records .
+Encryption
+Telnyx supports TLS versions 1.2 and v1.3 for encrypted signaling, and SRTP for encrypted media.
+
+For outbound calls, you can configure your device to use TLS and SRTP and make calls without further configuration on the Telnyx portal.
+
+For inbound calls, you can enable TLS with SRTP in the Connections page.
+
+AnchorSite™
+Telnyx will regularly ping your Connection using ICMP ping messages to calculate round trip timings from all Telnyx available sites.
+
+The site with the lowest latency will be selected as the AnchorSite™, and the media for Inbound/Outbound calls will be anchored in that site.
+
+If you prefer not to receive pings from Telnyx and manually anchor your media in one of the available sites, you can do so from the Connections page.
+
+Media Handling
+Telnyx will automatically detect your media IP address by monitoring the RTP packets received during the first seconds after media establishment on the media IP address:port pair and adjust it automatically if it differs from the pair announced by you during call establishment. This option can be disabled using the option Disable RTP Auto Adjust in the Numbers page under Expert Options.
+
+The same behavior can be extended to the whole duration of the call by selecting the option Accept any RTP packets in the Numbers page under Expert Options.
+
+FAX
+Telnyx supports FAX calls using G.711 codec or T38.
+
+For inbound FAX calls, Telnyx will expect the customer connection to send a T38 reinvite by default. If no reinvite is received, the call will continue with G.711 codec. This can be disabled using the T38 option in the Numbers page.
+
+For outbound FAX calls you can chose different FAX modes using T.38 Re-invite Initiated By options in the Outbound tab on the Connections page:
+
+Telnyx Telnyx will send a T38 reinvite after detecting FAX tone
+Customer Telnyx will expect a T38 reinvite from the customer
+Disabled Telnyx will not send a T38 reinvite and will reject an T38 reinvite sent from the customer
+STUN
+Telnyx provides STUN service using the following addresses:
+
+stun.telnyx.com:3478
+TURN
+Telnyx provides TURN service using the following address:
+
+turn.telnyx.com:3478
+Please request the TURN username and password by email to support@telnyx.com.
+
+WebRTC (Beta)
+Telnyx supports WebRTC calls through the following:
+
+Unencrypted websocket:
+
+ws://sip.telnyx.com:5066
+Encrypted websocket with flexible TLS cipher suites for use with most browsers (i.e. Firefox):
+
+wss://sip.telnyx.com:7443
+Client configuration
+Most WebRTC clients will ask for the following settings:
+
+Websocket	Use one from the list above
+User	Same as SIP username
+Password	Same as SIP password
+Domain/Realm	sip.telnyx.com
+SIP URI/Proxy	
+sip:username@sip.telnyx.com
+Registrar	
+sip:sip.telnyx.com
+STUN server	stun.telnyx.com:3478
+TURN server	turn.telnyx.com:3478

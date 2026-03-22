@@ -1,0 +1,144 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pivotal_crm_db
+    environment:
+      POSTGRES_DB: pivotal_crm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./full_database_export.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    networks:
+      - crm_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pivotal_crm_redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - crm_network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: pivotal_crm_app
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-changeme123}@postgres:5432/pivotal_crm
+      
+      # Redis (for BullMQ job queue)
+      REDIS_URL: redis://redis:6379
+      
+      # Node
+      NODE_ENV: production
+      PORT: 5000
+      
+      # Authentication
+      JWT_SECRET: ${JWT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+      
+      # API Keys (required)
+      EMAIL_LIST_VERIFY_API_KEY: ${EMAIL_LIST_VERIFY_API_KEY}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY}
+      
+      # Telnyx SIP credentials only
+      TELNYX_SIP_USERNAME: ${TELNYX_SIP_USERNAME:-}
+      TELNYX_SIP_PASSWORD: ${TELNYX_SIP_PASSWORD:-}
+      
+      # Email Service Providers (optional)
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      AWS_SES_ACCESS_KEY: ${AWS_SES_ACCESS_KEY:-}
+      AWS_SES_SECRET_KEY: ${AWS_SES_SECRET_KEY:-}
+      MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      
+      # OpenAI (for AI features)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crm_network
+    volumes:
+      - app_uploads:/app/uploads
+      - app_recordings:/app/recordings
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pivotal_crm_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "admin@example.com"
+      PGADMIN_DEFAULT_PASSWORD: "admin"
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - crm_network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: unless-stopped
+
+  
+  # This service is for running one-off scripts, migrations, or tools
+  # that need access to the same network and environment as the main app.
+  # Example usage:
+  # docker-compose run --rm tools node -e "console.log('Hello from tools container!')"
+  tools:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-changeme123}@postgres:5432/pivotal_crm
+      REDIS_URL: redis://redis:6379
+      # Add any other ENV vars your scripts might need
+      # For example, if your script uses an API key:
+      # SOME_API_KEY: ${SOME_API_KEY}
+      # Telnyx SIP credentials only
+      TELNYX_SIP_USERNAME: ${TELNYX_SIP_USERNAME:-}
+      TELNYX_SIP_PASSWORD: ${TELNYX_SIP_PASSWORD:-}
+      # OpenAI (for AI features)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:-}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - crm_network
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_uploads:
+    driver: local
+  app_recordings:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  crm_network:
+    driver: bridge

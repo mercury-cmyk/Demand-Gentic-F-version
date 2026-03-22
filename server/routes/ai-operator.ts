@@ -1210,7 +1210,7 @@ async function executeWithVertexAI(
   toolContext: ToolExecutionContext
 ): Promise<{ finalResponse: string; isComplete: boolean; iterations: number; toolsExecuted: any[]; model: string }> {
   const vertexAI = getVertexAI();
-  const model = process.env.AI_OPERATOR_GEMINI_MODEL || 'gemini-2.0-flash';
+  const model = process.env.AI_OPERATOR_GEMINI_MODEL || 'gemini-2.5-flash';
   
   const generativeModel = vertexAI.getGenerativeModel({
     model,

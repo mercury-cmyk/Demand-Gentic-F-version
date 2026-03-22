@@ -62,7 +62,7 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
       <div className="flex items-center gap-2 sm:gap-3">
         <ThemeToggle />
 
-        {/* AgentX Toggle */}
+        {/* AgentC Toggle */}
         {agentPanel && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -81,7 +81,7 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>AgentX (Ctrl+/)</p>
+              <p>AgentC (Ctrl+/)</p>
             </TooltipContent>
           </Tooltip>
         )}
@@ -109,59 +109,82 @@ export function TopBar({ userName = "Admin User", userRoles = ["admin"] }: { use
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel>Settings & Administration</DropdownMenuLabel>
+              <DropdownMenuLabel>Settings</DropdownMenuLabel>
               <DropdownMenuSeparator />
 
-              {/* All Settings Link */}
+              {/* General */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger data-testid="menu-general">
+                  <Settings className="mr-2 h-4 w-4" />
+                  General
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/profile')} data-testid="menu-profile-settings">
+                    <UserCog className="mr-2 h-4 w-4" />
+                    Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/integrations')} data-testid="menu-integrations">
+                    <Zap className="mr-2 h-4 w-4" />
+                    Integrations
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              {/* Telephony */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger data-testid="menu-telephony">
+                  <Phone className="mr-2 h-4 w-4" />
+                  Telephony
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/telephony')} data-testid="menu-sip">
+                    <Phone className="mr-2 h-4 w-4" />
+                    Telephony (SIP)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation('/number-pool')} data-testid="menu-number-pool">
+                    <Database className="mr-2 h-4 w-4" />
+                    Number Pool
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              {/* AI Configuration */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger data-testid="menu-ai-config">
+                  <Bot className="mr-2 h-4 w-4" />
+                  AI Configuration
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/ai-governance')} data-testid="menu-ai-governance">
+                    <Bot className="mr-2 h-4 w-4" />
+                    AI Governance
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              {/* Email & Messaging */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger data-testid="menu-email-messaging">
+                  <Mail className="mr-2 h-4 w-4" />
+                  Email & Messaging
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/mercury-notifications')} data-testid="menu-mercury">
+                    <Mail className="mr-2 h-4 w-4" />
+                    Mercury & Transactional
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation('/settings/email-management')} data-testid="menu-campaign-email">
+                    <Mail className="mr-2 h-4 w-4" />
+                    Campaign Email
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setLocation('/settings')} data-testid="menu-all-settings">
                 <Settings className="mr-2 h-4 w-4" />
                 All Settings
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              
-              {/* Infrastructure Section */}
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger data-testid="menu-infrastructure">
-                  <Zap className="mr-2 h-4 w-4" />
-                  Infrastructure
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/email-management')} data-testid="menu-sender-profiles">
-                    <Mail className="mr-2 h-4 w-4" />
-                    Campaign Email
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/telephony')} data-testid="menu-sip-trunks">
-                    <Phone className="mr-2 h-4 w-4" />
-                    Telephony Settings
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/integrations')} data-testid="menu-integrations">
-                    <Zap className="mr-2 h-4 w-4" />
-                    Integrations & APIs
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-
-              {/* Organization Section */}
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger data-testid="menu-organization">
-                  <Settings className="mr-2 h-4 w-4" />
-                  Organization
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/users')} data-testid="menu-users">
-                    <UserCog className="mr-2 h-4 w-4" />
-                    User & Role Management
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocation('/suppressions')} data-testid="menu-suppressions">
-                    <ShieldCheck className="mr-2 h-4 w-4" />
-                    Suppression Management
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setLocation('/settings/compliance')} data-testid="menu-compliance">
-                    <ShieldCheck className="mr-2 h-4 w-4" />
-                    Compliance Center
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
         )}

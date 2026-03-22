@@ -1,0 +1,461 @@
+Disposition Management & Call Activity Logging — Functional Spec
+1) Goals
+
+Enforce mandatory disposition capture at the end of every call.
+
+Persist call activity at both Contact and Account level with full auditability.
+
+Control queue membership per disposition (e.g., Global DNC, per-campaign opt-out, invalid data removal, voicemail/no-answer retries).
+
+Respect account-level lead caps and campaign scheduling rules.
+
+Allow client-specific disposition labels, while mapping them to standard system actions (no vendor lock to our labels).
+
+2) Disposition Taxonomy (Flexible, Client-Defined)
+
+You will keep your own disposition labels. We map each label to a System Action that drives behavior:
+
+System Actions (normalized):
+
+ADD_TO_GLOBAL_DNC
+
+REMOVE_FROM_CAMPAIGN_QUEUE
+
+REMOVE_FROM_ALL_QUEUES_FOR_CONTACT
+
+RETRY_AFTER_DELAY
+
+RETRY_WITH_NEXT_ATTEMPT_WINDOW
+
+CONVERTED/QUALIFIED (e.g., booked meeting, HQL/BANT)
+
+NO_ACTION (purely informational)
+
+Examples of mapping (editable in Settings → Dispositions):
+
+“Do Not Call” → ADD_TO_GLOBAL_DNC
+
+“Not interested (this campaign)” → REMOVE_FROM_CAMPAIGN_QUEUE
+
+“Invalid Number / Wrong Person” → REMOVE_FROM_ALL_QUEUES_FOR_CONTACT
+
+“Voicemail Left” → RETRY_AFTER_DELAY
+
+“No Answer” → RETRY_WITH_NEXT_ATTEMPT_WINDOW
+
+“Qualified / Booked” → CONVERTED/QUALIFIED
+
+You can create as many client-specific labels as you want; each must map to exactly one system action (plus optional parameters, e.g., delay minutes).
+
+3) Queue Rules Triggered by Dispositions
+A. Global DNC (Immediate & Irreversible by default)
+
+Trigger: Any disposition mapped to ADD_TO_GLOBAL_DNC.
+
+Effect:
+
+Add contact_id (and optionally all phone numbers on that contact) to Global DNC (table: global_dnc).
+
+Immediately remove contact’s pending call jobs from all campaign queues.
+
+Future queue builders must exclude any number in global_dnc.
+
+Optional setting: “Propagate to Account” (on/off). If on, mark account_id as account_level_dnc=true (rare; use only if client demands).
+
+B. Not Interested (Per-Campaign Opt-out)
+
+Trigger: Disposition mapped to REMOVE_FROM_CAMPAIGN_QUEUE.
+
+Effect:
+
+Add (contact_id, campaign_id) to campaign_opt_outs.
+
+Remove pending call jobs for that campaign only.
+
+Contact remains callable for other campaigns unless otherwise excluded.
+
+C. Invalid Data (Hard Removal Everywhere)
+
+Trigger: Disposition mapped to REMOVE_FROM_ALL_QUEUES_FOR_CONTACT.
+
+Effect:
+
+Persist disposition reason + sub-reason (e.g., “Invalid Number”, “Deceased”, “Wrong Region”).
+
+Remove all pending call jobs for that contact across all campaigns.
+
+Optional: flag the bad field(s) (e.g., phone_e164.is_invalid=true, invalid_reason=carrier_unassigned) to prevent re-ingest.
+
+Optional: Auto-open a Data Remediation task for ops.
+
+D. Voicemail / No Answer (Retry Logic)
+
+Trigger: RETRY_AFTER_DELAY (Voicemail) or RETRY_WITH_NEXT_ATTEMPT_WINDOW (No Answer).
+
+Effect:
+
+Defer re-queueing with campaign-level rules:
+
+Minimum retry delay (e.g., Voicemail = 24h; No Answer = 2h)
+
+Max attempts per day and max total attempts
+
+Attempt spacing strategy: fixed delay or escalating backoff
+
+Business hours & timezone constraints per campaign
+
+Create a new call job scheduled at the next permissible window.
+
+All re-queues must respect Account Lead Cap and agent workload constraints (see §7).
+
+4) Data Model (Core Tables)
+contacts
+
+id (PK), account_id (FK)
+
+first_name, last_name, title, phones (array with e164, is_primary, is_invalid)
+
+email, country, timezone, etc.
+
+accounts
+
+id (PK), name, industry, lead_cap_per_campaign (int, nullable)
+
+account_level_dnc (bool, default false)
+
+campaigns
+
+id, name, type, timezone
+
+retry_rules (JSON):
+
+{
+  "voicemail": {"min_delay_minutes": 1440, "max_attempts": 5, "daily_cap": 2},
+  "no_answer": {"min_delay_minutes": 120, "max_attempts": 6, "daily_cap": 3},
+  "backoff": "exponential|fixed",
+  "business_hours": {"start":"09:00","end":"18:00","days":[1,2,3,4,5]},
+  "respect_local_tz": true
+}
+
+call_jobs
+
+id, campaign_id, contact_id, account_id, agent_id (nullable if unassigned)
+
+status enum: QUEUED|SCHEDULED|IN_PROGRESS|COMPLETED|CANCELLED|REMOVED
+
+scheduled_at (UTC), priority (int), attempt_no (int, default 0)
+
+locked_by_agent_id (for live pickup), locked_at
+
+call_sessions (one per dial attempt)
+
+id, call_job_id, telnyx_call_id, from_number, to_number_e164
+
+started_at, ended_at, duration_sec, recording_url (QA-only access)
+
+status: CONNECTED|NO_ANSWER|BUSY|FAILED|VOICEMAIL_DETECTED|CANCELLED
+
+FK to activity log and disposition
+
+dispositions
+
+id, label (client text), system_action (enum above)
+
+params (JSON: { "retry_delay_minutes": 60 }), active (bool)
+
+call_dispositions
+
+id, call_session_id (FK), disposition_id (FK), notes (text), created_by
+
+created_at
+
+global_dnc
+
+id, contact_id (FK), phone_e164 (nullable), source (agent|api|import), reason, created_at
+
+campaign_opt_outs
+
+id, campaign_id, contact_id, reason, created_at
+
+activity_log (event store)
+
+id, entity_type (contact|account|campaign|call_job|call_session)
+
+entity_id, event_type (see §5), payload (JSON), created_by, created_at
+
+5) Activity Events (for rich audit & dashboards)
+
+Event Types (examples):
+
+CALL_JOB_CREATED, CALL_JOB_SCHEDULED, CALL_JOB_REMOVED
+
+CALL_STARTED, CALL_CONNECTED, CALL_ENDED
+
+DISPOSITION_SAVED
+
+ADDED_TO_GLOBAL_DNC, CAMPAIGN_OPT_OUT_SAVED
+
+DATA_MARKED_INVALID, RETRY_SCHEDULED
+
+ACCOUNT_CAP_REACHED, QUEUE_REBUILT
+
+Payload Example (DISPOSITION_SAVED):
+
+{
+  "call_session_id": "cs_123",
+  "contact_id": "c_456",
+  "campaign_id": "cmp_789",
+  "label": "Voicemail Left",
+  "system_action": "RETRY_AFTER_DELAY",
+  "params": {"retry_delay_minutes": 1440},
+  "notes": "Standard VM drop",
+  "agent_id": "u_007"
+}
+
+
+Each event writes to activity_log, and you display aggregations on:
+
+Contact timeline (all calls, emails, form fills, tasks, DNC events)
+
+Account timeline (roll-up of all contacts + account events)
+
+Campaign analytics (disposition distribution, retries, conversion, DNC hits)
+
+6) Agent Console Behavior
+
+Mandatory Disposition Modal: After each call ends (or when agent hits “End”), open a modal:
+
+Required: Disposition (dropdown of client labels)
+
+Optional: Notes, follow-up task, next-best-action
+
+Save & Continue button remains disabled until a disposition is selected
+
+On save:
+
+Persist call_dispositions
+
+Fire rules engine (see §8)
+
+Update UI with next queued record (only after rules finish), else show “No records available”
+
+Hide any contact that is:
+
+In global_dnc, or
+
+campaign_opt_outs for current campaign, or
+
+is_invalid for target dial channel
+
+7) Account Lead Cap (Per Campaign)
+
+Campaign has an optional Account Cap setting (e.g., 10 leads).
+
+When a contact gets CONVERTED/QUALIFIED within a campaign:
+
+Increment account_campaign_conversions counter.
+
+If cap reached:
+
+Remove all remaining call jobs for that account_id in this campaign.
+
+Log ACCOUNT_CAP_REACHED event.
+
+Queue builder and re-queue logic must check this cap before scheduling.
+
+8) Rules Engine (Pseudocode)
+onDispositionSaved(call_session_id):
+  disp = loadDisposition(call_session_id)
+  switch disp.system_action:
+    case ADD_TO_GLOBAL_DNC:
+      addToGlobalDNC(contact_id, phone)
+      removeAllPendingJobs(contact_id)
+      log(ADDED_TO_GLOBAL_DNC, {...})
+
+    case REMOVE_FROM_CAMPAIGN_QUEUE:
+      addCampaignOptOut(campaign_id, contact_id)
+      removePendingJobsForCampaign(contact_id, campaign_id)
+      log(CAMPAIGN_OPT_OUT_SAVED, {...})
+
+    case REMOVE_FROM_ALL_QUEUES_FOR_CONTACT:
+      markInvalid(contact_id, reason)
+      removeAllPendingJobs(contact_id)
+      log(DATA_MARKED_INVALID, {...})
+
+    case RETRY_AFTER_DELAY:
+      scheduleRetry(call_job_id, delay=disp.params.retry_delay_minutes or campaign.voicemail.min_delay)
+      log(RETRY_SCHEDULED, {...})
+
+    case RETRY_WITH_NEXT_ATTEMPT_WINDOW:
+      nextAt = computeNextWindow(campaign.retry_rules, attempts_so_far)
+      scheduleRetry(call_job_id, nextAt)
+      log(RETRY_SCHEDULED, {...})
+
+    case CONVERTED/QUALIFIED:
+      incrementAccountCapCounter(account_id, campaign_id)
+      if capReached(account_id, campaign_id):
+        removeAllAccountJobsInCampaign(account_id, campaign_id)
+        log(ACCOUNT_CAP_REACHED, {...})
+
+    case NO_ACTION:
+      // just log and move on
+
+
+Guards (always on):
+
+Do not schedule retries for contacts in global_dnc or campaign_opt_outs.
+
+Respect business hours & timezones.
+
+Respect max_attempts (per day and total).
+
+9) Telnyx Integration (recommended signals)
+
+Receive webhooks: call.answered, call.hangup, call.machine_detection.ended, call.recording.saved.
+
+On hangup → create/update call_sessions and pop disposition modal.
+
+Capture recording_url (restrict playback to QA-role).
+
+Optionally use AMD (answering machine detection) to auto-suggest “Voicemail” in modal.
+
+10) APIs (Example Contracts)
+
+POST /api/calls/{callSessionId}/disposition
+
+{
+  "disposition_id": "disp_voicemail",
+  "notes": "Left standard message v1"
+}
+
+
+Response
+
+{
+  "next_contact_id": "c_789",
+  "next_call_job_id": "job_456",
+  "actions": [
+    {"type":"RETRY_SCHEDULED","scheduled_at":"2025-10-16T14:00:00Z"}
+  ]
+}
+
+
+POST /api/dnc
+
+{
+  "contact_id": "c_123",
+  "phone_e164": "+441234567890",
+  "reason": "Do not call requested via phone"
+}
+
+
+GET /api/contacts/{id}/timeline → aggregated activity_log.
+
+POST /api/campaigns/{id}/opt-out
+
+{"contact_id": "c_123", "reason": "Not interested"}
+
+11) UI/UX Specifications
+Disposition Modal
+
+Fields: Disposition (required), Notes (optional), Follow-up (checkbox → create task)
+
+Context: Contact name, title, company, attempt #, last outcomes
+
+Keyboard friendly: Enter to submit; cannot proceed to next call until saved.
+
+Contact & Account Timelines
+
+Reverse-chronological activity feed with filters: Calls, Dispositions, DNC, Opt-outs, Tasks.
+
+Per-event quick view: who, when, outcome, recording (if QA).
+
+Campaign Builder → Retry Settings
+
+Per-campaign configurable panels:
+
+Voicemail settings
+
+No Answer settings
+
+Attempt caps & backoff
+
+Business hours (campaign TZ vs contact local TZ)
+
+Account lead cap
+
+Agent Queue Panel
+
+Shows My Queue, Scheduled Time, Attempt #, Reason for Scheduling (e.g., “Voicemail retry”)
+
+Real-time removal when DNC/opt-out/invalid flags trigger.
+
+12) Compliance & Safeguards
+
+Global DNC honored platform-wide.
+
+Store timestamp, agent, IP for DNC/opt-out events.
+
+GDPR/CCPA: expose “Erase/Export” for contact data; DNC list retained as hashed E.164 or minimally necessary fields to enforce suppression.
+
+Prevent manual dialing of DNC numbers in agent UI (button disabled with tooltip).
+
+13) Edge Cases & Policies
+
+Multiple phone numbers: Put the exact phone_e164 on DNC; optional policy to DNC all numbers for that contact.
+
+Campaign vs Global opt-out: Per-campaign “Not interested” must not escalate to global unless agent explicitly selects a global DNC disposition.
+
+Invalid data: If only a number is invalid but contact is otherwise useful, mark that number invalid and allow other valid numbers to queue.
+
+Re-ingest protection: On import, automatically suppress any number found in global_dnc.
+
+14) Testing Scenarios (must pass)
+
+Do Not Call
+
+Agent selects “Do Not Call” → contact added to Global DNC → removed from all queues → cannot be re-queued or dialed.
+
+Not Interested (Campaign-only)
+
+Agent selects “Not interested (Q4 HR Webinar)” → removed only from that campaign’s queue; still eligible in other campaigns.
+
+Invalid Data
+
+Agent selects “Invalid Number” → remove from all queues → phone flagged; re-import blocked unless fixed.
+
+Voicemail Retry
+
+“Voicemail Left” → new call job scheduled after campaign’s voicemail delay, inside business hours, respecting daily and total caps.
+
+No Answer Backoff
+
+“No Answer” repeatedly → attempt counter increments → next retry spaced per backoff → stops at max attempts.
+
+Account Cap
+
+When account reaches cap, remaining contacts from that account are removed from that campaign’s queue.
+
+15) Implementation Hints
+
+Use a message queue (e.g., call_job_scheduler) to compute next scheduled_at and to enforce caps/filters atomically.
+
+Add DB constraints & indexes:
+
+Unique (contact_id, campaign_id) in campaign_opt_outs
+
+Unique (contact_id, phone_e164) in global_dnc
+
+Implement a small rules engine around the disposition to keep the controller thin.
+
+Write idempotent handlers for Telnyx webhooks.
+
+Deliverables you’ll want next
+
+Migration SQL for the tables above.
+
+Admin UI for Disposition Mapping (client labels → system actions).
+
+Queue simulator to preview retry windows vs business hours.
+
+QA-only recording access gate.

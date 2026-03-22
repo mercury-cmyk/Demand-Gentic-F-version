@@ -1,12 +1,12 @@
 /**
- * Unified AgentX — Agentic Operator
+ * Unified AgentC — Agentic Operator
  * 
- * The ONE canonical AgentX Agent — autonomous action execution system.
+ * The ONE canonical AgentC Agent — autonomous action execution system.
  * Orchestrates multi-step agentic workflows with user-type-specific actions.
  * Each user type has a specialized set of executable actions and decision trees.
- * All AgentX configuration, prompts, capabilities, and learning exist exclusively within this agent.
+ * All AgentC configuration, prompts, capabilities, and learning exist exclusively within this agent.
  * 
- * AgentX Capability Matrix:
+ * AgentC Capability Matrix:
  * ┌────────────────────────┬──────────────┬────────────────────────────────┐
  * │ Action Domain          │ Section      │ Learning Input Source           │
  * ├────────────────────────┼──────────────┼────────────────────────────────┤
@@ -38,7 +38,7 @@ const AGENTX_PROMPT_SECTIONS: PromptSection[] = [
     'agentx_identity',
     'Identity & Objective',
     1,
-    `You are AgentX — the autonomous agentic operator in the demand generation system.
+    `You are AgentC — the autonomous agentic operator in the demand generation system.
 Your role: Execute multi-step workflows autonomously with precision and context-awareness.
 You operate as an intelligent action engine, transforming strategy and data into executable tasks.
 You are NOT a decision-maker — you are a Precision Executor.
@@ -473,10 +473,10 @@ const AGENTX_CAPABILITY_MAPPINGS: CapabilityPromptMapping[] = AGENTX_CAPABILITIE
 
 // ==================== AGENTX AGENT CLASS ====================
 
-export class UnifiedAgentXAgent extends UnifiedBaseAgent {
+export class UnifiedAgentCAgent extends UnifiedBaseAgent {
   readonly id = 'unified_agentx_agent';
-  readonly name = 'AgentX';
-  readonly description = 'The canonical AgentX Agent — autonomous agentic operator executing multi-step workflows with user-type-specific actions.';
+  readonly name = 'AgentC';
+  readonly description = 'The canonical AgentC Agent — autonomous agentic operator executing multi-step workflows with user-type-specific actions.';
   readonly channel = 'governance' as const;
   readonly agentType: UnifiedAgentType = 'agentx';
 
@@ -586,9 +586,9 @@ export class UnifiedAgentXAgent extends UnifiedBaseAgent {
       .map(s => `## ${s.name}\n${s.content}`)
       .join('\n\n');
 
-    return `# AgentX — Agentic Operator for Autonomous Action Execution
+    return `# AgentC — Agentic Operator for Autonomous Action Execution
 
-You are the AgentX Agent in the unified demand generation system.
+You are the AgentC Agent in the unified demand generation system.
 
 ## Core Mission
 Execute multi-step workflows autonomously with precision and context-awareness.
@@ -639,4 +639,4 @@ ${sections}
   }
 }
 
-export const unifiedAgentXAgent = new UnifiedAgentXAgent();
+export const unifiedAgentCAgent = new UnifiedAgentCAgent();

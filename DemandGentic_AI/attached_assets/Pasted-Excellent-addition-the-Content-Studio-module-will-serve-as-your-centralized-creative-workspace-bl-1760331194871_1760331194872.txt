@@ -1,0 +1,190 @@
+Excellent addition — the Content Studio module will serve as your centralized creative workspace, blending AI-assisted content creation, campaign asset management, and social media orchestration.
+
+Below is the full Section 24: Content Studio & Social Media Management, including a detailed prompt for Replit developers and AI workflow integration plan.
+
+⸻
+
+24) Content Studio & Social Media Management
+
+24.1 Overview
+
+The Content Studio acts as an integrated workspace for all marketing assets — emails, landing pages, social posts, visuals, and documents — powered by AI-driven ideation, content optimization, and channel publishing.
+
+It streamlines the creative-to-campaign pipeline:
+	•	Create → Approve → Publish → Analyze,
+all from within the CRM platform.
+
+⸻
+
+24.2 Objectives
+	•	Centralize creation and management of all marketing content (email templates, social posts, landing pages, ad creatives).
+	•	Provide an AI-powered writing assistant for ideation, messaging strategy, and personalization.
+	•	Enable cross-channel publishing (social media, email, campaign assets).
+	•	Allow collaboration between internal users and clients with comments and approvals.
+	•	Maintain asset compliance, versioning, and usage history across campaigns.
+
+⸻
+
+24.3 Core Functionalities
+
+A. Content Library
+	•	Asset Types:
+	•	Email Templates
+	•	Landing Pages
+	•	Ad Banners / Visuals
+	•	PDFs / Brochures / Case Studies
+	•	Social Media Posts
+	•	Video Scripts / Call Scripts
+	•	Sales Sequences / Nurture Flows
+	•	Metadata: asset_type, title, owner, tags, version, linked_campaigns[], approval_status, created_at, updated_at.
+	•	Version Control: full history of edits with rollback.
+	•	AI Metadata Extraction: auto-detects keywords, industry, tone, and CTA.
+
+⸻
+
+B. AI-Powered Content Generator
+	•	Input Fields:
+	•	Content Type (Email, LinkedIn Post, Ad Copy, Blog, Landing Page, etc.)
+	•	Target Audience Persona
+	•	Industry / Product Info
+	•	Key Value Proposition
+	•	Tone of Voice (Formal, Conversational, Insightful, Persuasive)
+	•	CTA Goal (Download, Demo, Signup, etc.)
+	•	AI Outputs:
+	•	Long-form and short-form content variations.
+	•	Auto-suggested CTAs and headings.
+	•	Key bullets and structured sections for easy editing.
+	•	Auto-generate HTML for emails and web pages.
+	•	Option to “Refine by Channel” (Email, LinkedIn, Twitter/X, Meta, Instagram).
+
+⸻
+
+C. Social Media Management Suite
+
+Platform Integrations
+	•	Native connectors for:
+	•	LinkedIn (Company + Personal)
+	•	Twitter/X
+	•	Facebook Pages
+	•	Instagram Business
+	•	YouTube (Video publishing, link embeds)
+	•	OAuth2 secure integration with scoped permissions.
+
+Publishing Tools
+	•	Schedule or post instantly to one or multiple platforms.
+	•	AI auto-optimize publish time based on engagement analytics.
+	•	UTM tagging for tracking.
+	•	Image/video uploader with aspect ratio validator.
+	•	Auto-preview post layout for each platform.
+
+Engagement Tracking
+	•	Pull reactions, comments, clicks, and reach per post.
+	•	Aggregate engagement metrics by campaign or time range.
+	•	Sentiment classification using AI (positive, neutral, negative).
+
+Collaboration
+	•	Draft → Review → Approve → Publish lifecycle.
+	•	Comment threads and approval checkboxes.
+	•	Role-based permissions (Creator, Reviewer, Publisher).
+
+⸻
+
+D. AI Creative Assistant
+
+Embedded AI Assistant panel within the Content Studio:
+	•	Analyze client assets: identify unique challenges, pain points, and value propositions.
+	•	Generate narratives: create messaging frameworks and campaign positioning.
+	•	Recommend formats: suggest suitable channel mix (e.g., Email + LinkedIn + Landing Page).
+	•	Write & Optimize:
+	•	Email subject lines
+	•	Social hooks
+	•	Ad headlines
+	•	Blog outlines
+	•	Compliance Review: flag potential compliance or brand tone deviations.
+
+⸻
+
+E. Landing Page Builder
+	•	Drag-and-drop visual builder using responsive grid.
+	•	Supports embedding forms, CTAs, videos, and tracking pixels.
+	•	Auto-generated metadata and SEO optimization.
+	•	Integration with Lead Capture Forms — submissions feed directly into CRM Contacts and QA workflow.
+	•	Prebuilt templates: eBook download, webinar signup, lead magnet, ABM outreach page.
+
+⸻
+
+F. Integration with Campaigns
+	•	Direct link to Campaign Builder:
+	•	“Attach to Campaign” option for any approved asset.
+	•	Auto-sync of campaign metrics (views, clicks, conversions) back into Content Studio.
+	•	Tag usage history:
+	•	“Used in: Campaign A (3k opens, 200 clicks)”
+	•	“Used in: LinkedIn Post (2k impressions, 50 reactions)”
+
+⸻
+
+G. Reporting & Analytics
+	•	Performance Overview: impressions, clicks, engagement rate, conversions per asset.
+	•	Channel Breakdown: compare Email vs. Social vs. Web landing.
+	•	AI Insights: identify top-performing tone, format, CTA, or audience segment.
+	•	Content Heatmap: visualize content utilization across campaigns.
+
+⸻
+
+24.4 User Roles & Permissions
+
+Role	Permissions
+Admin	Full access to all assets and publishing.
+Content Creator	Create, edit, submit for approval.
+Reviewer / QA	Review, comment, approve/reject.
+Campaign Manager	Attach assets to campaigns, monitor performance.
+Client User	View and comment on assets, approve deliverables.
+
+
+⸻
+
+24.5 Technical Implementation
+	•	Frontend: React + Tailwind + GrapesJS / TipTap for rich text editing.
+	•	Backend: Node.js (NestJS) or Python (FastAPI) for asset CRUD and versioning.
+	•	Storage: S3 for media, PostgreSQL for metadata, Redis for caching.
+	•	AI Integration: OpenAI / Anthropic models for copywriting, summarization, and sentiment scoring.
+	•	Social APIs:
+	•	LinkedIn Marketing Developer Platform
+	•	Meta Graph API
+	•	Twitter/X v2
+	•	YouTube Data API v3
+	•	Webhooks: Fetch social engagement stats daily.
+
+⸻
+
+24.6 Replit Developer Prompt
+
+Project Name: Content Studio & Social Media Management
+
+Objective: Build a scalable AI-powered content management and publishing suite integrated within the Pivotal B2B CRM.
+
+Requirements:
+	1.	Build a Content Studio module with CRUD for all asset types (emails, social posts, landing pages, visuals, PDFs).
+	2.	Implement AI text generation panel for creating and optimizing content with fields: content type, persona, tone, CTA.
+	3.	Add a social media publishing interface with OAuth2 integrations (LinkedIn, Twitter/X, Meta, YouTube).
+	4.	Include a calendar view for scheduled posts.
+	5.	Enable content versioning, commenting, and approval flow.
+	6.	Support asset tagging and link tracking (UTM builder).
+	7.	Integrate performance analytics dashboard for impressions, clicks, reactions, sentiment.
+	8.	Connect approved assets to Campaign Builder as templates or attachments.
+	9.	Maintain AI enrichment features for messaging, pain-point analysis, and content recommendations.
+	10.	Ensure role-based permissions and audit logging of changes.
+
+Tech Stack:
+	•	Frontend: React + Tailwind + GrapesJS / TipTap Editor + Chart.js
+	•	Backend: Node.js (NestJS) / Python (FastAPI), PostgreSQL, S3, Redis
+	•	AI: OpenAI GPT + Embedding Search for Content Recommendations
+	•	Social Integrations: LinkedIn, Meta, Twitter/X APIs
+	•	Deployment: Docker + Kubernetes + Feature Flags
+
+Deliverable:
+A modular, extensible Content Studio that seamlessly connects creative workflows, social publishing, and campaign execution with analytics-driven feedback loops.
+
+⸻
+
+Would you like me to add this as Section 24: Content Studio & Social Media Management to your PRD?

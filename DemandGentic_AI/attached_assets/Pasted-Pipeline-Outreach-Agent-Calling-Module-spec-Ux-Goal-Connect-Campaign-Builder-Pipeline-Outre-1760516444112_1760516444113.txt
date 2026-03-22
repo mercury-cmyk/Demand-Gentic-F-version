@@ -1,0 +1,270 @@
+Pipeline Outreach → Agent Calling Module (spec + Ux)
+Goal
+
+Connect Campaign Builder → Pipeline Outreach to an Agent Calling module so admins can assign agents to call campaigns and agents get a prioritized queue with click‑to‑call, mandatory dispositions, and tight QA/compliance.
+
+1) Roles & Permissions
+
+Admin / Campaign Owner: creates campaign, defines audience, assigns agents, designs disposition set, reviews QA, monitors performance.
+
+Supervisor / QA: monitors live calls, reviews recordings, can re‑queue records, edit dispositions (with audit trail).
+
+Agent: sees only assigned campaigns/queues; must complete disposition + notes before the next record unlocks.
+
+RBAC: campaign.read, campaign.assign, queue.manage, call.make, call.wrapup.required, recording.read.qa_only, analytics.view.
+
+2) Data Model (Core Entities)
+
+Campaign { id, name, type: "Pipeline Outreach | Tele", caller_id_pool, dialing_hours, lead_cap_per_account, retry_policy, priority_rules, disposition_set_id, call_script_id }
+
+Agent { id, name, sip_user, skills:[vertical, language], max_concurrent_campaigns, timezone }
+
+Assignment { id, campaign_id, agent_id, mode: (round_robin|block|weighted), quota, start_at, end_at }
+
+Prospect { id, account_id, contact_fields..., consent_flags, do_not_call, timezone }
+
+QueueItem { id, campaign_id, agent_id, prospect_id, priority, state:(queued|in_call|wrap_up|done|skipped|callback_scheduled), lock_token, attempts, last_result_at }
+
+CallTask { id, queue_item_id, dialed_number, started_at, ended_at, telco_call_id, direction:outbound, outcome }
+
+Questionnaire { id, name, version, questions:[question_ids], mappings:{question_id→crm_field} }
+
+Question { id, type, label, help_text, options[], required, validation:{}, visibility_rules:{} }
+
+CallResponse { id, call_task_id, questionnaire_id, answers:{question_id→value}, validated:boolean }
+
+Disposition { id, code, label, category, required_fields:[…], maps_to_lead_status } // Sourced from client’s disposition schema
+
+CallLog { id, call_task_id, agent_id, sip_events, duration, recordings:[urls], waveform_ref }
+
+RecordingAccess { call_task_id, visibility:(qa_only|agent|client_shareable) }
+
+AuditTrail { id, actor_id, action, entity, entity_id, before, after, at }
+
+3) Queue Generation & Prioritization
+
+Source: campaign audience (filters, lists, exclusions).
+
+Respect Lead Cap per Account: when cap is reached, automatically set related prospects to removed_from_queue: true for that campaign.
+
+Prioritization default: time-zone fit (local hours) > intent_score > recency > account tier.
+
+Assignment strategies:
+
+Round Robin: distribute QueueItems evenly across active agents.
+
+Block Assignment: each agent gets a block of N records.
+
+Weighted: weight by agent skill/language.
+
+Retry Policy (per campaign):
+
+Max attempts (e.g., 5), ladder: No answer → Try after 2h, then 1d, then 3d.
+
+Auto‑reschedule callbacks into same agent’s queue, or pool if agent OOO.
+
+Locking: when agent clicks Call, the QueueItem moves to in_call and is soft‑locked (lock_token). After hang‑up, state → wrap_up.
+
+4) Agent UI (Clean, Fast, Keyboard‑Friendly)
+A) My Queue
+
+Compact cards list: Name, Title, Company, City/TZ, Last Attempt, Priority chip.
+
+Toolbar: Start Calling, Filter (All/Callbacks/Due Now), Search, Sort.
+
+Status pill: Queued, In Call, Wrap‑up Needed, Done.
+
+B) Dialer Panel (Right Drawer)
+
+Header: Prospect identity + Account cap status (e.g., 18/20 used).
+
+Call Controls: Call, Hang up, Mute, Speaker/Device selector, Keypad, Hold, Transfer.
+
+Script Tab: dynamic script with merge fields; collapsible Qualifying checklist.
+
+Notes Tab: live notepad (auto‑save every 3s).
+
+Info Tab: past attempts, emails, dispositions, custom fields.
+
+Compliance strip: local time, consent flags, DNC indicator.
+
+C) Wrap‑Up Modal (Blocks Next Call)
+
+Mandatory Disposition select (category‑grouped) + required fields dynamically shown.
+
+Quick‑tags for notes ("Left VM", "Gatekeeper", etc.).
+
+Schedule Callback (date/time picker, follow‑up type), Next Step (task/ticket), Opt‑out.
+
+Primary actions: Save & Next (enabled only after validation), Save & Close.
+
+UX Rule: Until wrap‑up saved, Next Prospect button remains disabled and queue list items show a lock icon.
+
+5) Disposition Set (Use Client’s Schema)
+
+No platform defaults. Each campaign must select an existing client-approved disposition set.
+
+The wrap-up form renders dynamically from the selected schema (codes, labels, categories, required fields, and mappings).
+
+Editing a client’s disposition set is permission-gated and versioned (audit trail). Changes do not retro-apply to closed calls; they only affect new wrap-ups.
+
+6) Admin Console (Campaign Builder → Assign Agents)
+
+Step: Agents & Queue in Pipeline Outreach builder.
+
+Add Agents (multi‑select) with capacities and weights.
+
+Choose Assignment mode (Round Robin/Block/Weighted).
+
+Define Lead Cap per Account (hard stop or soft warn).
+
+Set Dialing Hours by timezone.
+
+Select Disposition Set (client‑provided; required).
+
+Assign Call Script (select version) and Attach Questionnaire (optional, with required fields & branching).
+
+Set Retry Policy and Max Attempts.
+
+Toggle Recording (QA‑only access) & Whisper/Barge‑in for supervisors.
+
+Preview: Estimated queue size per agent + SLA forecast; script/questionnaire versions displayed for confirmation.
+
+7) Telephony Integration (Telnyx SIP or similar)
+
+Browser‑based WebRTC: per‑agent SIP credentials.
+
+Caller ID Pool with adaptive CNAM; regional numbers matching prospect geo.
+
+Webhooks → /telco/events for call started, ringing, answered, hangup, recording ready; updates CallTask and CallLog.
+
+Device Test: mic/speaker test in agent settings.
+
+8) State Machine
+
+queued → in_call → wrap_up → (done | callback_scheduled | queued)
+
+Errors: failed_to_connect → backoff & re‑queue.
+
+Guard: transition to done only after valid disposition.
+
+9) QA & Compliance
+
+Recordings flagged QA‑Only; agents can playback their own calls, exports restricted to QA.
+
+Mandatory Call Disposition enforced; audit trail for edits.
+
+DNC / Opt‑out instantly updates Prospect.do_not_call and suppresses in all campaigns.
+
+TCPA/GDPR log of consent metadata per call.
+
+10) Analytics & Dashboards
+
+Real‑time: Calls placed, Connect rate, Avg talk time, Booked meetings, Callbacks set, Disposition mix.
+
+Agent leaderboard with SLA (wrap‑up time, data quality score).
+
+Account‑level cap usage and saturation heatmap.
+
+11) API Endpoints (REST Sketch)
+
+POST /campaigns/:id/assignments { agent_id, mode, quota } POST /campaigns/:id/queue/build { rules, cap_per_account } GET /agents/:id/queue?state=queued POST /queue/:id/call → creates CallTask and dials POST /calls/:id/hangup POST /calls/:id/disposition { code, fields{} } // validates & unlocks next (validates against client schema) POST /campaigns/:id/script { script_version_id } POST /campaigns/:id/questionnaire { questionnaire_id } POST /calls/:id/answers { questionnaire_id, answers{} } // server-side validation & mapping POST /callbacks { queue_item_id, callback_at } POST /telco/events { event, telco_call_id, payload } GET /qa/recordings?campaign_id=...
+
+12) Validation Rules
+
+Disposition required; required_fields must be present.
+
+Callback must be within dialing hours/timezone.
+
+Enforce Lead Cap per Account before moving a QueueItem to in_call.
+
+Do not allow dialing if Prospect is do_not_call=true or outside legal hours.
+
+13) Edge Cases & Fallbacks
+
+Agent disconnects mid‑call → auto move to wrap‑up with default outcome "Dropped", force agent to confirm.
+
+Prospect number invalid → mark as bad_number, trigger data repair task.
+
+Agent OOO with pending callbacks → auto‑reassign by skills & timezone.
+
+14) Implementation Milestones
+
+Data model + migrations
+
+Admin Assign & Queue Builder
+
+Agent UI (Queue + Dialer + Wrap‑Up)
+
+Telco integration + webhooks
+
+Disposition engine + mapping
+
+QA/Recording & Analytics
+
+Compliance hardening + audits
+
+15) Success Criteria (UAT)
+
+Agent cannot move to next record without valid disposition.
+
+Account lead caps strictly enforced in live calling.
+
+Callbacks re‑enter the correct agent’s queue at due time.
+
+QA can play recordings; export restricted as configured.
+
+Dashboard KPIs match sample data scenarios.
+
+16) Call Script & Questionnaire (Assignment + Runtime)
+A) Assignment (per Campaign)
+
+Select Call Script (versioned) at campaign level; optional per–agent overrides.
+
+Attach Questionnaire / Q‑List (optional) that the agent must complete during/after the call.
+
+Question types: single/multi select, short text, long text, numeric, date/time, rating, checklist.
+
+Validation: required fields, min/max, regex, conditional visibility.
+
+Branching logic: show follow‑ups based on answers (e.g., If "Interested" → show meeting time picker).
+
+B) Runtime in Agent UI
+
+Script Tab: rich text with merge fields; section nav; keyboard shortcuts to jump between sections.
+
+Questions Tab: form generated from questionnaire; autosave; visual completeness meter.
+
+Enforcement: If a questionnaire is attached, required answers must be satisfied (validated) before the wrap‑up can be saved.
+
+Exports: all answers are stored in CallResponse and can map to CRM fields (Lead, Opportunity, Deal custom fields).
+
+C) Versioning & Audit
+
+Script and questionnaire are versioned; queue items store the version ID used at call time.
+
+Any edits create a new version; existing queue items continue with their bound version.
+
+17) UI Components (for build)
+
+QueueList (virtualized list)
+
+DialerDrawer (WebRTC controls, Script, Notes, Info tabs)
+
+WrapUpModal (dynamic form from disposition schema)
+
+DeviceTester (mic/speaker)
+
+SupervisorBar (whisper/barge)
+
+KPIHeader (live metrics)
+
+18) Future Enhancements
+
+Progressive dial / power dial (configurable)
+
+AI call summaries + auto‑tagging
+
+Real‑time duplicate detection across campaigns
+
+Local presence number rotation with spam‑label monitoring

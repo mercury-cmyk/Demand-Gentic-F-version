@@ -1,0 +1,457 @@
+≡ƒÄñ Audio Transmission Diagnostic Test
+============================================================
+Target phone: +14179003844
+Virtual Agent: 5e8437c7-d69c-4e96-9faf-14d63e40cf9e
+API URL: http://localhost:5000
+
+ΓÜá∩╕Å  Prerequisites:
+------------------------------------------------------------
+1. Development server must be running:
+   npm run dev
+2. Environment variables must be set:
+   - OPENAI_API_KEY
+   - TELNYX_API_KEY
+   - TELNYX_FROM_NUMBER
+   - TELNYX_CALL_CONTROL_APP_ID
+3. Authentication token required:
+   - Set AUTH_TOKEN or TEST_AUTH_TOKEN environment variable
+   - Or login to get a token
+
+≡ƒôí Checking OpenAI Realtime service status...
+node.exe : Failed to check status: AxiosError: Request failed with status code 
+404
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Failed to check...status code 404 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    at settle (file:///C:/Users/Zahid/Downloads/PivotalMarketingPaltform%20(2)/
+PivotalMarketingPaltform/node_modules/axios/lib/core/settle.js:19:12)
+    at IncomingMessage.handleStreamEnd (file:///C:/Users/Zahid/Downloads/Pivota
+lMarketingPaltform%20(2)/PivotalMarketingPaltform/node_modules/axios/lib/adapte
+rs/http.js:617:11)
+    at IncomingMessage.emit (node:events:520:35)
+    at endReadableNT (node:internal/streams/readable:1701:12)
+    at process.processTicksAndRejections 
+(node:internal/process/task_queues:89:21)
+    at Axios.request (file:///C:/Users/Zahid/Downloads/PivotalMarketingPaltform
+%20(2)/PivotalMarketingPaltform/node_modules/axios/lib/core/Axios.js:45:41)
+    at process.processTicksAndRejections 
+(node:internal/process/task_queues:103:5)
+    at async checkAudioStatus 
+(C:\Users\Zahid\Downloads\PivotalMarketingPaltform 
+(2)\PivotalMarketingPaltform\test-audio-transmission.ts:28:22)
+    at async testAudioTransmission 
+(C:\Users\Zahid\Downloads\PivotalMarketingPaltform 
+(2)\PivotalMarketingPaltform\test-audio-transmission.ts:70:20) {
+  code: 'ERR_BAD_REQUEST',
+  config: {
+    transitional: {
+      silentJSONParsing: true,
+      forcedJSONParsing: true,
+      clarifyTimeoutError: false
+    },
+    adapter: [ 'xhr', 'http', 'fetch' ],
+    transformRequest: [ [Function: transformRequest] ],
+    transformResponse: [ [Function: transformResponse] ],
+    timeout: 0,
+    xsrfCookieName: 'XSRF-TOKEN',
+    xsrfHeaderName: 'X-XSRF-TOKEN',
+    maxContentLength: -1,
+    maxBodyLength: -1,
+    env: { FormData: [Function [FormData]], Blob: [class Blob] },
+    validateStatus: [Function: validateStatus],
+    headers: Object [AxiosHeaders] {
+      Accept: 'application/json, text/plain, */*',
+      'Content-Type': undefined,
+      'User-Agent': 'axios/1.12.2',
+      'Accept-Encoding': 'gzip, compress, deflate, br'
+    },
+    method: 'get',
+    url: 'http://localhost:5000/api/dialer-runs/openai-realtime/status',
+    allowAbsoluteUrls: true,
+    data: undefined
+  },
+  request:  ClientRequest {
+    _events: [Object: null prototype] {
+      abort: [Function (anonymous)],
+      aborted: [Function (anonymous)],
+      connect: [Function (anonymous)],
+      error: [Function (anonymous)],
+      socket: [Function (anonymous)],
+      timeout: [Function (anonymous)],
+      finish: [Function: requestOnFinish]
+    },
+    _eventsCount: 7,
+    _maxListeners: undefined,
+    outputData: [],
+    outputSize: 0,
+    writable: true,
+    destroyed: true,
+    _last: true,
+    chunkedEncoding: false,
+    shouldKeepAlive: true,
+    maxRequestsOnConnectionReached: false,
+    _defaultKeepAlive: true,
+    useChunkedEncodingByDefault: false,
+    sendDate: false,
+    _removedConnection: false,
+    _removedContLen: false,
+    _removedTE: false,
+    strictContentLength: false,
+    _contentLength: 0,
+    _hasBody: true,
+    _trailer: '',
+    finished: true,
+    _headerSent: true,
+    _closed: true,
+    _header: 'GET /api/dialer-runs/openai-realtime/status HTTP/1.1\r\n' +
+      'Accept: application/json, text/plain, */*\r\n' +
+      'User-Agent: axios/1.12.2\r\n' +
+      'Accept-Encoding: gzip, compress, deflate, br\r\n' +
+      'Host: localhost:5000\r\n' +
+      'Connection: keep-alive\r\n' +
+      '\r\n',
+    _keepAliveTimeout: 0,
+    _onPendingData: [Function: nop],
+    agent: Agent {
+      _events: [Object: null prototype],
+      _eventsCount: 2,
+      _maxListeners: undefined,
+      options: [Object: null prototype],
+      defaultPort: 80,
+      protocol: 'http:',
+      requests: [Object: null prototype] {},
+      sockets: [Object: null prototype] {},
+      freeSockets: [Object: null prototype],
+      keepAliveMsecs: 1000,
+      keepAlive: true,
+      maxSockets: Infinity,
+      maxFreeSockets: 256,
+      scheduling: 'lifo',
+      maxTotalSockets: Infinity,
+      totalSocketCount: 1,
+      agentKeepAliveTimeoutBuffer: 1000,
+      Symbol(shapeMode): false,
+      Symbol(kCapture): false
+    },
+    socketPath: undefined,
+    method: 'GET',
+    maxHeaderSize: undefined,
+    insecureHTTPParser: undefined,
+    joinDuplicateHeaders: undefined,
+    path: '/api/dialer-runs/openai-realtime/status',
+    _ended: true,
+    res: IncomingMessage {
+      _events: [Object],
+      _readableState: [ReadableState],
+      _maxListeners: undefined,
+      socket: null,
+      httpVersionMajor: 1,
+      httpVersionMinor: 1,
+      httpVersion: '1.1',
+      complete: true,
+      rawHeaders: [Array],
+      rawTrailers: [],
+      joinDuplicateHeaders: undefined,
+      aborted: false,
+      upgrade: false,
+      url: '',
+      method: null,
+      statusCode: 404,
+      statusMessage: 'Not Found',
+      client: [Socket],
+      _consuming: false,
+      _dumped: false,
+      req: [Circular *1],
+
+≡ƒÄ» Testing OpenAI Realtime call with audio monitoring...
+      _eventsCount: 4,
+      responseUrl: 
+'http://localhost:5000/api/dialer-runs/openai-realtime/status',
+      redirects: [],
+      Symbol(shapeMode): true,
+
+The test will:
+  1. Initiate a call via the OpenAI Realtime API
+  2. Monitor audio frame transmission
+  3. Track audio bytes sent to the caller
+      Symbol(kCapture): false,
+      Symbol(kHeaders): [Object],
+      Symbol(kHeadersCount): 34,
+      Symbol(kTrailers): null,
+      Symbol(kTrailersCount): 0
+    },
+    aborted: false,
+    timeoutCb: null,
+    upgradeOrConnect: false,
+    parser: null,
+  4. Detect any transmission delays or gaps
+  5. Report audio health metrics
+
+≡ƒô₧ Initiating test call...
+    maxHeadersCount: null,
+    reusedSocket: false,
+    host: 'localhost',
+    protocol: 'http:',
+    _redirectable: Writable {
+      _events: [Object],
+      _writableState: [WritableState],
+      _maxListeners: undefined,
+      _options: [Object],
+      _ended: true,
+      _ending: true,
+      _redirectCount: 0,
+      _redirects: [],
+      _requestBodyLength: 0,
+      _requestBodyBuffers: [],
+      _eventsCount: 3,
+      _onNativeResponse: [Function (anonymous)],
+      _currentRequest: [Circular *1],
+      _currentUrl: 
+'http://localhost:5000/api/dialer-runs/openai-realtime/status',
+      Symbol(shapeMode): true,
+      Symbol(kCapture): false
+    },
+    Symbol(shapeMode): false,
+    Symbol(kCapture): false,
+    Symbol(kBytesWritten): 0,
+    Symbol(kNeedDrain): false,
+    Symbol(corked): 0,
+    Symbol(kChunkedBuffer): [],
+    Symbol(kChunkedLength): 0,
+    Symbol(kSocket): Socket {
+      connecting: false,
+      _hadError: false,
+      _parent: null,
+      _host: 'localhost',
+      _closeAfterHandlingError: false,
+      _events: [Object],
+      _readableState: [ReadableState],
+      _writableState: [WritableState],
+      allowHalfOpen: false,
+      _maxListeners: undefined,
+      _eventsCount: 6,
+      _sockname: null,
+      _pendingData: null,
+      _pendingEncoding: '',
+      server: null,
+      _server: null,
+      timeout: 4000,
+      parser: null,
+      _httpMessage: null,
+      autoSelectFamilyAttemptedAddresses: [Array],
+      Symbol(async_id_symbol): -1,
+      Symbol(kHandle): [TCP],
+      Symbol(lastWriteQueueSize): 0,
+      Symbol(timeout): Timeout {
+        _idleTimeout: 4000,
+        _idlePrev: [TimersList],
+        _idleNext: [TimersList],
+        _idleStart: 752,
+        _onTimeout: [Function: bound ],
+        _timerArgs: undefined,
+        _repeat: null,
+        _destroyed: false,
+        Symbol(refed): false,
+        Symbol(kHasPrimitive): false,
+        Symbol(asyncId): 499,
+        Symbol(triggerId): 497,
+        Symbol(kAsyncContextFrame): undefined
+      },
+      Symbol(kBuffer): null,
+      Symbol(kBufferCb): null,
+      Symbol(kBufferGen): null,
+      Symbol(shapeMode): true,
+      Symbol(kCapture): false,
+      Symbol(kSetNoDelay): true,
+      Symbol(kSetKeepAlive): true,
+      Symbol(kSetKeepAliveInitialDelay): 1,
+      Symbol(kBytesRead): 0,
+      Symbol(kBytesWritten): 0
+    },
+    Symbol(kOutHeaders): [Object: null prototype] {
+      accept: [Array],
+      'user-agent': [Array],
+      'accept-encoding': [Array],
+      host: [Array]
+    },
+    Symbol(errored): null,
+    Symbol(kHighWaterMark): 16384,
+    Symbol(kRejectNonStandardBodyWrites): false,
+    Symbol(kUniqueHeaders): null
+  },
+  response: {
+    status: 404,
+    statusText: 'Not Found',
+    headers: Object [AxiosHeaders] {
+      'x-powered-by': 'Express',
+      'x-frame-options': 'DENY',
+      'x-content-type-options': 'nosniff',
+      'x-xss-protection': '1; mode=block',
+      'referrer-policy': 'strict-origin-when-cross-origin',
+      'content-security-policy': "default-src 'self'; script-src 'self' 
+'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' 
+https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' 
+data: https://fonts.gstatic.com; connect-src 'self' wss://sip.telnyx.com:7443 
+https://sip.telnyx.com wss://*.telnyx.com https://*.telnyx.com",
+      'ratelimit-policy': '10000;w=900',
+      'ratelimit-limit': '10000',
+      'ratelimit-remaining': '9996',
+      'ratelimit-reset': '896',
+      'content-type': 'application/json; charset=utf-8',
+      'content-length': '32',
+      etag: 'W/"20-nCH1SpapZfmcesztjNURs0fyPVw"',
+      vary: 'Accept-Encoding',
+      date: 'Tue, 30 Dec 2025 14:26:36 GMT',
+      connection: 'keep-alive',
+      'keep-alive': 'timeout=5'
+    },
+    config: {
+      transitional: [Object],
+      adapter: [Array],
+      transformRequest: [Array],
+      transformResponse: [Array],
+      timeout: 0,
+      xsrfCookieName: 'XSRF-TOKEN',
+      xsrfHeaderName: 'X-XSRF-TOKEN',
+      maxContentLength: -1,
+      maxBodyLength: -1,
+      env: [Object],
+      validateStatus: [Function: validateStatus],
+      headers: [Object [AxiosHeaders]],
+      method: 'get',
+      url: 'http://localhost:5000/api/dialer-runs/openai-realtime/status',
+      allowAbsoluteUrls: true,
+      data: undefined
+    },
+    request:  ClientRequest {
+      _events: [Object: null prototype],
+      _eventsCount: 7,
+      _maxListeners: undefined,
+      outputData: [],
+      outputSize: 0,
+      writable: true,
+      destroyed: true,
+      _last: true,
+      chunkedEncoding: false,
+      shouldKeepAlive: true,
+      maxRequestsOnConnectionReached: false,
+      _defaultKeepAlive: true,
+      useChunkedEncodingByDefault: false,
+      sendDate: false,
+      _removedConnection: false,
+      _removedContLen: false,
+      _removedTE: false,
+      strictContentLength: false,
+      _contentLength: 0,
+      _hasBody: true,
+      _trailer: '',
+      finished: true,
+      _headerSent: true,
+      _closed: true,
+      _header: 'GET /api/dialer-runs/openai-realtime/status HTTP/1.1\r\n' +
+        'Accept: application/json, text/plain, */*\r\n' +
+        'User-Agent: axios/1.12.2\r\n' +
+        'Accept-Encoding: gzip, compress, deflate, br\r\n' +
+        'Host: localhost:5000\r\n' +
+        'Connection: keep-alive\r\n' +
+        '\r\n',
+      _keepAliveTimeout: 0,
+      _onPendingData: [Function: nop],
+      agent: [Agent],
+      socketPath: undefined,
+      method: 'GET',
+      maxHeaderSize: undefined,
+      insecureHTTPParser: undefined,
+      joinDuplicateHeaders: undefined,
+      path: '/api/dialer-runs/openai-realtime/status',
+      _ended: true,
+      res: [IncomingMessage],
+      aborted: false,
+      timeoutCb: null,
+      upgradeOrConnect: false,
+      parser: null,
+      maxHeadersCount: null,
+      reusedSocket: false,
+      host: 'localhost',
+      protocol: 'http:',
+      _redirectable: [Writable],
+      Symbol(shapeMode): false,
+      Symbol(kCapture): false,
+      Symbol(kBytesWritten): 0,
+      Symbol(kNeedDrain): false,
+      Symbol(corked): 0,
+      Symbol(kChunkedBuffer): [],
+      Symbol(kChunkedLength): 0,
+      Symbol(kSocket): [Socket],
+      Symbol(kOutHeaders): [Object: null prototype],
+      Symbol(errored): null,
+      Symbol(kHighWaterMark): 16384,
+      Symbol(kRejectNonStandardBodyWrites): false,
+      Symbol(kUniqueHeaders): null
+    },
+    data: { error: 'Dialer run not found' }
+  },
+  status: 404
+}
+Γ£à Call initiated successfully!
+Call Control ID: undefined
+Call ID: undefined
+WebSocket URL: ws://localhost:5000/openai-realtime-dialer
+
+≡ƒöì Audio Transmission Checklist:
+------------------------------------------------------------
+Γ£ô Telnyx call initiated with stream_url parameter
+Γ£ô WebSocket endpoint includes all required parameters
+Γ£ô Stream will connect automatically when call is answered
+Γ£ô Audio format set to g711_ulaw (native Telnyx compatibility)
+Γ£ô Both OpenAI and Telnyx connections will be monitored
+
+≡ƒôè Audio Transmission Monitoring:
+------------------------------------------------------------
+Watch server logs for audio health metrics.
+Expected metrics to display:
+  Γ£à Audio frames being received from OpenAI
+  Γ£à Audio bytes being transmitted to caller
+  Γ£à First audio frame delivery confirmation
+  Γ£à Periodic health checks (every 30 seconds)
+  ΓÜá∩╕Å  Warnings if audio stalls (>15 seconds gap)
+  ΓÜá∩╕Å  Warnings if frame rate is too low (10 fps
+   - No gaps >1 second in audio stream
+   - Total bytes increasing steadily
+   - Both OpenAI and Telnyx showing OPEN state
+   - Stream ID properly set
+
+Γ¥î Audio transmission issues:
+   - 'Telnyx WebSocket not open' errors
+   - 'No stream_id available' errors
+   - No audio frames received for >15 seconds
+   - Frame rate drops below 5 fps
+   - Buffered frames accumulating (indicates connection lag)
+   - WebSocket state showing CLOSED or NULL
+
+≡ƒöº Troubleshooting:
+------------------------------------------------------------
+If audio isn't audible on the receiving end:
+  1. Check server logs for 'First audio frame sent to Telnyx' confirmation
+  2. Verify stream_id is set (should appear in health checks)
+  3. Look for 'No stream_id available' errors
+  4. Check both WebSocket states are OPEN
+  5. Monitor for 'Failed to send audio frame' errors
+  6. Verify Telnyx streaming endpoint is receiving 'media' events
+  7. Confirm audio payload format (should be base64 encoded)
+  8. Check for 'Telnyx WebSocket not ready' warnings
+  9. Verify OpenAI session is using g711_ulaw audio format
+  10. Look for buffer accumulation warnings (>20 frames)ng 'media' events
+  3. Confirm audio payload format (should be base64 encoded)
+  4. Check Telnyx API for media stream errors
+  5. Verify OpenAI session is using g711_ulaw audio format
+  6. Test with a different phone number or agent
+
+≡ƒô₧ Call is now connected. Listen for AI agent voice on the call.
+The call will end automatically after completion.
+
+Press Ctrl+C to stop the test at any time.

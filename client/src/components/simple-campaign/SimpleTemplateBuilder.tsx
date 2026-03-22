@@ -3,7 +3,7 @@
  * 
  * Full-screen email editor with:
  * - Left/Main Area (70%): Email Canvas at 600px, text-first
- * - Right Sidebar: Components (drag & drop) + AgentX
+ * - Right Sidebar: Components (drag & drop) + AgentC
  * - Top Bar: Preview, Save, Send Test, Back to Campaign
  * 
  * Design Philosophy:
@@ -660,7 +660,7 @@ export function SimpleTemplateBuilder({
   const [testEmail, setTestEmail] = useState("");
   const [sendingTest, setSendingTest] = useState(false);
   
-  // AgentX state
+  // AgentC state
   const [outreachType, setOutreachType] = useState("cold-outreach");
   const [tone, setTone] = useState("professional");
   // Pre-populate context with project details when available
@@ -1386,12 +1386,12 @@ export function SimpleTemplateBuilder({
           
           {/* Center Toolbar */}
           <div className="flex items-center gap-2">
-            {/* AgentX Sheet */}
+            {/* AgentC Sheet */}
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2 border-purple-200 hover:bg-purple-50 hover:text-purple-700">
                   <Sparkles className="w-4 h-4 text-purple-500" />
-                  AgentX
+                  AgentC
                 </Button>
               </SheetTrigger>
               <SheetContent className="w-[90vw] sm:w-[500px] overflow-y-auto">
@@ -1404,7 +1404,7 @@ export function SimpleTemplateBuilder({
                       <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full border-[2px] border-white bg-green-500 animate-pulse shadow-sm" />
                     </div>
                     <div className="space-y-1">
-                      <SheetTitle className="text-left text-lg font-semibold tracking-tight">AgentX</SheetTitle>
+                      <SheetTitle className="text-left text-lg font-semibold tracking-tight">AgentC</SheetTitle>
                       <SheetDescription className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Content Copilot</SheetDescription>
                     </div>
                   </div>

@@ -39,7 +39,6 @@ import {
   ChevronRight,
   ChevronDown,
   Sparkles,
-  TrendingUp,
   FileText,
   HelpCircle,
   Phone,
@@ -56,14 +55,18 @@ import {
   Mail,
   BarChart3,
   Plus,
-  Wand2,
   Workflow,
   Inbox,
+  Database,
+  Building2,
+  Users,
+  ListFilter,
+  Globe,
+  FileInput,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { VoiceAssistant } from '../voice/voice-assistant';
 import { SimulationStudioPanel as CampaignSimulationPanel } from '../simulation-studio/simulation-studio-panel';
-import { AgentPanelProvider, useAgentPanelContextOptional } from '@/components/agent-panel';
+import { AgentPanelProvider, AgentSidePanel, useAgentPanelContextOptional } from '@/components/agent-panel';
 import { clearClientPortalSession } from '@/lib/client-portal-session';
 
 interface ClientUser {
@@ -101,10 +104,13 @@ const NAV_FEATURE_MAP: Record<string, string> = {
   '/client-portal/dashboard?tab=work-orders': 'work_orders',
   '/client-portal/dashboard?tab=bookings': 'calendar_booking',
   '/client-portal/intelligence': 'ai_studio_dashboard',
+  '/client-portal/dashboard?tab=accounts': 'ai_studio_dashboard',
+  '/client-portal/dashboard?tab=contacts': 'ai_studio_dashboard',
   '/client-portal/dashboard?tab=target-markets': 'ai_studio_dashboard',
   '/client-portal/dashboard?tab=campaign-planner': 'ai_campaign_planner',
   '/client-portal/generative-studio': 'ai_studio_dashboard',
   '/client-portal/preview-studio': 'voice_simulation',
+  '/client-portal/campaign-planner': 'ai_campaign_planner',
   '/client-portal/reports': 'analytics_dashboard',
   '/client-portal/analytics': 'analytics_dashboard',
   '/client-portal/conversation-quality': 'analytics_dashboard',
@@ -145,9 +151,21 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'AI Studio',
     items: [
       { name: 'Org Intelligence', href: '/client-portal/intelligence', icon: Brain },
-      { name: 'Target Markets', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
       { name: 'Creative Studio', href: '/client-portal/generative-studio', icon: Sparkles },
       { name: 'Preview Studio', href: '/client-portal/preview-studio', icon: PhoneCall },
+      { name: 'Campaign Planner', href: '/client-portal/campaign-planner', icon: Layers },
+    ],
+  },
+  {
+    id: 'data-management',
+    label: 'Data Management',
+    items: [
+      { name: 'Accounts', href: '/client-portal/dashboard?tab=accounts', icon: Building2 },
+      { name: 'Contacts', href: '/client-portal/dashboard?tab=contacts', icon: Users },
+      { name: 'Lists', href: '/client-portal/dashboard?tab=target-markets', icon: ListFilter },
+      { name: 'Segments', href: '/client-portal/dashboard?tab=target-markets', icon: Target },
+      { name: 'Domain Sets', href: '/client-portal/dashboard?tab=target-markets', icon: Globe },
+      { name: 'Forms', href: '/client-portal/dashboard?tab=target-markets', icon: FileInput },
     ],
   },
   {
@@ -155,7 +173,6 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'Communications',
     items: [
       { name: 'Email Campaigns', href: '/client-portal/email-campaigns', icon: Mail },
-      { name: 'Email Studio', href: '/client-portal/email-simulation', icon: Wand2 },
       { name: 'Shared Inbox', href: '/client-portal/email-inbox', icon: Inbox },
     ],
   },
@@ -171,7 +188,7 @@ const baseNavigationGroups: NavGroup[] = [
     label: 'Account',
     items: [
       { name: 'Billing & Invoices', href: '/client-portal/dashboard?tab=billing', icon: CreditCard },
-      { name: 'Client Guide', href: '/client-portal/services', icon: HelpCircle },
+      { name: 'Account Management', href: '/client-portal/services', icon: HelpCircle },
     ],
   },
 ];
@@ -220,12 +237,12 @@ function ClientPortalAgentToggleButton() {
             onClick={agentPanel.togglePanel}
           >
             <BotMessageSquare className="h-4 w-4" />
-            <span className="hidden sm:inline">AgentX</span>
+            <span className="hidden sm:inline">AgentC</span>
             <span className="absolute -top-0.5 -right-0.5 h-2 w-2 bg-green-500 rounded-full" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
-          <p>AgentX - Your command center (Ctrl+/)</p>
+          <p>AgentC - Your command center (Ctrl+/)</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -236,10 +253,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [location, setLocation] = useLocation();
   const searchString = useSearch();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const [simulationOpen, setSimulationOpen] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [hasInteracted, setHasInteracted] = useState(false);
 
   const storedUser = localStorage.getItem('clientPortalUser');
   const user: ClientUser | null = storedUser ? JSON.parse(storedUser) : null;
@@ -343,69 +357,6 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     return pinnedNavItems.filter(filterByFeature);
   }, [filterByFeature]);
 
-  // Show suggestions bubble after a delay if user hasn't interacted
-  useEffect(() => {
-    const interacted = localStorage.getItem('demandAssistantInteracted');
-    if (interacted) {
-      setHasInteracted(true);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (!voiceOpen) {
-        setShowSuggestions(true);
-      }
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, [voiceOpen]);
-
-  // Context-aware suggestions based on current page and user
-  const getSuggestions = () => {
-    const baseSuggestions = [
-      { icon: TrendingUp, text: "What's my campaign performance?", action: "What's my campaign performance this month?" },
-      { icon: FileText, text: "Show my pending invoices", action: "Show my pending invoices" },
-      { icon: HelpCircle, text: "How do I create a new order?", action: "How do I create a new order?" },
-    ];
-
-    if (location.includes('/dashboard')) {
-      return [
-        { icon: TrendingUp, text: "Summarize my account", action: "Give me a summary of my account status and recent activity" },
-        { icon: Sparkles, text: "What leads were delivered?", action: "What leads have been delivered to me recently?" },
-        ...baseSuggestions.slice(0, 1),
-      ];
-    }
-    if (location.includes('/campaigns')) {
-      return [
-        { icon: TrendingUp, text: "Campaign analytics", action: "Show me detailed analytics for my campaigns" },
-        { icon: Megaphone, text: "Best performing campaign", action: "Which campaign is performing the best?" },
-        { icon: Phone, text: "Try AI Simulation", action: "__SIMULATION__", isSimulation: true },
-      ];
-    }
-    if (location.includes('/billing')) {
-      return [
-        { icon: CreditCard, text: "Billing summary", action: "Give me a summary of my billing and payments" },
-        { icon: FileText, text: "Download invoices", action: "How do I download my invoices?" },
-        ...baseSuggestions.slice(0, 1),
-      ];
-    }
-
-    return baseSuggestions;
-  };
-
-  const handleOpenAssistant = (initialPrompt?: string) => {
-    if (initialPrompt === '__SIMULATION__') {
-      setShowSuggestions(false);
-      setSimulationOpen(true);
-      return;
-    }
-
-    setShowSuggestions(false);
-    setHasInteracted(true);
-    localStorage.setItem('demandAssistantInteracted', 'true');
-    setVoiceOpen(true);
-  };
-
   const handleLogout = () => {
     clearClientPortalSession();
     setLocation('/client-portal/login');
@@ -418,10 +369,6 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     return (first + last).toUpperCase() || user.email[0].toUpperCase();
   };
 
-  const handleVoiceNavigation = (path: string) => {
-    setVoiceOpen(false);
-    setLocation(path);
-  };
 
   const currentPageLabel = React.useMemo(() => {
     if (location === '/client-portal/dashboard') {
@@ -434,7 +381,9 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         'unified-pipelines': 'Pipeline & Engagement',
         'work-orders': 'Work Orders',
         bookings: 'Bookings',
-        'target-markets': 'Target Markets',
+        accounts: 'Accounts',
+        contacts: 'Contacts',
+        'target-markets': 'Data Management',
         'campaign-planner': 'Campaign Planner',
         settings: 'Settings',
         billing: 'Billing',
@@ -456,7 +405,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   return (
     <AgentPanelProvider userRole="client" isClientPortal={true}>
-      <div className="min-h-screen bg-background agentx-shell">
+      <div className="min-h-screen bg-background agentc-shell">
         {/* Mobile sidebar overlay */}
         {sidebarOpen && (
           <div
@@ -621,7 +570,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
             <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{currentPageLabel}</div>
           </div>
 
-          {/* AgentX Button in Header - REMOVED (Replaced by Dashboard Action)
+          {/* AgentC Button in Header - REMOVED (Replaced by Dashboard Action)
           <ClientPortalAgentToggleButton />
           */}
 
@@ -693,16 +642,8 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         <main className="p-4 lg:p-6">{children}</main>
       </div>
 
-      {/* Voice Assistant Modal */}
-      <VoiceAssistant
-        open={voiceOpen}
-        onOpenChange={setVoiceOpen}
-        onNavigate={handleVoiceNavigation}
-      />
-
-      {/* Global AI Agent Side Panel - REMOVED per user request
+      {/* Unified AgentC Side Panel — all GenAI & Agentic ops */}
       <AgentSidePanel />
-      */}
 
       {/* Campaign Simulation Panel */}
       <CampaignSimulationPanel
@@ -738,7 +679,7 @@ export function ClientPortalAgentToggle() {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>AgentX (Ctrl+/)</p>
+          <p>AgentC (Ctrl+/)</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

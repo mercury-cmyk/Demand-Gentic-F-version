@@ -1,0 +1,315 @@
+Pivotal Pipeline Management System — Full Implementation Prompt (v2)
+0️⃣ Objective
+
+Design and build a next-generation Pipeline Management Platform (PPMS) for Pivotal B2B, combining:
+
+Dynamic Pipelines with integrated Accounts and Contacts
+
+True Microsoft 365 OAuth Email sync (Graph API)
+
+AI-driven Account Intelligence
+
+Automated Email Sequences with personalization
+
+Outlook-safe email templates with ABM targeting
+
+The system must be modular, data-driven, and enterprise-compliant (GDPR, CCPA, TCPA).
+
+1️⃣ Tech Stack & Foundations
+Layer	Technology
+Frontend	React 18 + TypeScript + Vite + Tailwind + shadcn/ui + Zustand or Redux Toolkit
+Backend	Node.js 20 + Express + Prisma (PostgreSQL) + Zod Validation
+Auth	NextAuth / Passport.js with OAuth 2.0 (M365 + JWT sessions)
+Database	PostgreSQL (hosted, scalable)
+Integrations	Microsoft Graph API (Mail, Calendar, Users), OpenAI / local LLM for AI insights
+Job Queue	BullMQ (Redis) for email sequences and sync tasks
+Infra	Docker + GitHub Actions CI/CD
+Monitoring	OpenTelemetry + Winston logs
+Testing	Vitest + Playwright + Pact for API contracts
+2️⃣ Core Functional Modules
+2.1 Pipeline Management
+
+Full CRUD for Pipelines, Stages, and Deals
+
+Drag-and-drop Kanban UI (React DnD / dnd-kit)
+
+Inline editing for deal value, owner, stage, close date
+
+Stage transitions auto-save with optimistic UI updates
+
+Pipeline metrics: total value, win rate, forecast by month
+
+2.2 Account & Contact Integration
+
+Accounts link directly to associated Contacts and Deals
+
+Selecting an Account in Deal Creation filters related Contacts
+
+Account view includes:
+
+Open/closed deals
+
+Contacts with activity score
+
+AI-generated AccountBrief (see section 4)
+
+Email & meeting timeline synced via M365
+
+3️⃣ Microsoft 365 Email Integration (Graph API)
+3.1 OAuth 2.0 Flow
+
+Use authorization_code + PKCE flow
+
+Scopes: offline_access, Mail.ReadWrite, Mail.Send, Calendars.Read, User.Read
+
+Store encrypted tokens (access + refresh) in DB
+
+Auto-refresh access tokens; fail gracefully if expired
+
+Connection UI shows status + “Reconnect” button
+
+3.2 Email & Calendar Sync
+
+Fetch inbound/outbound messages tied to known domains
+
+Log as Activity objects (email, meeting, task)
+
+Sync scheduler runs every 6 hours; on-demand via /m365/sync
+
+Respect GDPR: store only metadata & bodyPreview (not full email body)
+
+3.3 Reply Detection
+
+Graph Webhook subscription for /me/messages
+
+Auto-detect replies → mark sequence completed
+
+4️⃣ AI Account Analyst (Deep Account Insights)
+4.1 Purpose
+
+Generate structured account intelligence using internal + public data:
+
+Main products & positioning
+
+Target industries & geos
+
+Buyer titles (decision-maker personas)
+
+Key pains & triggers
+
+Tailored outreach angles
+
+4.2 Data Flow
+
+Ingest: Account domain + company description + manual notes
+
+Enrich: Industry normalization, product keywords
+
+Synthesize: AI model generates AccountBrief JSON
+
+Cache: Version per Account; refresh every 14 days
+
+Expose: /ai/accounts/{id}/brief and /ai/accounts/{id}/analyze
+
+4.3 Example Output
+{
+  "accountId": "acc_123",
+  "mainProducts": [{"name": "CloudOps Suite", "desc": "automation for IT workflows"}],
+  "targetMarkets": [{"segment": "Enterprise SaaS", "geo": "North America"}],
+  "buyerTitles": ["Head of IT", "VP of Engineering"],
+  "industries": ["Technology", "Software"],
+  "painHypotheses": [
+    {"pain": "Slow lead qualification", "proof": "Hiring SDRs aggressively"}
+  ],
+  "tailoredAngles": {
+    "openingHook": "We noticed your expansion into cloud automation...",
+    "tailoredOffer": "We help streamline your sales-to-marketing pipeline...",
+    "caseStudy": "Acme Tech scaled pipeline by 40% using Content Syndication"
+  },
+  "confidence": 85
+}
+
+5️⃣ Automated Email Sequences
+5.1 Capabilities
+
+Multi-step email & task sequences with delays and conditions
+
+Enrollment by Account or Contact list
+
+Pause on reply, unsubscribe, or bounce
+
+A/B test (subject + body variants)
+
+Use M365 Graph Mail.Send for real sending
+
+5.2 Sequence Model
+model Sequence {
+  id          String @id @default(cuid())
+  name        String
+  ownerId     String
+  steps       Json    // [{id, kind:'email'|'task', delay:{days}, templateId, branch}]
+  targetType  String  // 'account' | 'contact'
+  status      String  // 'draft' | 'active' | 'paused'
+}
+
+model SequenceEnrollment {
+  id          String @id @default(cuid())
+  sequenceId  String
+  targetId    String
+  status      String  // 'queued'|'in_progress'|'paused'|'completed'
+  currentStep String?
+  lastEventAt DateTime?
+}
+
+5.3 Send Engine
+
+Cron/queue picks due sends
+
+Token substitution from Account/Contact/AI data
+
+M365 Send via /me/sendMail
+
+Stop rules: reply, bounce, unsubscribe
+
+A/B logic: randomized variant per enrollment
+
+Analytics: open, click, reply, bounce tracked via webhook
+
+5.4 Personalization Tokens
+{{contact.firstName}}, {{account.name}}, {{account.industry}},
+{{ai.openingHook}}, {{ai.tailoredOffer}}, {{rep.signature}}
+
+6️⃣ Custom AI-Tailored Email Templates
+6.1 AI-Generated Templates
+
+Each Account gets unique messaging snippets via AccountBrief
+
+System auto-creates draft templates:
+
+Subject line variations (A/B)
+
+Personalized opening and CTA
+
+Integrated case study or proof point
+
+6.2 Template Requirements
+
+600px width, responsive table layout
+
+Bulletproof header with gradient + solid color fallback (VML)
+
+bgcolor fallback for Outlook desktop
+
+Semantic  layout, no CSS floats
+
+Include List-Unsubscribe headers
+
+Example header:
+
+
+
+
+
+
+
+  Pivotal B2B
+
+
+
+7️⃣ Reports & Analytics
+
+Pipeline Metrics: Total value, win rate, velocity
+
+Email Analytics: open/click/reply/bounce rate
+
+Forecasting: Weighted revenue projection
+
+AI Insights Usage: Confidence scores distribution
+
+8️⃣ Compliance & Security
+
+GDPR / CCPA compliant (right to delete, purpose limitation)
+
+Suppression lists for opt-outs and bounces
+
+Data minimization (no full email storage)
+
+All tokens encrypted with AES-256 at rest
+
+Role-based access (admin/manager/rep)
+
+Audit logs for pipeline, sequence, and AI edits
+
+9️⃣ Acceptance Criteria
+Area	Acceptance Test
+Pipelines	Drag-and-drop updates persist within 300ms
+M365	OAuth connect & Graph sync confirmed
+AI Analyst	AccountBrief fields populated ≥80% with confidence ≥60
+Sequences	Emails send with correct tokens; stops on reply/unsubscribe
+Templates	Render correctly on Outlook desktop + mobile
+Compliance	Unsubscribes update suppression list
+Reporting	Forecast matches weighted sum across deals
+🔟 UI/UX Requirements
+
+Clean grid layout; left sidebar + top metrics bar
+
+Consistent typography (Inter/Roboto)
+
+Keyboard accessible, WCAG 2.1 AA
+
+Smooth DnD animations
+
+Light/dark mode toggle
+
+Empty/error states with recovery actions
+
+🧩 API Endpoints Overview
+Endpoint	Description
+/pipelines	CRUD pipelines
+/deals	CRUD deals, move stage
+/accounts	CRUD accounts, fetch contacts
+/contacts	CRUD contacts
+/m365/oauth/start	Start OAuth (redirect)
+/m365/oauth/callback	Handle OAuth callback
+/m365/sync	Run email/calendar sync
+/ai/accounts/:id/analyze	Generate account brief
+/ai/accounts/:id/brief	Fetch cached brief
+/templates	CRUD email templates
+/sequences	CRUD & activate sequences
+/sequences/:id/enroll	Enroll contacts/accounts
+/deliver/schedule	Trigger sequence send queue
+/reports/*	Funnel, Forecast, Velocity reports
+🚀 Suggested Implementation Phases
+Sprint 1 — Foundation & Routing
+
+Routing, Auth, Kanban UI, Accounts/Contacts integration
+
+Sprint 2 — M365 OAuth + Sync
+
+Real OAuth, email activity timeline, compliance
+
+Sprint 3 — AI Account Analyst
+
+LLM integration, AccountBrief, Insights tab UI
+
+Sprint 4 — Email Sequences Engine
+
+Queue system, send scheduler, Graph send, stop rules
+
+Sprint 5 — Reports + UI Polish
+
+Charts, filters, responsive design, accessibility pass
+
+✅ Done = Definition of Success
+
+Dynamic, multi-page app (no static screen)
+
+All modules connected via API and DB
+
+M365 OAuth functional & secure
+
+AI-generated insights and tailored outreach live
+
+Emails render perfectly in Outlook & Gmail
+
+90%+ test coverage in critical workflows

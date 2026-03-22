@@ -1,0 +1,173 @@
+Perfect — this is a major UX and functional enhancement request for your Campaign Builder Module, covering both Email and Telemarketing experiences.
+Below is a comprehensive new Section 23: Campaign Builder UI & Workflow Upgrade, detailing how to rebuild these modules for power, personalization, and usability, while integrating the new segmentation engine and role-based flows.
+
+⸻
+
+23) Campaign Builder UI & Workflow Upgrade
+
+23.1 Objectives
+	•	Deliver a modern, intuitive, step-by-step campaign builder for both Email and Telemarketing campaigns.
+	•	Provide an advanced HTML/Rich Text editor with personalization placeholders and dynamic preview.
+	•	Integrate the new audience filtering engine (same as Accounts/Contacts) to allow granular targeting.
+	•	Separate Agent Dashboard from Campaign Builder, ensuring managers handle creation while agents only see assigned calling queues.
+	•	Streamline pre-flight, QA, and campaign launch experience.
+
+⸻
+
+23.2 Campaign Builder — Unified Design
+
+Both Email and Telemarketing campaign creation flows follow a 5-step guided UI wizard, displayed in a side-stepped layout or horizontal progress bar style (e.g., Step 1 → Step 5).
+
+Step	Stage	Purpose
+1	Audience Selection	Choose audience source (Segments, Lists, Domain Sets, or Advanced Filters).
+2	Content & Setup	For Email: Template and personalization. For Telemarketing: Script and qualification.
+3	Scheduling & Pacing	Define send time or call window, daily cap, throttling, timezone.
+4	Compliance & Review	Verify unsubscribe block, DNC checks, quiet hours, frequency caps.
+5	Summary & Launch	Final overview with audience size, pacing, compliance, and content preview.
+
+
+⸻
+
+23.3 Step 1 — Advanced Audience Selection
+
+Integrated Audience Filters
+
+Uses the same filtering engine as Contacts and Accounts:
+	•	Supports all filter categories:
+Contact Fields, Account Fields, Suppression Fields, Email Campaign Fields, Telemarketing Fields, QA Fields, Client Portal Fields, Lists, Segments.
+	•	Allows multi-condition AND/OR logic, nested grouping, and cross-entity conditions (e.g., “Contacts where Account.industry = IT and Email Opened in last 30 days”).
+	•	“Save as Segment” and “Save as List” buttons to preserve filters for reuse.
+
+Data Preview
+	•	Live count with “View Sample Records” button.
+	•	Pie chart of audience distribution (e.g., by title, region, industry).
+	•	Show excluded records due to suppression or invalid data.
+
+⸻
+
+23.4 Step 2 — Content & Setup
+
+A. Email Campaigns — Rich HTML Editor
+
+Editor Features
+	•	Modes:
+	•	Design Mode: Drag-and-drop layout blocks (header, text, image, button, divider, footer).
+	•	Code Mode: Full HTML view with syntax highlighting and live preview.
+	•	Hybrid Mode: Switch freely without data loss.
+	•	Rich Text Controls: font family, size, alignment, links, images, icons, CTA buttons, custom colors.
+	•	Template Library: Save, clone, and load templates.
+	•	Dynamic Placeholders:
+	•	Contact placeholders: {{contact.first_name}}, {{contact.job_title}}, {{contact.city}}.
+	•	Account placeholders: {{account.name}}, {{account.industry}}.
+	•	Fallback support: {{contact.first_name|there}}.
+	•	Conditional Sections:
+	•	Show/hide blocks based on attribute conditions (e.g., “Show paragraph if account.industry = ‘Finance’”).
+	•	Mandatory Compliance Blocks:
+	•	Auto-appended Unsubscribe link & company address (cannot be removed).
+
+Content Personalization Sidebar
+
+Right-side panel for inserting placeholders and logic snippets:
+	•	“Insert Placeholder” dropdown grouped by entity.
+	•	“Insert Conditional Block” (if/else editor).
+	•	Preview toggle: choose sample contact to preview email rendering.
+
+⸻
+
+B. Telemarketing Campaigns — Call Script Builder
+
+Script Panel
+	•	Rich text with formatting, placeholders, hyperlinks, and section headers.
+	•	Version-controlled (each change tracked with timestamp and author).
+	•	Script preview in agent view identical to builder preview.
+
+Qualification Questions Builder
+	•	Add field types: Dropdown, Radio, Checkbox, Text, Number, Date.
+	•	Define required/optional, tooltips, default values.
+	•	Save as “Qualification Form Template” for reuse.
+
+Integration
+	•	Qualification schema linked to QA portal → data auto-passed on lead creation.
+	•	Agents see assigned script + form, cannot edit content (read-only).
+
+⸻
+
+23.5 Step 3 — Scheduling & Pacing
+	•	Email:
+	•	Schedule date/time or “Send Now.”
+	•	Set send throttling (max X emails/minute).
+	•	Timezone-based sends (e.g., local morning hours).
+	•	AI-suggested optimal send time (optional).
+	•	Telemarketing:
+	•	Call window (e.g., 9am–6pm per timezone).
+	•	Max concurrent calls per agent.
+	•	Frequency cap (max calls per contact per X days).
+	•	Assign agent teams or auto-assign dynamically by availability.
+
+⸻
+
+23.6 Step 4 — Compliance & Review
+	•	Runs automated pre-flight checklist:
+	•	✅ Valid emails/phones only.
+	•	✅ DNC and Unsubscribe compliance verified.
+	•	✅ Consent basis present (or legitimate interest).
+	•	✅ Sender Profile (email) or SIP (phone) validated.
+	•	✅ Suppression applied.
+	•	Display total included, excluded, and suppressed counts.
+	•	For Email → ensure Unsubscribe URL + address visible.
+	•	For Calls → ensure Call Recording consent enabled if jurisdiction requires it.
+
+⸻
+
+23.7 Step 5 — Summary & Launch
+	•	Display:
+	•	Audience Summary: size, filters, exclusions.
+	•	Content Summary: template name, subject line, preview.
+	•	Schedule Summary: start date/time, pacing.
+	•	Compliance Status: all checks passed.
+	•	Action Buttons:
+	•	“Launch Now”
+	•	“Save as Draft”
+	•	“Send Test Email” / “Make Test Call”
+	•	Post-launch: progress indicators for sent/delivered/called counts.
+
+⸻
+
+23.8 Separation of Roles
+
+Function	Campaign Manager	Agent
+Create/Edit Campaign	✅	🔒
+Configure Audience	✅	🔒
+Edit Script/Template	✅	🔒
+View Agent Queue	🔒	✅
+Record Disposition	🔒	✅
+Access QA View	✅ (limited)	🔒
+
+Agents now see only their assigned campaigns via a separate “My Calls” dashboard, not the campaign creation UI.
+
+⸻
+
+23.9 Technical Integration Notes
+	•	Email Editor: TinyMCE / GrapesJS hybrid with server-side sanitization and placeholder parser.
+	•	Dynamic Preview: Render test template using sample contact JSON (API endpoint /templates/render).
+	•	Audience Filters: Shared filter component reused from Contacts/Accounts with field registry sync.
+	•	Telemarketing Creation: Replace existing “Agent Screen” with Manager’s Campaign Builder; route /telemarketing/create uses the 5-step builder.
+	•	Campaign Previews: Async call to /audience/preview for live record count.
+	•	Versioning: Save campaign at each step; restore from drafts.
+
+⸻
+
+23.10 Acceptance Criteria
+
+✅ Email Campaign Builder shows full drag-drop HTML editor with personalization.
+✅ Dynamic placeholders work across Contact and Account fields.
+✅ Advanced audience filter builder identical to Accounts/Contacts.
+✅ Telemarketing creation page accessible only to managers (not agents).
+✅ Agent screen appears only in “My Calls.”
+✅ Step-based builder with progress indicator implemented.
+✅ Compliance checks pass before allowing “Launch.”
+✅ Live preview and test-send/test-call functional.
+
+⸻
+
+Would you like me to add this as Section 23: Campaign Builder UI & Workflow Upgrade to your PRD, right after Section 22 (Menu Architecture)?

@@ -1,0 +1,170 @@
+import { storage } from './storage';
+import { hashPassword } from './auth';
+import { seedDefaultKnowledgeBlocks, areKnowledgeBlocksInitialized } from './services/knowledge-block-service';
+import { seedDefaultTemplates, seedDefaultRules } from './services/mercury/default-templates';
+import {
+  initializeSuperOrganization,
+  setupAdminAsSuperOrgOwner,
+} from './services/super-organization-service';
+
+/**
+ * Initialize database with default admin user for production
+ * Only runs if no users exist in the database
+ */
+export async function initializeDatabase() {
+  try {
+    console.log('[DB-INIT] Checking database initialization status...');
+
+    // Initialize knowledge blocks if not already done
+    await initializeKnowledgeBlocks();
+
+    // Initialize Super Organization (Pivotal B2B)
+    await initializeSuperOrganizationData();
+
+    // Seed Mercury notification templates and rules
+    await initializeMercuryNotifications();
+
+    // Check if any users exist
+    const users = await storage.getUsers();
+
+    if (users.length > 0) {
+      console.log('[DB-INIT] Database already initialized with', users.length, 'users');
+
+      // Ensure admin users are super org owners
+      const adminUsers = users.filter(u => u.role === 'admin');
+      for (const admin of adminUsers) {
+        await setupAdminAsSuperOrgOwner(admin.id);
+      }
+
+      // Optionally force specific users to be platform owners/admins
+      // Comma-separated list of usernames or emails:
+      //   SUPER_ORG_OWNERS=zahid,tabasum
+      const ownerListRaw = process.env.SUPER_ORG_OWNERS;
+      if (ownerListRaw && ownerListRaw.trim().length > 0) {
+        const identifiers = ownerListRaw
+          .split(/[,\n;]/g)
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        for (const identifier of identifiers) {
+          const match = users.find(u =>
+            u.username?.toLowerCase() === identifier.toLowerCase() ||
+            u.email?.toLowerCase() === identifier.toLowerCase()
+          );
+
+          if (!match) {
+            console.warn(`[DB-INIT] SUPER_ORG_OWNERS user not found: ${identifier}`);
+            continue;
+          }
+
+          if (match.role !== 'admin') {
+            await storage.updateUser(match.id, { role: 'admin' });
+          }
+          await storage.assignUserRole(match.id, 'admin', match.id);
+          await setupAdminAsSuperOrgOwner(match.id);
+          console.log(`[DB-INIT] ✅ Ensured SUPER_ORG_OWNER: ${match.username}`);
+        }
+      }
+
+      return;
+    }
+
+    console.log('[DB-INIT] No users found. Initializing with default admin user...');
+
+    // Get admin credentials from environment or use defaults
+    const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@crm.local';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'Admin123!';
+    const adminFirstName = process.env.ADMIN_FIRST_NAME || 'Admin';
+    const adminLastName = process.env.ADMIN_LAST_NAME || 'User';
+
+    // Hash password
+    const hashedPassword = await hashPassword(adminPassword);
+
+    // Create admin user
+    const adminUser = await storage.createUser({
+      username: adminUsername,
+      email: adminEmail,
+      password: hashedPassword,
+      role: 'admin',
+      firstName: adminFirstName,
+      lastName: adminLastName,
+    });
+
+    // Assign admin role in multi-role system
+    await storage.assignUserRole(adminUser.id, 'admin', adminUser.id);
+
+    // Add admin as super organization owner
+    await setupAdminAsSuperOrgOwner(adminUser.id);
+
+    console.log('[DB-INIT] ✅ Default admin user created successfully');
+    console.log('[DB-INIT] Username:', adminUsername);
+    console.log('[DB-INIT] Email:', adminEmail);
+    console.log('[DB-INIT] Use the credentials you configured to log in');
+
+  } catch (error) {
+    console.error('[DB-INIT] ❌ Failed to initialize database:', error);
+    // Don't throw - let the app continue even if init fails
+  }
+}
+
+/**
+ * Initialize the Super Organization (Pivotal B2B)
+ * This creates the persistent super organization that owns the platform
+ */
+async function initializeSuperOrganizationData() {
+  try {
+    console.log('[DB-INIT] Initializing super organization...');
+    await initializeSuperOrganization();
+    console.log('[DB-INIT] ✅ Super organization initialized');
+  } catch (error) {
+    console.error('[DB-INIT] ⚠️ Failed to initialize super organization:', error);
+    // Don't throw - super org init is important but shouldn't block startup
+  }
+}
+
+/**
+ * Initialize knowledge blocks with default system blocks
+ * Seeds the knowledge_blocks table with core agent knowledge
+ */
+async function initializeKnowledgeBlocks() {
+  try {
+    console.log('[DB-INIT] Checking knowledge blocks initialization...');
+
+    const initialized = await areKnowledgeBlocksInitialized();
+    if (initialized) {
+      console.log('[DB-INIT] Knowledge blocks already initialized');
+      return;
+    }
+
+    console.log('[DB-INIT] Seeding default knowledge blocks...');
+    const result = await seedDefaultKnowledgeBlocks();
+
+    if (result.errors.length > 0) {
+      console.warn('[DB-INIT] ⚠️ Some knowledge blocks failed to seed:', result.errors);
+    }
+
+    console.log(`[DB-INIT] ✅ Knowledge blocks seeded: ${result.created} created, ${result.existing} existing`);
+  } catch (error) {
+    console.error('[DB-INIT] ⚠️ Failed to initialize knowledge blocks:', error);
+    // Don't throw - knowledge blocks are optional for basic functionality
+  }
+}
+
+/**
+ * Seed Mercury notification templates and rules.
+ * Safe to call every startup — skips already-existing entries.
+ */
+async function initializeMercuryNotifications() {
+  try {
+    console.log('[DB-INIT] Seeding Mercury notification templates and rules...');
+    const templates = await seedDefaultTemplates();
+    const rules = await seedDefaultRules();
+    console.log(
+      `[DB-INIT] ✅ Mercury seeded: templates=${templates.created} new/${templates.skipped} existing, rules=${rules.created} new/${rules.skipped} existing`
+    );
+  } catch (error) {
+    console.error('[DB-INIT] ⚠️ Failed to seed Mercury notifications:', error);
+    // Don't throw - Mercury seeding is non-critical for basic startup
+  }
+}

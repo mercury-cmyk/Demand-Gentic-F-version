@@ -1,0 +1,1003 @@
+lead_id,qa_status,contact_name,account_name,campaign_name,overall_quality_score,convq,scored_at
+6e7c1116-e7b4-4203-96de-e1e3d3b9edc9,under_review,Herb Kaaihue,CareOregon,RingCentral_AppointmentGen,100,98,Fri Feb 13 2026 16:35:08 GMT+0500 (Pakistan Standard Time)
+aa2b1394-e280-4303-afb4-6197a29fa88a,approved,David Toone,,UK Export Finance_Q4 2025.,95,97,Fri Feb 13 2026 15:13:25 GMT+0500 (Pakistan Standard Time)
+3d0b503e-dd15-4c1e-86fc-91559dd1c15c,approved,Callum Finlayson,,UK Export Finance_Q4 2025.,92,97,Fri Feb 13 2026 15:26:42 GMT+0500 (Pakistan Standard Time)
+56445db2-5110-4b10-843c-6f67e00e6cd5,approved,Alvi Chowdhury,,Proton UK,96,96,Fri Feb 13 2026 15:54:42 GMT+0500 (Pakistan Standard Time)
+c1b756fe-c4bc-409c-ade0-f7be6d9df7bc,approved,Lasantha Pambagoda,,Proton UK,95,96,Fri Feb 13 2026 15:59:51 GMT+0500 (Pakistan Standard Time)
+9ff3a847-ec04-4024-891a-e3102878e570,approved,Olivia Morris,,UK Export Finance_Q4 2025.,95,96,Fri Feb 13 2026 15:30:32 GMT+0500 (Pakistan Standard Time)
+3ca95c16-c608-4d67-a281-69a7ccc2bb15,approved,John Fedden,,UK Export Finance_Q4 2025.,94,96,Fri Feb 13 2026 15:32:27 GMT+0500 (Pakistan Standard Time)
+4dff49c9-5e9e-4d30-b46d-6330a8b5b599,approved,Bruno Foito,,UK Export Finance_Q4 2025.,92,96,Fri Feb 13 2026 15:35:07 GMT+0500 (Pakistan Standard Time)
+af1d78a3-5e29-4865-be74-574b434a85ff,approved,Katie Evans,,UK Export Finance_Q4 2025.,92,96,Fri Feb 13 2026 15:39:47 GMT+0500 (Pakistan Standard Time)
+ceac16da-f7cc-417d-87b1-4b151bf8bee8,approved,Kieron Atkinson,,UK Export Finance_Q4 2025.,92,96,Fri Feb 13 2026 15:28:08 GMT+0500 (Pakistan Standard Time)
+824f320d-54f9-4e2e-bbf5-a9c9094179cc,approved,Nathan Edwards,,UK Export Finance_Q4 2025.,92,96,Fri Feb 13 2026 15:55:54 GMT+0500 (Pakistan Standard Time)
+43b3c795-426c-42cf-8460-e1cc64efbc3f,approved,Stewart Lee,,UK Export Finance_Q4 2025.,92,96,Fri Feb 13 2026 15:33:15 GMT+0500 (Pakistan Standard Time)
+d74671c1-f9ea-4105-ae17-716f641cfe84,approved,Sultana Miah,,UK Export Finance_Q4 2025.,92,96,Fri Feb 13 2026 15:29:52 GMT+0500 (Pakistan Standard Time)
+4ffdeea2-16cb-4206-8a70-a9e3cd7647e5,approved,David Martin,,Proton UK,95,95,Fri Feb 13 2026 15:54:01 GMT+0500 (Pakistan Standard Time)
+d89621de-1025-4652-8606-6e2e4ed863a6,under_review,Eva Zamorano,,UK Export Finance_Q4 2025.,95,95,Fri Feb 13 2026 14:57:24 GMT+0500 (Pakistan Standard Time)
+0f4136e2-f2bc-4c5f-a5db-e4738a5f55b7,approved,Trevor Dicken,,UK Export Finance_Q4 2025.,95,95,Fri Feb 13 2026 15:43:43 GMT+0500 (Pakistan Standard Time)
+8c901418-39ec-47ab-b7fc-e9348669a4cc,approved,Dennis Cattliff,,UK Export Finance_Q4 2025.,94,95,Fri Feb 13 2026 15:19:11 GMT+0500 (Pakistan Standard Time)
+ef30185b-d656-4bf6-b7c5-36e0e0a5e7dd,approved,Carl Potter,,UK Export Finance_Q4 2025.,92,95,Fri Feb 13 2026 15:41:47 GMT+0500 (Pakistan Standard Time)
+42b9ae4b-5741-40de-9ba0-cd9a5b5b0a44,approved,James Head,,UK Export Finance_Q4 2025.,92,95,Fri Feb 13 2026 15:51:40 GMT+0500 (Pakistan Standard Time)
+e15630c9-7d46-4eab-bd97-0e8092ebfebd,approved,Liz Halpine,,UK Export Finance_Q4 2025.,92,95,Fri Feb 13 2026 15:27:56 GMT+0500 (Pakistan Standard Time)
+766310e7-9f18-496c-917d-dc15a337e9aa,approved,Paul Mellor,,UK Export Finance_Q4 2025.,92,95,Fri Feb 13 2026 15:40:13 GMT+0500 (Pakistan Standard Time)
+26ec7261-f6e2-4653-a7ed-37c89c717ee7,approved,Stephen McMurray,,UK Export Finance_Q4 2025.,92,95,Fri Feb 13 2026 15:11:49 GMT+0500 (Pakistan Standard Time)
+495f881e-968c-4ff0-9ec0-98d8738272c0,approved,Tom Allen,,Proton UK,92,95,Fri Feb 13 2026 15:54:42 GMT+0500 (Pakistan Standard Time)
+b2c5daea-fa2b-4b92-a4df-5af1722f7c66,under_review,Viviane Paraschiv,,UK Export Finance_Q4 2025.,88,95,Fri Feb 13 2026 15:00:00 GMT+0500 (Pakistan Standard Time)
+03cd6689-f1ea-4eb1-9619-b10a09716fb5,under_review,Andrew Langley,,UK Export Finance_Q4 2025.,96,94,Fri Feb 13 2026 15:58:46 GMT+0500 (Pakistan Standard Time)
+0780bb14-ec86-4ac4-b0d1-e9447e78ad6c,approved,Lee McDaid,,UK Export Finance_Q4 2025.,95,94,Fri Feb 13 2026 15:26:10 GMT+0500 (Pakistan Standard Time)
+bc5a8cef-850d-437b-adf6-6d7ec8d5c01a,approved,Olga Leach,,UK Export Finance_Q4 2025.,95,94,Fri Feb 13 2026 15:57:13 GMT+0500 (Pakistan Standard Time)
+3086e450-a687-44ab-a1f2-d8665e4590cb,approved,Simon Temple,,UK Export Finance_Q4 2025.,95,94,Fri Feb 13 2026 15:25:54 GMT+0500 (Pakistan Standard Time)
+52fdeb8a-4da8-4c02-812a-f52b5cad1b0d,approved,Steve Randall,,UK Export Finance_Q4 2025.,95,94,Fri Feb 13 2026 15:50:01 GMT+0500 (Pakistan Standard Time)
+a0bdfffb-3e9d-4b18-ad58-e151f82bba3c,approved,Tom Ottey,,UK Export Finance_Q4 2025.,95,94,Fri Feb 13 2026 15:19:57 GMT+0500 (Pakistan Standard Time)
+405fffb3-9cb3-4c19-9d9f-3de4046a2546,approved,Dean Marriott,,UK Export Finance_Q4 2025.,94,94,Fri Feb 13 2026 15:09:42 GMT+0500 (Pakistan Standard Time)
+ccf55323-6181-48e6-b73a-59eb12ef1d16,approved,Luke Flanaghan,,UK Export Finance_Q4 2025.,94,94,Fri Feb 13 2026 15:41:13 GMT+0500 (Pakistan Standard Time)
+592e068c-9d4a-4528-84d6-92bccf75ac66,approved,Jagdeep Gossain,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:02:46 GMT+0500 (Pakistan Standard Time)
+80cbcc7b-2883-4304-9868-8dae309ffca6,approved,John Speed,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:01:48 GMT+0500 (Pakistan Standard Time)
+d13bd80d-cf93-4c71-9478-6b337a2130da,approved,Josh Gorman,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:25:45 GMT+0500 (Pakistan Standard Time)
+fe6ae623-75ae-4acf-b40c-a6ce991becff,approved,Kevin Whitham,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:18:11 GMT+0500 (Pakistan Standard Time)
+2968d7e6-a794-4d76-91cc-4de86bdc8954,approved,Mark Petrich,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:38:29 GMT+0500 (Pakistan Standard Time)
+b7331fe1-9528-4561-92f2-18a5a61b0ba8,approved,Oliver Green,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:22:45 GMT+0500 (Pakistan Standard Time)
+0dda4fc5-42ac-4eb4-8afe-8d662d5b0582,approved,Paul Everley,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:42:00 GMT+0500 (Pakistan Standard Time)
+79ee5565-a6f7-4943-b1a4-6c5da46e2221,approved,Ron Calcott,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 15:42:30 GMT+0500 (Pakistan Standard Time)
+b10878ac-fa4b-40a9-b959-5f42e3cd0bca,under_review,Sanj Bhambra,,UK Export Finance_Q4 2025.,92,94,Fri Feb 13 2026 04:09:14 GMT+0500 (Pakistan Standard Time)
+5cefbcb3-bc21-4f9c-b425-f8f3ce3b60ce,approved,Andrew Moinzadeh,,UK Export Finance_Q4 2025.,88,94,Fri Feb 13 2026 15:47:38 GMT+0500 (Pakistan Standard Time)
+6131daca-7646-4125-b513-2d3182775132,approved,Callum Milner,,UK Export Finance_Q4 2025.,88,94,Fri Feb 13 2026 15:39:44 GMT+0500 (Pakistan Standard Time)
+0493e913-0d0a-478d-b363-04f0900da172,approved,Dan Reynolds,,UK Export Finance_Q4 2025.,88,94,Fri Feb 13 2026 15:00:38 GMT+0500 (Pakistan Standard Time)
+83db4818-afad-45b5-ad68-58d6cf52c5ef,approved,Rupert Kingston,,UK Export Finance_Q4 2025.,88,94,Fri Feb 13 2026 15:18:18 GMT+0500 (Pakistan Standard Time)
+ae63f101-3c55-4b6f-ad19-e13ce819e5be,approved,Wieslaw Marc,,UK Export Finance_Q4 2025.,88,94,Fri Feb 13 2026 15:04:28 GMT+0500 (Pakistan Standard Time)
+72183f22-1c86-4d46-8df2-341b0a070c35,approved,Anthony Quinn,,UK Export Finance_Q4 2025.,95,93,Fri Feb 13 2026 15:17:43 GMT+0500 (Pakistan Standard Time)
+19e5bb3b-c1bb-426f-8ca0-8afb87627242,under_review,Tyrone Powell,System Studies and Simulation Inc,RingCentral_AppointmentGen,95,93,Fri Feb 13 2026 16:35:59 GMT+0500 (Pakistan Standard Time)
+c671fa78-9af4-4568-a74f-2af61bab936e,under_review,Vishnu Sankar,Jumbo Group,RingCentral_AppointmentGen,95,93,Fri Feb 13 2026 16:36:55 GMT+0500 (Pakistan Standard Time)
+9976a2e0-c464-40f3-9750-2e8f189c1457,approved,Denise Johnston,,UK Export Finance_Q4 2025.,94,93,Fri Feb 13 2026 15:18:40 GMT+0500 (Pakistan Standard Time)
+5c28d7ab-20af-41ee-8a5f-dbf68f38f67e,approved,Sarah Jenkins,,UK Export Finance_Q4 2025.,94,93,Fri Feb 13 2026 15:10:26 GMT+0500 (Pakistan Standard Time)
+85f4b8bd-c1db-4072-9082-17012497cab0,approved,Alan Melia,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:13:11 GMT+0500 (Pakistan Standard Time)
+9681627f-ede7-42e4-a359-56cfe9ca5401,under_review,Alessandra Mengoni,Catalent Pharma Solutions,Appointment Setting Request - Campaign,92,93,Fri Feb 13 2026 16:29:19 GMT+0500 (Pakistan Standard Time)
+319bc166-d4ff-4e62-8fc0-be1e38c656ad,approved,Alfie Furse,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:52:24 GMT+0500 (Pakistan Standard Time)
+4064d981-eea1-4c9f-8da6-12f98bdba8fc,approved,Ali Graham,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:15:25 GMT+0500 (Pakistan Standard Time)
+bcc43e04-4518-4d48-83c1-feafd3a20ec9,approved,Andrew Crook,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:06:14 GMT+0500 (Pakistan Standard Time)
+6ab719c6-2705-483f-abef-0269bb36d001,approved,Andrew Hardie,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:13:54 GMT+0500 (Pakistan Standard Time)
+b4cc17b3-8e6e-4c96-bfe0-0ee1a7b3aaf0,approved,Angus Phillips,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:12:50 GMT+0500 (Pakistan Standard Time)
+b4f8ab39-f8a4-4f49-8ced-5fa4e8b19857,approved,Avtar Bratch,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:14:08 GMT+0500 (Pakistan Standard Time)
+a3e000c1-22fb-4082-957f-6ffe924fb7b6,approved,Ben Beattie,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:04:19 GMT+0500 (Pakistan Standard Time)
+620f2c25-a7b0-4de2-b7ab-5c8a55dcdba2,approved,Bo Sostrom,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:18:38 GMT+0500 (Pakistan Standard Time)
+85b07d46-ffed-4fa1-9f21-21d07b183608,approved,Brian Parker,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:18:12 GMT+0500 (Pakistan Standard Time)
+80b0e183-4455-42dc-83b4-1060bf117510,approved,Charlie Taylor,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:40:08 GMT+0500 (Pakistan Standard Time)
+c6296a9d-d958-4da1-b669-9069bbf83798,approved,Chris Holyfield,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:09:51 GMT+0500 (Pakistan Standard Time)
+be801b2a-a092-4109-ac15-6a416407f647,under_review,Chris Lewis,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:03:57 GMT+0500 (Pakistan Standard Time)
+38ead00f-fbff-4ece-b5b1-c801200fc82d,approved,Chris Sutherland,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:58:15 GMT+0500 (Pakistan Standard Time)
+ec4141e7-7573-4687-8527-341132e383dd,approved,Connor Dickinson,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:32:44 GMT+0500 (Pakistan Standard Time)
+cae50621-7458-4032-9957-c04410e83696,approved,Conor Macklin,,Proton UK,92,93,Fri Feb 13 2026 15:44:55 GMT+0500 (Pakistan Standard Time)
+8d73f5ee-18bd-4d01-bce8-e4de2b5e27b2,approved,Daniel Hullah,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:09:09 GMT+0500 (Pakistan Standard Time)
+bc51f29b-ef97-4048-94b9-42621736fdbe,approved,Darren Soley,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:37:27 GMT+0500 (Pakistan Standard Time)
+c59a1458-6022-4ab6-9ef4-5a1bdcc3055d,approved,David Dillon,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:23:10 GMT+0500 (Pakistan Standard Time)
+90f1fcbf-2502-443e-8704-f72eb81405ec,approved,Derek Carr,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:17:13 GMT+0500 (Pakistan Standard Time)
+f14e1e57-0bd8-4af4-a7e6-143d7be3a865,under_review,Dion Robotham,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:20:33 GMT+0500 (Pakistan Standard Time)
+c246c148-8147-4bf3-814a-576aac86f43f,approved,Duncan Ford,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:36:55 GMT+0500 (Pakistan Standard Time)
+4200216b-54c6-4922-98f5-1333a33be9ef,approved,Ercan Cinar,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:05:16 GMT+0500 (Pakistan Standard Time)
+7eced039-2954-4346-897a-fa86b173c34b,approved,Gavin Young,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:41:35 GMT+0500 (Pakistan Standard Time)
+736621fa-0d43-4dc0-b679-d3a172227f23,approved,George McLean,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:13:47 GMT+0500 (Pakistan Standard Time)
+fb93c655-6b2c-411b-83be-d327de76f626,approved,Gordon Strachan,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:27:11 GMT+0500 (Pakistan Standard Time)
+6945efa9-3478-437a-bd5f-c4cae8d84ae7,approved,Iain Courage,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:19:42 GMT+0500 (Pakistan Standard Time)
+382c44d5-67a6-48ff-b997-782e3c8e7c8a,approved,Ian Squirrell,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:09:39 GMT+0500 (Pakistan Standard Time)
+b5fef63b-d34d-470a-9a22-cd99a0e93236,approved,Ian Xiang,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:32:06 GMT+0500 (Pakistan Standard Time)
+b3a59464-e58b-4712-9480-c683d19e04ec,approved,Jack Orbell,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:43:05 GMT+0500 (Pakistan Standard Time)
+0bc81a8e-9524-446f-ba32-8702cab1b5c6,approved,James Moulton,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:48:13 GMT+0500 (Pakistan Standard Time)
+43a97e6a-2686-4124-8609-832728c668d0,approved,Jenni Bezer,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:10:46 GMT+0500 (Pakistan Standard Time)
+94875c02-3011-467c-8b22-2426f657733a,approved,Julien Barnier,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:51:36 GMT+0500 (Pakistan Standard Time)
+2d9483ca-61bf-4fd2-a95c-3932752e39bc,approved,Kamlesh Patel,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:01:51 GMT+0500 (Pakistan Standard Time)
+2a00a227-480e-48ed-b8b2-cb70900bdccc,approved,Lee Brogan,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:16:47 GMT+0500 (Pakistan Standard Time)
+75736c72-1f8d-4e2a-a14c-1bdf16cf35e6,approved,Lee Clarke,,Proton UK,92,93,Fri Feb 13 2026 15:54:23 GMT+0500 (Pakistan Standard Time)
+851b1146-46e4-4ee6-b2ba-f0ed03d13954,approved,Mark Edwards,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:50:03 GMT+0500 (Pakistan Standard Time)
+c441705c-9dd9-4274-a786-f7e0f979ce5e,approved,Mark Ressel,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:58:30 GMT+0500 (Pakistan Standard Time)
+ebe324d2-34c6-4be8-b003-cb3ff0861797,approved,Mark Smith,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:21:25 GMT+0500 (Pakistan Standard Time)
+76ed1f35-39d1-49b3-833e-65f813f66697,approved,Martin Hayhurst,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:35:47 GMT+0500 (Pakistan Standard Time)
+b670699b-a742-4692-abb6-bdd2bca93ad2,approved,Matt Gale,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:59:05 GMT+0500 (Pakistan Standard Time)
+5c6db0ee-0353-4921-96b0-e872d1f32b79,approved,Matthew Berry,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:05:45 GMT+0500 (Pakistan Standard Time)
+f29b2232-e13e-44d2-a226-e2c2112e704b,approved,Michael Smith,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:07:58 GMT+0500 (Pakistan Standard Time)
+6aefb620-9d49-4690-b07b-6cea60394ed6,approved,Minh Phan,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:32:40 GMT+0500 (Pakistan Standard Time)
+dc4bf584-6668-4cb0-88d2-e542536e3e92,approved,Monir Tani,,Proton UK,92,93,Fri Feb 13 2026 15:56:15 GMT+0500 (Pakistan Standard Time)
+6e858421-55dd-4ac9-a096-c0c881483d6d,approved,Neil Ashton,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:19:36 GMT+0500 (Pakistan Standard Time)
+8990dd5c-4250-4368-b090-f7f6c587b1cb,approved,Neil Waterman,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:36:44 GMT+0500 (Pakistan Standard Time)
+5471eb76-66c4-4b96-b861-72b2e8796acc,approved,Neville McElwaine,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:21:49 GMT+0500 (Pakistan Standard Time)
+d8b65992-de0e-4233-9cdb-a24dd2aef42b,approved,Nigel Cross,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:12:21 GMT+0500 (Pakistan Standard Time)
+005ca1d9-d995-4d82-9065-6fbdb54c9c62,approved,Paul Brannon,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:20:03 GMT+0500 (Pakistan Standard Time)
+4cb4c2ec-1e8e-40ad-9704-8ff9192ca953,approved,Paul Cienciala,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:17:58 GMT+0500 (Pakistan Standard Time)
+db211110-4940-4632-9ebf-b0b216d191ef,under_review,Peter Knights,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:36:53 GMT+0500 (Pakistan Standard Time)
+79963f7d-a621-4e8b-b4d2-2a3c077b474b,approved,Ramesh Parmar,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:08:32 GMT+0500 (Pakistan Standard Time)
+483919d9-2ddb-4200-aca9-19b203ddbd52,approved,Rehan Yasin,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:37:44 GMT+0500 (Pakistan Standard Time)
+704ddfa6-6c08-403f-81b2-755175bc350b,approved,Richard Lang,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:48:13 GMT+0500 (Pakistan Standard Time)
+f05ad5fe-8d16-4be2-b473-6dcca9eed230,approved,Robert Harwood,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:39:26 GMT+0500 (Pakistan Standard Time)
+385b44d8-8bfc-4363-ae95-5b51eb5ec5ec,approved,Robert Taylor,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:18:47 GMT+0500 (Pakistan Standard Time)
+54a81f90-178f-4842-a8a4-207523b749c4,approved,Ron Sangster,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:34:12 GMT+0500 (Pakistan Standard Time)
+ee5b1128-5aaf-4f1c-a005-b2701eaf7a98,approved,Ross Edmonds,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:35:50 GMT+0500 (Pakistan Standard Time)
+6549925f-672e-46af-a86a-f6b957ad8bce,approved,Ross Taylor,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:30:59 GMT+0500 (Pakistan Standard Time)
+302bf13d-14c1-4d00-8e70-603f57ae7538,approved,Sally Clough,,Proton UK,92,93,Fri Feb 13 2026 15:58:13 GMT+0500 (Pakistan Standard Time)
+2eaa267a-9104-4955-a0fe-c14264ae49f0,approved,Simon Dobson,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:30:10 GMT+0500 (Pakistan Standard Time)
+5e7f9f52-20c8-49b3-ba86-0e1079e268ef,approved,Stephen Hornby,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:43:41 GMT+0500 (Pakistan Standard Time)
+0eac5448-b52a-4952-b7bf-f7a8db3de496,approved,Steve Pizzey,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:28:54 GMT+0500 (Pakistan Standard Time)
+3e97f568-dc5b-461c-aa04-458dbfd9aa84,approved,Sue Bedford,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:49:05 GMT+0500 (Pakistan Standard Time)
+5e4bbdcb-92fd-4ff3-aa92-8d5f8c30c779,approved,Terence Barrow,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:43:03 GMT+0500 (Pakistan Standard Time)
+44bb8b94-21b6-4e3e-bcfb-09e310f89675,approved,Thomas Michaelson-Yeates,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:14:37 GMT+0500 (Pakistan Standard Time)
+b23c1cff-49a9-4a3e-bb95-8a027ba0a440,approved,Toby Reynolds,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:32:13 GMT+0500 (Pakistan Standard Time)
+e0473bf6-a9cc-49f4-bc5e-52d3da9f2397,approved,Tony Ledwith,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:41:08 GMT+0500 (Pakistan Standard Time)
+814b57b3-73ea-4782-b496-a56242ddd057,approved,Wayne Salvin,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:12:50 GMT+0500 (Pakistan Standard Time)
+e7c021a2-33c4-4ca5-955e-e64011a7110e,under_review,Zekeriye Cil,,UK Export Finance_Q4 2025.,92,93,Fri Feb 13 2026 15:11:02 GMT+0500 (Pakistan Standard Time)
+9e6341a0-7734-4f49-a7d1-2a6602ad9a18,approved,Howard Warrington,,UK Export Finance_Q4 2025.,90,93,Fri Feb 13 2026 15:34:31 GMT+0500 (Pakistan Standard Time)
+a9842865-8795-4404-8268-7b806de8e4ac,approved,Alun Roberts,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:14:27 GMT+0500 (Pakistan Standard Time)
+fa1fbf4c-5a31-4d80-af07-493bfc595487,approved,Anitha Ilangovan,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:47:43 GMT+0500 (Pakistan Standard Time)
+863bc43f-35a7-4bc5-bd2b-adb1080a2881,approved,Becky May,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:16:18 GMT+0500 (Pakistan Standard Time)
+3525dad1-d35f-4996-b5d1-1be895ddcadd,approved,Bimal Parambil,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:01:47 GMT+0500 (Pakistan Standard Time)
+77377350-be14-4774-a84a-93dab4bba4e1,approved,Byron Ward,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:32:05 GMT+0500 (Pakistan Standard Time)
+7e214191-0125-446f-973d-600034f088a8,approved,Cheryle Broom,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:53:50 GMT+0500 (Pakistan Standard Time)
+4c6c338f-c1a1-4f10-b163-bcc55dc5a85d,approved,Chris Garton,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:21:29 GMT+0500 (Pakistan Standard Time)
+9d0b3c8c-99ad-4b47-a438-6e82f9ef1537,approved,Dan Jenkins,,Proton UK,88,93,Fri Feb 13 2026 15:45:11 GMT+0500 (Pakistan Standard Time)
+4f94aa59-da5e-44c0-9678-c3f910933b1b,approved,David Evans,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:38:35 GMT+0500 (Pakistan Standard Time)
+db7ff53c-4577-46df-b750-1e4a0bd30429,approved,Ewen Cameron,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:18:47 GMT+0500 (Pakistan Standard Time)
+47749707-fd15-40d6-870a-6f3b6e7a3716,approved,Gary Campbell,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:22:32 GMT+0500 (Pakistan Standard Time)
+50031d90-95fa-40dd-bd8e-9b914804feb3,approved,Georgi Petkov,,Proton UK,88,93,Fri Feb 13 2026 15:45:48 GMT+0500 (Pakistan Standard Time)
+2f5cb048-d1aa-457d-a745-033761f99fa9,approved,Ian Bain,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:10:28 GMT+0500 (Pakistan Standard Time)
+23439a3e-690b-4256-8138-bade9527227d,approved,Jason Nicholson,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:50:53 GMT+0500 (Pakistan Standard Time)
+59d585d1-12a5-44dc-a291-becc7d826217,approved,Kelvin Gregory,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:28:55 GMT+0500 (Pakistan Standard Time)
+eee6ebb6-5561-430f-ba3c-a86fe8bad3a1,under_review,Ksenia Kazbekova,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:11:11 GMT+0500 (Pakistan Standard Time)
+b859a1e1-6050-4b87-ba7b-b97198cccde3,approved,Lee Thornton,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:21:48 GMT+0500 (Pakistan Standard Time)
+224065aa-c493-4cfa-bfb2-c8fb3099c76e,approved,Louise Lee,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:13:42 GMT+0500 (Pakistan Standard Time)
+34afb3df-d983-4201-8f4c-f907c088696f,approved,Mark Brown,,Proton UK,88,93,Fri Feb 13 2026 15:56:31 GMT+0500 (Pakistan Standard Time)
+188ea15d-5d0d-4051-878f-a8aa0dd6aba9,approved,Mat Mitas,,Proton UK,88,93,Fri Feb 13 2026 15:56:51 GMT+0500 (Pakistan Standard Time)
+f304293c-8c39-4780-965b-64d47bb88000,approved,Mehdi Golestani,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:05:54 GMT+0500 (Pakistan Standard Time)
+5742ba95-eca0-4f87-8e64-d04b079e766c,approved,Michael Taite,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:46:20 GMT+0500 (Pakistan Standard Time)
+600e391e-e1c2-4fb7-ac1c-8f89b168a164,approved,Mike Jenvey,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:17:33 GMT+0500 (Pakistan Standard Time)
+c61e0664-a6fe-4c7c-adf9-c3e98b4b5a64,approved,Mohammed Rob,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:11:00 GMT+0500 (Pakistan Standard Time)
+a051c844-9263-4cd2-8f03-d851eba7b8f7,approved,Paul Blanchard,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:27:01 GMT+0500 (Pakistan Standard Time)
+1487de78-205d-4cb1-a3e4-aa9fe9645b17,under_review,Paul Constantine,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:19:28 GMT+0500 (Pakistan Standard Time)
+934b0ac1-67fe-49b1-93fc-a98944707659,approved,Pedro Freitas,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:21:33 GMT+0500 (Pakistan Standard Time)
+77c6b5ea-b616-43d0-8dec-b68f162dfc28,approved,Richard Rawlinson,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:12:24 GMT+0500 (Pakistan Standard Time)
+1def9e1b-2156-4407-bbd6-94062773d60a,approved,Sam Barratt,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:34:00 GMT+0500 (Pakistan Standard Time)
+2b9dc921-6e16-4950-9d97-60bfcf275258,under_review,Sarah Whiting,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:28:48 GMT+0500 (Pakistan Standard Time)
+eadc18bb-a7fc-4f7f-abeb-95e92c0824e3,approved,Tyrone Osborne,,Proton UK,88,93,Fri Feb 13 2026 15:44:10 GMT+0500 (Pakistan Standard Time)
+9d2533ea-2399-4d50-a7ad-6053ef7ee74f,approved,Vince Gosling,,UK Export Finance_Q4 2025.,88,93,Fri Feb 13 2026 15:29:31 GMT+0500 (Pakistan Standard Time)
+0461c598-a295-4ffe-8f02-d38bb1c4de0e,approved,Yassin Hussain,,Proton UK,88,93,Fri Feb 13 2026 15:55:15 GMT+0500 (Pakistan Standard Time)
+18a3dbfd-549b-470d-9f9f-931d8a9c759e,approved,Brook Hovell,,UK Export Finance_Q4 2025.,85,93,Fri Feb 13 2026 15:41:26 GMT+0500 (Pakistan Standard Time)
+bd30b8f9-6977-4824-9c77-9341584508dd,approved,Lee Proctor,,UK Export Finance_Q4 2025.,95,92,Fri Feb 13 2026 15:10:16 GMT+0500 (Pakistan Standard Time)
+d68b2c02-b71d-4e6c-b79f-93b9536d67bf,under_review,Aidan McKay,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:12:43 GMT+0500 (Pakistan Standard Time)
+d24353fb-d64e-49f3-9649-66eaa07a1e15,approved,Amanda Routledge,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:36:37 GMT+0500 (Pakistan Standard Time)
+c6d36b7e-9322-45d0-b338-490fc86a4e4c,approved,Benjamin Murphy,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:34:47 GMT+0500 (Pakistan Standard Time)
+513ed576-5e6b-4d7a-a30c-882b3ce98193,approved,Chris Kerns,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:35:16 GMT+0500 (Pakistan Standard Time)
+937961fb-b9e2-4e43-9d19-a0b5a054a959,approved,Chris Nielsen,,Proton UK,92,92,Fri Feb 13 2026 15:56:49 GMT+0500 (Pakistan Standard Time)
+868bc306-a0dc-44b3-8a25-b96bd0e44b0e,under_review,Claire Sullivan,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:53:23 GMT+0500 (Pakistan Standard Time)
+751e8213-f758-46b6-aa4c-52a248b283c4,approved,David Black,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:39:25 GMT+0500 (Pakistan Standard Time)
+5de0e2ed-65e2-42c0-9834-69b70e6585a6,approved,Delia Burton,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:14:58 GMT+0500 (Pakistan Standard Time)
+857a807d-5bec-438a-9346-4d3f96ed5eec,approved,Derrick Goodall,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:13:41 GMT+0500 (Pakistan Standard Time)
+bead87a7-9afa-4b75-ae5e-b198f0f83a6b,approved,Gareth Haughey,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:00:25 GMT+0500 (Pakistan Standard Time)
+e38073a4-6210-4cc7-b243-73d27201374d,approved,Glyn Taylor,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:01:21 GMT+0500 (Pakistan Standard Time)
+c1b34b77-0119-4590-bcd5-c3bea6ff368b,approved,Hayley Sarson,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:29:06 GMT+0500 (Pakistan Standard Time)
+49cbd64c-db81-456c-8acb-ef593a9caa8a,approved,James Grant,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:26:08 GMT+0500 (Pakistan Standard Time)
+f95e3ce6-8a5d-448a-9398-0c48967cc43c,approved,Jon Reeves,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:19:35 GMT+0500 (Pakistan Standard Time)
+c22edf0c-444a-48b0-912c-4c4eac76fffd,approved,Kevin Hickey,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:18:12 GMT+0500 (Pakistan Standard Time)
+bfaf2ec0-e276-4f64-943b-49322baea2f4,approved,Kim Hampshire,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:24:55 GMT+0500 (Pakistan Standard Time)
+51c418a5-9cd2-494f-97cf-e63fae415615,approved,Len Jacobs,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:38:33 GMT+0500 (Pakistan Standard Time)
+94c97cf3-b1fd-4962-91c2-6601a31875ec,approved,Mark Jones,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:42:04 GMT+0500 (Pakistan Standard Time)
+18408062-eb14-4694-a38d-86c6ead5992d,approved,Mark O'Sullivan,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:35:03 GMT+0500 (Pakistan Standard Time)
+70744318-d1b5-48fe-8e73-977f2e40bca4,approved,Michael Battersby,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:27:22 GMT+0500 (Pakistan Standard Time)
+76e2f964-151f-4abb-a918-c4c2e62a4d21,approved,Michaela Kendall,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:49:26 GMT+0500 (Pakistan Standard Time)
+98807541-a7e2-4783-8ce4-286fe7fc39dd,under_review,Neil Foster,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:30:41 GMT+0500 (Pakistan Standard Time)
+76285104-3104-46db-87f2-7210e8a53217,approved,Nerav Mehta,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:23:57 GMT+0500 (Pakistan Standard Time)
+8af3da6a-c9c6-438c-8987-8ce6bc060a57,approved,Nick Ward,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:29:29 GMT+0500 (Pakistan Standard Time)
+853ec1eb-beed-49d3-9294-1b5c74002a6c,approved,Owen Coyne,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:16:07 GMT+0500 (Pakistan Standard Time)
+c4f5e5c6-abd8-4974-a774-0f6372c1bcc7,approved,Paul Anderson,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:30:34 GMT+0500 (Pakistan Standard Time)
+30f292d9-c9ef-4c8b-8b22-83fb1b903f89,approved,Rob Townsend,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:35:39 GMT+0500 (Pakistan Standard Time)
+412b7549-ac56-4c3c-944e-3fc43c4949e4,approved,Robert Heathcote,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:33:43 GMT+0500 (Pakistan Standard Time)
+042c6b46-e740-49fb-b976-c93f6de7bdf9,approved,Roger Jervis,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:46:39 GMT+0500 (Pakistan Standard Time)
+3724be85-2dcc-4745-9233-f22ec663a409,approved,Sam Jacques,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:09:10 GMT+0500 (Pakistan Standard Time)
+d64929b4-7093-40cf-b640-59bf7f6d3909,under_review,Sangita Patel,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:07:28 GMT+0500 (Pakistan Standard Time)
+ea04520d-ae41-4908-8e73-8b7d200fddc6,approved,Stuart Dillon,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:46:52 GMT+0500 (Pakistan Standard Time)
+ecb2bbc9-2465-4aa1-94c4-37507184949d,approved,Tom Green,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:05:06 GMT+0500 (Pakistan Standard Time)
+6c818ed0-70b3-4881-9f91-5b6d00caa248,approved,Tristan Kirk,,UK Export Finance_Q4 2025.,92,92,Fri Feb 13 2026 15:13:15 GMT+0500 (Pakistan Standard Time)
+e73bd31c-6d3b-4fb9-81a0-d0ed8be5b2fb,approved,Aaron Clark,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:03:27 GMT+0500 (Pakistan Standard Time)
+f5a433d5-3f43-4781-9361-a069b3870ace,approved,Andy Thompson,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:14:07 GMT+0500 (Pakistan Standard Time)
+4710a676-0961-4c47-979e-28d7fe16499c,approved,Dan Coole,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:05:46 GMT+0500 (Pakistan Standard Time)
+467ac268-f91b-4474-9b36-0645a57c0514,approved,Dan Holben,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:09:53 GMT+0500 (Pakistan Standard Time)
+f165829e-8444-4879-8cf9-93b8dee820ad,approved,Daniel Orija,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:47:19 GMT+0500 (Pakistan Standard Time)
+ebe0d3b7-a849-4f13-9e52-b512344154ea,approved,David Thompson,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:20:30 GMT+0500 (Pakistan Standard Time)
+01c61b02-9aaf-4aa2-91c8-e0f670c8ff69,approved,Gary O'Malley,,Proton UK,88,92,Fri Feb 13 2026 15:57:45 GMT+0500 (Pakistan Standard Time)
+f505fbfa-767c-4a2f-bc78-0ce8b49f4157,approved,Greg Jackson,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:08:41 GMT+0500 (Pakistan Standard Time)
+6615ea72-1f63-4c44-a004-e32f1fbe2a63,approved,Hannah Adjepong,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:39:34 GMT+0500 (Pakistan Standard Time)
+75079670-27ae-4892-9eb7-c84fe7d7a319,under_review,Jalen Davidson,Radiance Technologies,RingCentral_AppointmentGen,88,92,Fri Feb 13 2026 16:40:57 GMT+0500 (Pakistan Standard Time)
+e9391a15-2537-47d0-afdc-61308fbd61c4,approved,James Dowling,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:06:49 GMT+0500 (Pakistan Standard Time)
+66f9eb6f-535a-4a79-9e7e-af3ca343790d,approved,Jason Lamb,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:27:03 GMT+0500 (Pakistan Standard Time)
+35df5928-cd13-4a0d-8829-ec436c9254f5,approved,Jimmy David,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:22:48 GMT+0500 (Pakistan Standard Time)
+c9a6cbd9-2857-4959-88a5-8fa895fde2a2,approved,John Alston,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:15:10 GMT+0500 (Pakistan Standard Time)
+3cc4dd3b-fc1e-488f-8426-5991230f6f32,approved,John Laherty,,Proton UK,88,92,Fri Feb 13 2026 15:55:32 GMT+0500 (Pakistan Standard Time)
+100e9636-71b9-4e18-8d47-63f2b3e2a894,approved,Julia Salmond,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:33:00 GMT+0500 (Pakistan Standard Time)
+21df9736-ee11-4d14-a467-d4f578878fb6,approved,Jurgens Els,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:39:07 GMT+0500 (Pakistan Standard Time)
+77bdf001-b75b-43a0-838a-428f6ee1218f,approved,Justin Benson,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:20:02 GMT+0500 (Pakistan Standard Time)
+4890a1c7-2e25-4d7d-aa38-bd1071a792f6,approved,Llywela Wharton,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:40:57 GMT+0500 (Pakistan Standard Time)
+358ebd3a-dc69-4615-81e5-9304b79ad2a0,approved,Mandy Brierley,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 14:58:22 GMT+0500 (Pakistan Standard Time)
+419085d2-1ff8-48a4-b50a-a73ddeca9c6d,approved,Mark Hipgrave,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:07:59 GMT+0500 (Pakistan Standard Time)
+7e8c6519-1752-4c7f-b57f-228fb2733aec,approved,Paul Grunhut,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:04:00 GMT+0500 (Pakistan Standard Time)
+98069582-09de-48ff-9af8-72fa897b84de,approved,Paul Herbert,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:30:32 GMT+0500 (Pakistan Standard Time)
+5859a31e-19a4-46c7-922b-d5e26d0cb486,approved,Peter Harris,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:05:15 GMT+0500 (Pakistan Standard Time)
+8fb3aeea-6739-4080-9e46-09f6d840093e,approved,Rob Christie,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:04:02 GMT+0500 (Pakistan Standard Time)
+a06bf0f5-f427-4f1b-8e40-a9b758d25051,approved,Sam Marsden,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:53:37 GMT+0500 (Pakistan Standard Time)
+94c61b59-a129-47fc-bc1b-d311475d99b1,approved,Sam Thorpe,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 14:59:59 GMT+0500 (Pakistan Standard Time)
+433180e1-299e-43eb-8a7e-a286544b4cdf,approved,Sean Ashton,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:07:25 GMT+0500 (Pakistan Standard Time)
+ea179078-15ba-43c6-9e16-217b03dfd49d,approved,Shahrad Behin-Aein,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:04:36 GMT+0500 (Pakistan Standard Time)
+fb24b5c5-3860-469e-82ae-4cd7dfa60d08,approved,Simon Hall,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:02:10 GMT+0500 (Pakistan Standard Time)
+2cbae85a-d567-402f-b790-eb6d357cdab0,approved,Stephanie O'Meads,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:42:11 GMT+0500 (Pakistan Standard Time)
+62fe877b-378e-44a6-ac19-c0e45b1051b4,approved,Stuart Hull,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:16:46 GMT+0500 (Pakistan Standard Time)
+247bc4c9-a26e-49d2-8493-346bacce3b04,approved,Tanyaradzwa Chambati,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:20:15 GMT+0500 (Pakistan Standard Time)
+9ecb73b6-1002-4306-be6c-293031c90cc4,approved,Tim Chambers,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:40:24 GMT+0500 (Pakistan Standard Time)
+cea8f69f-fcec-488b-8a4d-a0c9ce3a7b0a,approved,Tom Dawes,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:22:18 GMT+0500 (Pakistan Standard Time)
+d87890da-8008-4de6-a895-d406bb0edff4,under_review,Venkatesan Palaniappan,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:16:11 GMT+0500 (Pakistan Standard Time)
+fb0c9655-5f74-40a7-a1cb-69982b6d7118,approved,Wayne Campbell,,UK Export Finance_Q4 2025.,88,92,Fri Feb 13 2026 15:54:05 GMT+0500 (Pakistan Standard Time)
+7c6d06f0-5901-47f1-bef9-285e93687753,approved,Andy Walker,,Proton UK,85,92,Fri Feb 13 2026 15:56:19 GMT+0500 (Pakistan Standard Time)
+b9880f01-a49e-46a6-9440-2b08e4a35a1e,under_review,Ihab Salem,,UK Export Finance_Q4 2025.,85,92,Fri Feb 13 2026 15:30:02 GMT+0500 (Pakistan Standard Time)
+d9ebffbb-1c18-450c-9c86-51cae84494fb,approved,Adam Hutton,,UK Export Finance_Q4 2025.,82,92,Fri Feb 13 2026 15:52:35 GMT+0500 (Pakistan Standard Time)
+ede528da-690e-4287-8e14-9771d1de4ba8,approved,John Baxter,,Proton UK,82,92,Fri Feb 13 2026 15:45:41 GMT+0500 (Pakistan Standard Time)
+0cce5425-e89d-4850-9943-6e6d23e307cc,approved,Rachel Wormald,,UK Export Finance_Q4 2025.,82,92,Fri Feb 13 2026 15:07:38 GMT+0500 (Pakistan Standard Time)
+bd3f49aa-db97-4e7f-8a56-c3a4169f8a63,approved,Xiaoya Zhang,,UK Export Finance_Q4 2025.,82,92,Fri Feb 13 2026 15:08:13 GMT+0500 (Pakistan Standard Time)
+7cdd9e9a-4a2b-4a4d-ad9e-792c27c7d2c8,approved,Bryony Hartley,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:40:35 GMT+0500 (Pakistan Standard Time)
+4dbcd2b2-f624-493e-b3d1-22ed60efcac6,approved,Chris Dixon,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:27:04 GMT+0500 (Pakistan Standard Time)
+b0568f25-3696-4dcf-8f33-8b1bca944700,approved,Csaba Vizoviczki,,Proton UK,92,91,Fri Feb 13 2026 15:46:08 GMT+0500 (Pakistan Standard Time)
+2eb9993a-d01a-4cce-b4f4-ee0311191735,approved,David Bolam,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:39:03 GMT+0500 (Pakistan Standard Time)
+ed3721b7-b8e9-49de-8cc6-2aef1bffaa23,under_review,Eduardo Silva,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:41:29 GMT+0500 (Pakistan Standard Time)
+4159bdeb-fd7c-4b32-9c8d-620a8491f090,approved,Gary Watt,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:28:06 GMT+0500 (Pakistan Standard Time)
+4841e04b-41e1-454c-b006-6ed42d23d5a8,under_review,Jackie Chen,TheScore,RingCentral_AppointmentGen,92,91,Fri Feb 13 2026 16:40:23 GMT+0500 (Pakistan Standard Time)
+bc35330c-e326-4c35-b68e-ea8a720e8755,under_review,James Newey,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:52:47 GMT+0500 (Pakistan Standard Time)
+9fadc1db-34c2-4ed1-83de-7ef73ed15cc8,approved,Joanne Jones,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:34:32 GMT+0500 (Pakistan Standard Time)
+70667c18-f93c-4bbf-9300-ca2dec55ef70,under_review,Mel Edwards,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:02:39 GMT+0500 (Pakistan Standard Time)
+9a452263-8c31-4011-b73f-079c0e420a61,approved,Nigel Callaghan,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:47:02 GMT+0500 (Pakistan Standard Time)
+a247cddc-4127-4aae-b856-6f0c03526465,approved,Paul Quin,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:33:39 GMT+0500 (Pakistan Standard Time)
+812e4804-7249-4c6b-ba3c-54327d812cab,approved,Tom McCain,,UK Export Finance_Q4 2025.,92,91,Fri Feb 13 2026 15:21:12 GMT+0500 (Pakistan Standard Time)
+628f3ee0-1e6f-4af9-b908-1f3b002ae91b,approved,Ben Smith,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:32:13 GMT+0500 (Pakistan Standard Time)
+a2e8889a-0995-4cde-ba3d-d1204d713388,approved,Bev Edwards,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:42:22 GMT+0500 (Pakistan Standard Time)
+eefcd387-f6a0-48ed-8e2a-ede0f2e4e6a1,under_review,Dave Beevis,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:48:58 GMT+0500 (Pakistan Standard Time)
+42eee3c9-84bd-4163-978b-b30decde860e,approved,Graeme Anderson,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:14:42 GMT+0500 (Pakistan Standard Time)
+541cf79b-7555-4e10-94f6-d520400bb498,approved,Graham Whitton,,Proton UK,88,91,Fri Feb 13 2026 15:55:44 GMT+0500 (Pakistan Standard Time)
+9e3936de-5f6f-43bb-9375-740d6b429655,approved,Greg Ansell,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:13:00 GMT+0500 (Pakistan Standard Time)
+813e19fc-6ec2-41e3-8fd5-c0e759dddf97,approved,Helen Jones,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:50:31 GMT+0500 (Pakistan Standard Time)
+f0aefb42-2929-4467-912b-5decf3338e2a,approved,Jon Boulton,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:24:01 GMT+0500 (Pakistan Standard Time)
+ed4b040a-f21e-4571-bd1d-4b5423149146,approved,Justine Berry,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:32:28 GMT+0500 (Pakistan Standard Time)
+3277bb15-8c27-4300-8fab-c5e84b2e2fc0,approved,Mark Catchpole,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:25:16 GMT+0500 (Pakistan Standard Time)
+f8df3ddf-1097-4a39-9ad4-6fd02538ebb2,approved,Mike Phillips,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:13:47 GMT+0500 (Pakistan Standard Time)
+1b8d28af-9a38-4f9e-82fe-a7750841a11d,approved,Nauman Butt,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:50:06 GMT+0500 (Pakistan Standard Time)
+c53cd840-dfeb-4174-8f4c-4c270b207666,approved,Paul Docherty,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:00:16 GMT+0500 (Pakistan Standard Time)
+14eea2f2-93c1-4526-87f8-8a586007117b,approved,Paul Francis,,Proton UK,88,91,Fri Feb 13 2026 15:45:28 GMT+0500 (Pakistan Standard Time)
+98bf280d-7e1d-4224-b64b-38c9d7579615,approved,Richard Blagden,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:24:27 GMT+0500 (Pakistan Standard Time)
+aec48b91-eb77-484b-875a-b9521538529d,approved,Sudhir Ruparelia,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:01:27 GMT+0500 (Pakistan Standard Time)
+98c2125a-fc97-449e-b328-59ada47576d9,approved,Tam McDonald,,UK Export Finance_Q4 2025.,88,91,Fri Feb 13 2026 15:49:35 GMT+0500 (Pakistan Standard Time)
+7f6b0a83-6278-4db0-b9a2-159ea5a620d9,approved,Colin Foster,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:09:55 GMT+0500 (Pakistan Standard Time)
+e3dd2c20-b7c7-4efd-b48b-9bf76b2b7463,under_review,Devish Paniker,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:48:33 GMT+0500 (Pakistan Standard Time)
+6128f297-e430-4c24-816b-47cf576a79d4,approved,Fiona Walsh,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:06:35 GMT+0500 (Pakistan Standard Time)
+9e25468b-936e-4e33-9c6d-e0e64451f190,approved,Martin Hennessey,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:21:58 GMT+0500 (Pakistan Standard Time)
+c2d61f02-9869-4a38-879c-e71234d1c405,approved,Phil Dewhurst,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:00:54 GMT+0500 (Pakistan Standard Time)
+5d668e80-99e3-40f7-a292-b426c9d1966e,approved,Richard Wenman,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:40:57 GMT+0500 (Pakistan Standard Time)
+bae5137e-f78a-44ee-99e1-b1f7035e020e,approved,Simon Lascelles,,UK Export Finance_Q4 2025.,85,91,Fri Feb 13 2026 15:10:54 GMT+0500 (Pakistan Standard Time)
+1cc5a9f5-4334-4ab5-93d6-18fe7dae666a,approved,Elaine Tucker,,UK Export Finance_Q4 2025.,82,91,Fri Feb 13 2026 15:33:58 GMT+0500 (Pakistan Standard Time)
+f467db6d-7d5e-4e47-986d-8480c820f304,approved,Jason Hutt,,UK Export Finance_Q4 2025.,82,91,Fri Feb 13 2026 15:07:29 GMT+0500 (Pakistan Standard Time)
+2f168318-75fe-4d1c-99c2-50362365fd5f,approved,Simon Dodd,,Proton UK,82,91,Fri Feb 13 2026 15:58:54 GMT+0500 (Pakistan Standard Time)
+d7bf9a08-211e-4c57-9896-fecf508f039e,under_review,Bradley Riley,YourMarketingPartners,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 16:41:26 GMT+0500 (Pakistan Standard Time)
+bc6923a1-b2f5-4972-acbd-f59fb9586b72,approved,David Gordon,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:15:39 GMT+0500 (Pakistan Standard Time)
+db4e745c-cd64-41f3-8312-648db79c276c,approved,Jason Reed,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:40:06 GMT+0500 (Pakistan Standard Time)
+40f9652c-db22-4088-88c8-d041c229ab13,approved,Kate Gibbard,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:33:16 GMT+0500 (Pakistan Standard Time)
+4d524cb4-c1eb-4ff1-8e0a-b6f196a2ce21,approved,Kevin Goodchild,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:56:33 GMT+0500 (Pakistan Standard Time)
+5aa9c6f9-16db-4741-983e-c3aafa217a45,approved,Oliver Mashiter,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:09:15 GMT+0500 (Pakistan Standard Time)
+70b477d5-74a6-4973-b091-6205d671058b,under_review,Peter Cramp,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:17:11 GMT+0500 (Pakistan Standard Time)
+387fb53f-1ab6-4585-870f-a6c25746e10c,approved,Sam Minionis,,UK Export Finance_Q4 2025.,92,90,Fri Feb 13 2026 15:50:01 GMT+0500 (Pakistan Standard Time)
+91ac2134-6224-4252-80e6-42a89ebc10ae,approved,Adisa Lekuwa,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:01:44 GMT+0500 (Pakistan Standard Time)
+d3b1c56c-ba48-46b5-925b-0b5f5ce37b3e,approved,Ken Newman,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:32:59 GMT+0500 (Pakistan Standard Time)
+352d2b99-7346-4069-92b3-64b3ffa5f3ee,approved,Lisa Cooper,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:12:22 GMT+0500 (Pakistan Standard Time)
+ab1a2eb6-e791-488b-bf51-53cdaa36dc9c,approved,Mehdi Sharafi,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:24:25 GMT+0500 (Pakistan Standard Time)
+7c8d6a80-3ca8-497a-95df-454da568e4fd,approved,Mollie Foy,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:36:31 GMT+0500 (Pakistan Standard Time)
+56215f77-bb2b-47d8-a5c9-d1e8ea4bb4f6,approved,Mona El-Kheshen,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:43:16 GMT+0500 (Pakistan Standard Time)
+f1a439d6-ff24-4fd2-9cb5-f0b2be9ef034,approved,Neville Gordon,,Proton UK,88,90,Fri Feb 13 2026 16:00:26 GMT+0500 (Pakistan Standard Time)
+34e70747-0eae-41c5-bf28-8852f39157e1,approved,Richard Shirman,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:28:50 GMT+0500 (Pakistan Standard Time)
+dbafb422-a0bc-4950-8499-5e00ada202b4,approved,Sam Riley,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:41:08 GMT+0500 (Pakistan Standard Time)
+17d0c88d-6135-43e6-81c5-7e4c3bb9bab0,approved,Saqulain Firdoose,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:43:49 GMT+0500 (Pakistan Standard Time)
+d18a9b83-b6d7-4e55-9d51-7b10e08009c7,approved,Scott Thomas,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:11:31 GMT+0500 (Pakistan Standard Time)
+2bdd2437-9c42-4aa6-b2c0-c37bb715d8b8,approved,Slavko Radisa,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 14:59:51 GMT+0500 (Pakistan Standard Time)
+fa3c53c1-39d9-4346-926c-78d5d412ce17,approved,Stephen Hall,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:11:24 GMT+0500 (Pakistan Standard Time)
+a3d097e0-2784-4f92-8756-3036863989bb,approved,Stephen Warhurst,,Proton UK,88,90,Fri Feb 13 2026 15:45:44 GMT+0500 (Pakistan Standard Time)
+f68715ab-2cca-43e2-a068-b681f941ea90,approved,Suzanne Moore,,UK Export Finance_Q4 2025.,88,90,Fri Feb 13 2026 15:52:12 GMT+0500 (Pakistan Standard Time)
+c86d367b-0cb2-4d5c-8a88-c7b59a302de8,approved,Syed Jafri,,Proton UK,88,90,Fri Feb 13 2026 15:45:41 GMT+0500 (Pakistan Standard Time)
+8e3ef2e1-abdc-4fae-b146-dba6c5f9f0ad,under_review,Reni Reis,,UK Export Finance_Q4 2025.,85,90,Fri Feb 13 2026 04:09:52 GMT+0500 (Pakistan Standard Time)
+8242f7a0-47da-4955-ab12-7d265d17ede2,approved,Steven Davies,,UK Export Finance_Q4 2025.,85,90,Fri Feb 13 2026 15:24:02 GMT+0500 (Pakistan Standard Time)
+3f8c0dc3-acb7-4c02-80c6-0c338e6c059a,approved,Graham Newman,,Proton UK,82,90,Fri Feb 13 2026 16:00:39 GMT+0500 (Pakistan Standard Time)
+d4befab9-897a-4d1e-9445-5f5e3c6282d4,approved,Neil Redley,,UK Export Finance_Q4 2025.,82,90,Fri Feb 13 2026 15:43:10 GMT+0500 (Pakistan Standard Time)
+93feae44-0562-40e0-a34a-8a376fdf32f2,approved,Graeme Corker,,UK Export Finance_Q4 2025.,94,89,Fri Feb 13 2026 15:36:19 GMT+0500 (Pakistan Standard Time)
+5044f7fc-8d09-4103-aafd-815af9fd422d,under_review,Kiki Zhang,,UK Export Finance_Q4 2025.,92,89,Fri Feb 13 2026 14:57:42 GMT+0500 (Pakistan Standard Time)
+7d5e5ce2-e31b-4d17-80d4-afa481b9d70b,approved,Mike Bola,,UK Export Finance_Q4 2025.,92,89,Fri Feb 13 2026 15:52:50 GMT+0500 (Pakistan Standard Time)
+59dd0a77-ffe1-44c5-b6c8-76949244ebbd,approved,Alpesh Mistry,,Proton UK,88,89,Fri Feb 13 2026 15:44:27 GMT+0500 (Pakistan Standard Time)
+b6ed72fa-766b-4074-a069-b798a794c324,approved,Andy Rodgers,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:51:03 GMT+0500 (Pakistan Standard Time)
+8a5a064d-94dd-43a7-8391-0a2c69e8023e,approved,Barry Morris,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:17:43 GMT+0500 (Pakistan Standard Time)
+a68835ec-ab75-47ff-a5da-bbd2607f602c,approved,Brandon Davies,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:34:43 GMT+0500 (Pakistan Standard Time)
+dbb3f09a-a144-4c83-91de-0d2c96469e96,approved,David Jones,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:53:53 GMT+0500 (Pakistan Standard Time)
+f5230322-e135-4fa0-9da3-75d06b8243ed,approved,Fintan McKeever,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:17:43 GMT+0500 (Pakistan Standard Time)
+4d15d995-8640-470b-8198-6cfc6f47176a,approved,Gerry Smith,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:27:36 GMT+0500 (Pakistan Standard Time)
+54516291-d7df-4c30-8c76-8270386c223c,approved,Helen Harrison,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:22:00 GMT+0500 (Pakistan Standard Time)
+78bcb6ae-0816-4259-ba3d-81d82d44c30b,approved,Ian Brown,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:07:11 GMT+0500 (Pakistan Standard Time)
+0dd9dccb-70e7-4902-b19f-e70a1ed0f65f,approved,James Nixon,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:42:40 GMT+0500 (Pakistan Standard Time)
+24da85d8-d896-45eb-9933-c811fbdb1aac,approved,Jennifer Buron,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:21:00 GMT+0500 (Pakistan Standard Time)
+a33ff027-8386-416b-8b0a-028f928bf642,approved,Jim Bryce,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:03:55 GMT+0500 (Pakistan Standard Time)
+001c07c4-8cdf-4da9-9ffc-7dbf2a92fb8f,approved,Kevin Priestley,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:16:11 GMT+0500 (Pakistan Standard Time)
+10e1b6a7-2a92-4a28-953b-9ded0d914734,approved,Kirby Pons,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:14:16 GMT+0500 (Pakistan Standard Time)
+e24de780-f71a-4241-a1cc-360397103e97,approved,Oscar Soiza,,Proton UK,88,89,Fri Feb 13 2026 15:44:13 GMT+0500 (Pakistan Standard Time)
+998c843f-3b35-4c90-b359-2d98959ca8ca,under_review,Russ Powell,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:57:40 GMT+0500 (Pakistan Standard Time)
+1b71113c-c81c-46ec-8ece-5267d9691674,approved,Sheikh Zaheer,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:47:39 GMT+0500 (Pakistan Standard Time)
+9d766e07-7c6f-4215-a64c-47d999716790,approved,Simon Goodman,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:48:33 GMT+0500 (Pakistan Standard Time)
+4deb6439-ba29-45b0-aa0e-afa45aeb2bb0,approved,Stuart Phipps,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:58:12 GMT+0500 (Pakistan Standard Time)
+eb7dbfe2-54ab-497e-b200-d16fe33c133b,approved,Tony Powell,,UK Export Finance_Q4 2025.,88,89,Fri Feb 13 2026 15:34:55 GMT+0500 (Pakistan Standard Time)
+6fb24058-b49f-47e3-b14a-3f4f4a8b0b24,approved,Ben Andrews,,UK Export Finance_Q4 2025.,85,89,Fri Feb 13 2026 15:06:47 GMT+0500 (Pakistan Standard Time)
+308862ba-9fca-45b2-a52c-d92c61dc37ac,under_review,Keith Muir,,UK Export Finance_Q4 2025.,85,89,Fri Feb 13 2026 15:58:31 GMT+0500 (Pakistan Standard Time)
+4674607f-709c-4aa8-8e35-fbdf2fee38a8,approved,David Edwards,,UK Export Finance_Q4 2025.,82,89,Fri Feb 13 2026 14:59:52 GMT+0500 (Pakistan Standard Time)
+3a02cb38-6bae-4004-994d-ca71801f5f46,approved,John Coulter,,UK Export Finance_Q4 2025.,82,89,Fri Feb 13 2026 16:36:36 GMT+0500 (Pakistan Standard Time)
+545a055d-35ae-4537-8b87-bcbc082c655c,under_review,Leo Flores,,UK Export Finance_Q4 2025.,82,89,Fri Feb 13 2026 16:40:58 GMT+0500 (Pakistan Standard Time)
+87cf56c5-6fa5-401f-859c-675f8eede302,approved,Steven Crane,,UK Export Finance_Q4 2025.,82,89,Fri Feb 13 2026 15:46:33 GMT+0500 (Pakistan Standard Time)
+87bb4afa-8f58-48f7-95c4-fba82901edf6,approved,William Cooper,,UK Export Finance_Q4 2025.,82,89,Fri Feb 13 2026 15:40:40 GMT+0500 (Pakistan Standard Time)
+95abe157-5eea-4046-8207-01de75573276,approved,Candida Molyneux,,UK Export Finance_Q4 2025.,92,88,Fri Feb 13 2026 15:58:56 GMT+0500 (Pakistan Standard Time)
+608efcf7-1ae7-48f2-abfc-ff0f375c921f,approved,Chloe Mullen,,UK Export Finance_Q4 2025.,92,88,Fri Feb 13 2026 15:23:16 GMT+0500 (Pakistan Standard Time)
+d94bd506-62ff-4a8c-aa4d-f6f383e85670,approved,Alison McKenzie,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:27:49 GMT+0500 (Pakistan Standard Time)
+6bb41ed6-39f6-432c-a0e5-a064c4d07589,under_review,Andrew Cannon,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:07:02 GMT+0500 (Pakistan Standard Time)
+b7916c73-63fd-4bc6-8ce9-0b0dce6be948,approved,Craig Wilson,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:00:49 GMT+0500 (Pakistan Standard Time)
+10521fca-6fb4-49a8-bdcf-32f872ac57ba,approved,Joseph Birks,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:05:37 GMT+0500 (Pakistan Standard Time)
+a2858e32-ba2d-4009-a846-049607e31c83,approved,Karl Bolton,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:53:25 GMT+0500 (Pakistan Standard Time)
+15b30017-d041-42c3-b21e-60eb1d1ecbed,approved,Kashif Maqbool,,Proton UK,88,88,Fri Feb 13 2026 15:57:43 GMT+0500 (Pakistan Standard Time)
+17d1d544-4cbf-41ec-ba50-99e54b1ec2d4,under_review,Kevan Hamman,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:26:44 GMT+0500 (Pakistan Standard Time)
+2f8b1ec9-3676-4178-8789-bed8c9f1de13,approved,Max Turner,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:33:32 GMT+0500 (Pakistan Standard Time)
+506bd80e-b047-451e-88ee-8cdea6929c22,under_review,Peter Lambert,,UK Export Finance_Q4 2025.,88,88,Fri Feb 13 2026 15:43:56 GMT+0500 (Pakistan Standard Time)
+dc77b293-32f6-476f-a3ec-c9abae4b0a84,approved,Adam Barak,,UK Export Finance_Q4 2025.,85,88,Fri Feb 13 2026 15:01:18 GMT+0500 (Pakistan Standard Time)
+a546ffc5-a8fe-4e48-8024-1a22e4299920,approved,Helen Moore,,UK Export Finance_Q4 2025.,82,88,Fri Feb 13 2026 15:23:19 GMT+0500 (Pakistan Standard Time)
+bddcef4b-5fa5-4a69-8ea7-5a9a7af2fedf,approved,John Gupta,,Proton UK,82,88,Fri Feb 13 2026 15:46:00 GMT+0500 (Pakistan Standard Time)
+94c9823a-b8f2-42a0-b228-e7262db2087b,approved,Mike Barden,,UK Export Finance_Q4 2025.,82,88,Fri Feb 13 2026 15:35:34 GMT+0500 (Pakistan Standard Time)
+328429fe-3013-4cf2-9a99-1f1d617924e6,under_review,Sharon Harper,The Oakwood Group,RingCentral_AppointmentGen,100,87,Fri Feb 13 2026 16:40:19 GMT+0500 (Pakistan Standard Time)
+5776a589-a764-484c-84a9-02b79dbbe3b3,approved,Oleksandr Karpenko,,UK Export Finance_Q4 2025.,92,87,Fri Feb 13 2026 15:02:52 GMT+0500 (Pakistan Standard Time)
+e8e163bd-e0dd-4f7c-8ba5-bb9dd722f872,approved,Abdul Alaoudine,,Proton UK,88,87,Fri Feb 13 2026 15:55:09 GMT+0500 (Pakistan Standard Time)
+ed2e293d-2c56-4564-bfcc-4f3a4ec84cb5,under_review,Davide Vece,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:52:01 GMT+0500 (Pakistan Standard Time)
+1875da99-278c-43a3-ab6a-eb31c4f371a8,approved,Farheen Allsopp,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:32:41 GMT+0500 (Pakistan Standard Time)
+0381a349-ecf2-465d-9aca-7aeaa028d330,approved,Gary Henley,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:43:44 GMT+0500 (Pakistan Standard Time)
+20c15028-90a7-4c2e-94cf-63b5ea0ffdff,approved,Hector Worsley,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:10:54 GMT+0500 (Pakistan Standard Time)
+45cc4003-fd72-4c0b-8bdf-2542e4f96eee,approved,Iain Scott,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:43:13 GMT+0500 (Pakistan Standard Time)
+425a60f7-1d1a-4f41-8eff-9495d3e36c6d,approved,Mohammed Talha,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:30:20 GMT+0500 (Pakistan Standard Time)
+304ed13a-e853-4d62-9f33-37fe1394005b,approved,Rinkle Buddhadev,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:02:52 GMT+0500 (Pakistan Standard Time)
+8b1fa6e5-976f-4d87-9faa-e652a2c344ed,approved,Stuart Taylor,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:26:25 GMT+0500 (Pakistan Standard Time)
+b4e8b178-1119-407b-b68a-d454f9b07b0c,approved,Tim Spalton,,UK Export Finance_Q4 2025.,88,87,Fri Feb 13 2026 15:41:52 GMT+0500 (Pakistan Standard Time)
+e5d7685a-b19a-482f-93eb-971e4d32c77e,approved,Brian O'Rourke,,UK Export Finance_Q4 2025.,82,87,Fri Feb 13 2026 15:09:13 GMT+0500 (Pakistan Standard Time)
+a0b1487c-81b4-447a-88e6-cb51dcdd9dda,approved,Dan Cojocaru,,UK Export Finance_Q4 2025.,82,87,Fri Feb 13 2026 15:08:45 GMT+0500 (Pakistan Standard Time)
+0b53390a-7c52-4ab5-9323-d3cb26655a15,approved,Tom Robinson,,UK Export Finance_Q4 2025.,82,87,Fri Feb 13 2026 15:24:34 GMT+0500 (Pakistan Standard Time)
+301df63b-a1c4-4bdb-b0ea-38ae33ca4b1c,approved,David Collins,,Proton UK,78,87,Fri Feb 13 2026 16:01:22 GMT+0500 (Pakistan Standard Time)
+0c214177-eea8-4944-85cb-4fdc06a4b03c,approved,Ben Kirby,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:33:15 GMT+0500 (Pakistan Standard Time)
+9e27d8df-6ca9-4533-aeaf-f2c93579c37e,approved,Chris Doyle,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:48:44 GMT+0500 (Pakistan Standard Time)
+bee7c708-91cd-42a5-81c3-5c19b4cc15f2,approved,David Jarman,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:04:23 GMT+0500 (Pakistan Standard Time)
+085d0e59-bdb8-4e1c-a961-6669a2e1de9e,approved,Desrée Arthur,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:42:41 GMT+0500 (Pakistan Standard Time)
+773e381c-47a5-4d82-8f05-8b607b7b7e50,approved,Glenn Rika-Rayne,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:34:17 GMT+0500 (Pakistan Standard Time)
+0c0483b8-235b-4a10-923d-b85aadfaa4a5,approved,Lawrie Baggs,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:03:56 GMT+0500 (Pakistan Standard Time)
+bb6a6700-8d69-4429-b8b6-c6c988fca5db,under_review,Peter Fox,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:17:15 GMT+0500 (Pakistan Standard Time)
+eeae843d-0dfc-413d-ab69-f110a07d5cbe,approved,Stephen Bradley,,UK Export Finance_Q4 2025.,88,86,Fri Feb 13 2026 15:52:47 GMT+0500 (Pakistan Standard Time)
+34dc03c6-86a5-4174-8fbd-5bbd190a3b65,approved,Charlie Stevens,,UK Export Finance_Q4 2025.,85,86,Fri Feb 13 2026 15:12:19 GMT+0500 (Pakistan Standard Time)
+ca227850-dfd6-4dbd-a3c0-e28607c54540,approved,Glyn Dawson,,UK Export Finance_Q4 2025.,85,86,Fri Feb 13 2026 15:05:39 GMT+0500 (Pakistan Standard Time)
+a513ae1f-8b8e-45e6-9737-920c9cb97737,approved,Andrew Parry,,Proton UK,82,86,Fri Feb 13 2026 15:44:46 GMT+0500 (Pakistan Standard Time)
+2f419853-4f63-4fe6-95e0-054b982e9245,approved,Barry Byrd,,UK Export Finance_Q4 2025.,82,86,Fri Feb 13 2026 15:02:05 GMT+0500 (Pakistan Standard Time)
+cff36121-a7c4-439c-8ff6-9e0852014aa5,under_review,Collette Corr,,UK Export Finance_Q4 2025.,82,86,Fri Feb 13 2026 15:25:19 GMT+0500 (Pakistan Standard Time)
+6847bce3-cb98-45ba-ad9e-d94043c3259a,approved,Robert Lavicky,,UK Export Finance_Q4 2025.,82,86,Fri Feb 13 2026 15:00:38 GMT+0500 (Pakistan Standard Time)
+9752c95e-6fd4-476c-8e88-0f819ad632ac,approved,Shaun Bennett,,UK Export Finance_Q4 2025.,82,86,Fri Feb 13 2026 15:37:35 GMT+0500 (Pakistan Standard Time)
+38b2d028-341c-41c3-a79b-2ffd25e5c32d,under_review,Vistar Sharma,,UK Export Finance_Q4 2025.,82,86,Fri Feb 13 2026 15:31:44 GMT+0500 (Pakistan Standard Time)
+84cd4b43-c978-4f53-b1fa-34cc05fa94e5,published,Steven Russell,,Proton UK,78,86,Fri Feb 13 2026 16:01:52 GMT+0500 (Pakistan Standard Time)
+8779e9a9-17e2-4a9e-99c9-cd4be6ab7b68,approved,Charlie Evatt,,UK Export Finance_Q4 2025.,88,85,Fri Feb 13 2026 15:49:18 GMT+0500 (Pakistan Standard Time)
+d2f6e1a3-4ee6-4183-a1a8-df7271dae340,under_review,Paul Holden,,UK Export Finance_Q4 2025.,88,85,Fri Feb 13 2026 15:23:19 GMT+0500 (Pakistan Standard Time)
+52f78281-41b7-4474-9d7c-bd488d2ef424,approved,Rob Rule,,UK Export Finance_Q4 2025.,88,85,Fri Feb 13 2026 15:31:06 GMT+0500 (Pakistan Standard Time)
+189f35c6-4a92-4935-897f-1acc4e72a022,approved,Ian Willis,,UK Export Finance_Q4 2025.,85,85,Fri Feb 13 2026 15:31:40 GMT+0500 (Pakistan Standard Time)
+9f71aa48-556b-4357-98b3-1934b6160fac,approved,Corinne Srouji,,UK Export Finance_Q4 2025.,82,85,Fri Feb 13 2026 15:57:42 GMT+0500 (Pakistan Standard Time)
+22f16298-4bee-4d25-b268-8b01a2926d57,approved,Gary Green,,UK Export Finance_Q4 2025.,82,85,Fri Feb 13 2026 15:21:03 GMT+0500 (Pakistan Standard Time)
+08eaccd3-f7c4-4c0a-8fc9-0b47d1206682,approved,Kaledupe Aiyegbusi,,Proton UK,82,85,Fri Feb 13 2026 16:00:15 GMT+0500 (Pakistan Standard Time)
+a005059e-9777-4360-9b1d-6cdebd627249,approved,Mick Patton,,UK Export Finance_Q4 2025.,82,85,Fri Feb 13 2026 15:36:19 GMT+0500 (Pakistan Standard Time)
+4ced0a6f-16e1-4450-9cf2-84461f8447af,approved,Ronnie Wilson,,UK Export Finance_Q4 2025.,82,85,Fri Feb 13 2026 15:28:37 GMT+0500 (Pakistan Standard Time)
+4556cdda-32c5-4e58-a4c3-db8fa77c42be,under_review,Nick Jones,,UK Export Finance_Q4 2025.,78,85,Fri Feb 13 2026 15:14:58 GMT+0500 (Pakistan Standard Time)
+eaff5d98-a081-4c54-a6b0-b7db26b0230c,approved,Elaine Whitefoot,,Proton UK,72,85,Fri Feb 13 2026 16:01:13 GMT+0500 (Pakistan Standard Time)
+39a18811-c6f9-4274-b20d-073dbf6db1a5,under_review,Willie Taylor,CareSouth Carolina Inc.,RingCentral_AppointmentGen,95,84,Fri Feb 13 2026 16:38:52 GMT+0500 (Pakistan Standard Time)
+24322595-a346-4eb9-95cd-7f4825045908,approved,Jamie McMinnis,,UK Export Finance_Q4 2025.,88,84,Fri Feb 13 2026 15:57:59 GMT+0500 (Pakistan Standard Time)
+1dc8c376-75f4-4aac-9f46-8b7c200fc3ad,approved,Jonathan Whitfield,,UK Export Finance_Q4 2025.,88,84,Fri Feb 13 2026 15:42:35 GMT+0500 (Pakistan Standard Time)
+fc75772e-daf5-427a-b338-af8c7ca18f5a,approved,Giselly Da Cunha,,UK Export Finance_Q4 2025.,82,84,Fri Feb 13 2026 15:01:25 GMT+0500 (Pakistan Standard Time)
+9a7fc0f5-ef45-4081-943c-7f92db88923b,approved,Sameen Ahmed,,Proton UK,82,84,Fri Feb 13 2026 15:57:19 GMT+0500 (Pakistan Standard Time)
+91b87051-c4fd-4be6-baa6-6737580a912e,approved,Ian Crabtree,,UK Export Finance_Q4 2025.,75,84,Fri Feb 13 2026 15:03:20 GMT+0500 (Pakistan Standard Time)
+a5f8f02f-e31e-44cb-ae07-6e96ab9eca66,approved,John Yeatman,,UK Export Finance_Q4 2025.,75,84,Fri Feb 13 2026 15:09:23 GMT+0500 (Pakistan Standard Time)
+fc154e9a-1d15-49b3-a80d-4ded8017c017,under_review,Stephanie Pohlman,Exact Sciences,Harver Appoitnment Gen,95,83,Fri Feb 13 2026 16:41:23 GMT+0500 (Pakistan Standard Time)
+cd547f33-191a-4df6-a7ae-ab66e4be3a1a,approved,Kareen Campbell,,UK Export Finance_Q4 2025.,88,83,Fri Feb 13 2026 15:14:54 GMT+0500 (Pakistan Standard Time)
+c59837ba-8ce6-4d9c-9dd8-a06b99ba3f0a,under_review,Emma Jennison,,UK Export Finance_Q4 2025.,82,83,Fri Feb 13 2026 14:58:09 GMT+0500 (Pakistan Standard Time)
+7d569d92-a734-4ee6-90ac-dbe14c2cc110,approved,Louise Martin,,UK Export Finance_Q4 2025.,82,83,Fri Feb 13 2026 15:22:41 GMT+0500 (Pakistan Standard Time)
+f94c09e5-524f-419b-a165-5446745af199,approved,Michael Richmond,,UK Export Finance_Q4 2025.,75,83,Fri Feb 13 2026 15:31:39 GMT+0500 (Pakistan Standard Time)
+a2d8df48-0ed3-46e2-9e78-dccb90c70806,published,Dale Liesching,,Proton UK,72,83,Fri Feb 13 2026 15:59:50 GMT+0500 (Pakistan Standard Time)
+66ae7a25-218b-4fe2-91ef-66db1ac78d8f,approved,Michael Blaize,,Proton UK,72,83,Fri Feb 13 2026 16:00:49 GMT+0500 (Pakistan Standard Time)
+c21ad858-dd6a-4356-abce-cbb47f60b7a9,approved,Derek Davies,,UK Export Finance_Q4 2025.,65,83,Fri Feb 13 2026 15:50:55 GMT+0500 (Pakistan Standard Time)
+84d5d8da-0701-48ff-927c-d14368110ea8,approved,Paul Humphreys,,UK Export Finance_Q4 2025.,85,82,Fri Feb 13 2026 15:35:14 GMT+0500 (Pakistan Standard Time)
+35986fb1-f43e-4713-89d5-f8a7a9a7464b,approved,Amar Tanna,,UK Export Finance_Q4 2025.,82,82,Fri Feb 13 2026 15:12:48 GMT+0500 (Pakistan Standard Time)
+f2fb1127-9e34-42ec-97a6-75d67ce06589,approved,Andie Chessun,,UK Export Finance_Q4 2025.,82,82,Fri Feb 13 2026 15:28:01 GMT+0500 (Pakistan Standard Time)
+42c4e00c-1545-45c4-a1b7-fa40e60481ba,approved,Harry Saint,,UK Export Finance_Q4 2025.,82,82,Fri Feb 13 2026 15:46:54 GMT+0500 (Pakistan Standard Time)
+a51f8de8-1b94-46bd-b7b3-52938b866bf9,under_review,Lauren McMinn,,UK Export Finance_Q4 2025.,82,82,Fri Feb 13 2026 15:59:02 GMT+0500 (Pakistan Standard Time)
+a6f324a1-4b78-4b62-8f32-f66397ee49ff,approved,Matt Stakes,,UK Export Finance_Q4 2025.,82,82,Fri Feb 13 2026 15:00:04 GMT+0500 (Pakistan Standard Time)
+8bdff4c1-1c5e-49ff-b864-2cadec46549e,approved,Richard May,,Proton UK,82,82,Fri Feb 13 2026 15:54:23 GMT+0500 (Pakistan Standard Time)
+74ba4e7a-ff37-4306-86e6-7f4364258f13,approved,Russell Crowe,,UK Export Finance_Q4 2025.,82,82,Fri Feb 13 2026 15:40:14 GMT+0500 (Pakistan Standard Time)
+d1944495-9337-4c7e-aaed-5502310c2fdc,approved,Alice Edgcumbe-Rendle,,UK Export Finance_Q4 2025.,75,82,Fri Feb 13 2026 15:28:23 GMT+0500 (Pakistan Standard Time)
+80a9c3cd-fea0-4c00-b643-825fc9acddc3,under_review,Carl Morenikeji,,UK Export Finance_Q4 2025.,45,82,Fri Feb 13 2026 14:58:08 GMT+0500 (Pakistan Standard Time)
+2cbed333-5639-42be-ba46-00aacafe65aa,approved,Brendan Cullen,,UK Export Finance_Q4 2025.,82,81,Fri Feb 13 2026 15:48:51 GMT+0500 (Pakistan Standard Time)
+406bcad8-009d-4a73-bba8-c674cb9bdc5c,under_review,St-John Williamson,,UK Export Finance_Q4 2025.,82,81,Fri Feb 13 2026 15:39:10 GMT+0500 (Pakistan Standard Time)
+de2b12e1-fb98-4540-9ce6-e55efc9f60b7,approved,Catherine Morse-Brown,,UK Export Finance_Q4 2025.,78,81,Fri Feb 13 2026 15:05:06 GMT+0500 (Pakistan Standard Time)
+70d2a5b3-02f6-4967-b9b2-5b4b35f95de0,approved,Paul Stacey,,Proton UK,78,81,Fri Feb 13 2026 16:00:43 GMT+0500 (Pakistan Standard Time)
+574118f0-af43-43fb-8975-170c1d736b44,published,Ronnie Gurr,,Proton UK,75,81,Fri Feb 13 2026 15:59:50 GMT+0500 (Pakistan Standard Time)
+1e6d1515-d7d3-44a1-bc5e-84aae042e95f,approved,Asim Tahir,,Proton UK,72,81,Fri Feb 13 2026 16:01:20 GMT+0500 (Pakistan Standard Time)
+efeaadb0-c8b0-4bab-a2ea-d858a625c53f,approved,Chloe Barker,,UK Export Finance_Q4 2025.,72,81,Fri Feb 13 2026 15:03:19 GMT+0500 (Pakistan Standard Time)
+44664e87-87b6-4ff7-8a30-1c246a7bf154,approved,Rob Courtney,,UK Export Finance_Q4 2025.,72,81,Fri Feb 13 2026 15:31:24 GMT+0500 (Pakistan Standard Time)
+baa6857f-1735-48f8-aa8a-14d7a5904283,approved,William Mendes,,UK Export Finance_Q4 2025.,68,81,Fri Feb 13 2026 15:03:19 GMT+0500 (Pakistan Standard Time)
+57358c42-c760-481c-bdd2-6ea11c7f82fe,approved,Jane Best,,UK Export Finance_Q4 2025.,85,80,Fri Feb 13 2026 15:59:24 GMT+0500 (Pakistan Standard Time)
+c6f637ee-9d9c-4f78-9ef4-354b59824613,under_review,Angus Taylor,,UK Export Finance_Q4 2025.,82,80,Fri Feb 13 2026 15:49:05 GMT+0500 (Pakistan Standard Time)
+0227b025-a596-4b5a-957d-5b38efe64932,approved,Helen Stott,,UK Export Finance_Q4 2025.,82,80,Fri Feb 13 2026 15:34:46 GMT+0500 (Pakistan Standard Time)
+0cb4c1f1-c947-4dfb-9678-328a0e83be85,approved,Marc Brewster,,UK Export Finance_Q4 2025.,82,80,Fri Feb 13 2026 15:16:53 GMT+0500 (Pakistan Standard Time)
+d33cb5a3-0401-4ced-8066-352c65c9ac67,under_review,Lee Park,,UK Export Finance_Q4 2025.,78,80,Fri Feb 13 2026 15:31:54 GMT+0500 (Pakistan Standard Time)
+dfeb7067-ed6a-45a7-965e-a83d51476bac,approved,James Wilkinson,,UK Export Finance_Q4 2025.,82,79,Fri Feb 13 2026 15:10:22 GMT+0500 (Pakistan Standard Time)
+5e79b3f6-0d62-4091-8e73-75c0111e5a07,approved,Jamie McGilvray,,UK Export Finance_Q4 2025.,82,79,Fri Feb 13 2026 15:53:29 GMT+0500 (Pakistan Standard Time)
+7a994caa-9027-475c-bc0e-d1df3497381f,approved,Scott Livingston,,UK Export Finance_Q4 2025.,82,79,Fri Feb 13 2026 15:48:04 GMT+0500 (Pakistan Standard Time)
+6f341ed0-91d3-470e-b79f-2bab8b42dbc3,approved,Roy Duggan,,Proton UK,78,79,Fri Feb 13 2026 15:57:04 GMT+0500 (Pakistan Standard Time)
+05343ab5-8864-4410-9a3b-91f914930d04,approved,Stuart McOnie,,UK Export Finance_Q4 2025.,78,79,Fri Feb 13 2026 15:15:31 GMT+0500 (Pakistan Standard Time)
+a6a229ca-2a04-4843-b871-fd19117c46ca,approved,Caitlin O'Shaughnessy,,UK Export Finance_Q4 2025.,72,79,Fri Feb 13 2026 15:35:58 GMT+0500 (Pakistan Standard Time)
+d25db730-32ee-4cca-bf83-8a48ed7c5c74,approved,Ravinder Rai,,UK Export Finance_Q4 2025.,72,79,Fri Feb 13 2026 15:29:20 GMT+0500 (Pakistan Standard Time)
+2c4f2ffe-0855-40c0-a8be-5b0f9c7a94c3,under_review,Mithila Wegapitiya,potenza.sg,Appointment Setting Request - Campaign,92,78,Fri Feb 13 2026 16:38:05 GMT+0500 (Pakistan Standard Time)
+e984954a-10dc-4469-a657-a11cfe7c1d85,approved,Dave Sheldon,,UK Export Finance_Q4 2025.,82,78,Fri Feb 13 2026 15:37:23 GMT+0500 (Pakistan Standard Time)
+546802ff-e1dc-45d2-a593-1101f1bdd1b8,approved,Charlton Karlowsky,Pembina Trails School Division,RingCentral_AppointmentGen,78,78,Fri Feb 13 2026 11:16:31 GMT+0500 (Pakistan Standard Time)
+263e0996-d5f4-4f63-b80e-6a2a17b2072e,approved,Nick Baxter,,Proton UK,78,78,Fri Feb 13 2026 16:01:13 GMT+0500 (Pakistan Standard Time)
+c3817d12-69c9-4edd-8654-1a344a2bd89c,approved,Mathew Summerfield,,UK Export Finance_Q4 2025.,75,78,Fri Feb 13 2026 15:02:29 GMT+0500 (Pakistan Standard Time)
+04fdad9c-d7ce-4020-8fea-90131dfa6b6f,approved,Thomas Bray,,UK Export Finance_Q4 2025.,75,78,Fri Feb 13 2026 15:06:15 GMT+0500 (Pakistan Standard Time)
+178eb47f-5caa-490b-91f8-c52e01e659b1,approved,Phil Seal,,Proton UK,72,78,Fri Feb 13 2026 15:46:32 GMT+0500 (Pakistan Standard Time)
+66c0ac80-80e0-4c37-a15c-ba543b027343,approved,Gary Downham,,UK Export Finance_Q4 2025.,78,77,Fri Feb 13 2026 15:59:19 GMT+0500 (Pakistan Standard Time)
+6f057366-1d16-4015-9c31-980c9886104f,under_review,Gilbert Campbell,,UK Export Finance_Q4 2025.,78,77,Fri Feb 13 2026 15:55:52 GMT+0500 (Pakistan Standard Time)
+28217c12-a302-45f7-9644-6d8bcd3ca644,under_review,Ian Couch,,UK Export Finance_Q4 2025.,78,77,Fri Feb 13 2026 15:08:19 GMT+0500 (Pakistan Standard Time)
+254ef91e-fa71-41f2-bc42-728c51078833,approved,Mark Kerrigan,,UK Export Finance_Q4 2025.,78,77,Fri Feb 13 2026 15:38:05 GMT+0500 (Pakistan Standard Time)
+e5abfe2b-084f-4ad9-b480-840965fb8a99,published,Jonathan McIlveen,,Proton UK,72,77,Fri Feb 13 2026 16:01:48 GMT+0500 (Pakistan Standard Time)
+69161f33-1b59-4d19-9a71-3eb5ebb0a697,under_review,Alex King,icandy,Appointment Setting Request - Campaign,92,76,Fri Feb 13 2026 16:38:03 GMT+0500 (Pakistan Standard Time)
+b8e2701e-9dac-40c2-bf8f-55669a9e8932,under_review,Craig Fraser,,UK Export Finance_Q4 2025.,82,76,Fri Feb 13 2026 15:20:57 GMT+0500 (Pakistan Standard Time)
+ba486310-c8ee-4565-8b25-6f73c7392225,approved,Maddy Kennedy,,UK Export Finance_Q4 2025.,82,76,Fri Feb 13 2026 15:01:14 GMT+0500 (Pakistan Standard Time)
+c0581af4-1d6b-4dd8-84d4-aebff9fdfd47,under_review,Richard Lane,,UK Export Finance_Q4 2025.,82,76,Fri Feb 13 2026 14:57:28 GMT+0500 (Pakistan Standard Time)
+6e005a3d-9b98-4717-9181-697124520c95,approved,Jamie Munday,,UK Export Finance_Q4 2025.,78,76,Fri Feb 13 2026 15:18:37 GMT+0500 (Pakistan Standard Time)
+33b78582-5da1-45f5-b3ea-cf3d4fde0628,approved,Michael Scarfe,,UK Export Finance_Q4 2025.,78,76,Fri Feb 13 2026 15:22:55 GMT+0500 (Pakistan Standard Time)
+9dd03cac-e3df-4cbe-9c9a-242498dc6221,under_review,Qin Jeffries,,UK Export Finance_Q4 2025.,78,76,Fri Feb 13 2026 15:10:15 GMT+0500 (Pakistan Standard Time)
+c50d836e-b745-4a45-a1e9-a726f66dce7f,approved,Thomas Dring,,Proton UK,75,76,Fri Feb 13 2026 15:55:22 GMT+0500 (Pakistan Standard Time)
+4e3c1bcf-a144-4776-8f80-4a3feb1b15cf,under_review,Matt Crocker,,UK Export Finance_Q4 2025.,72,76,Fri Feb 13 2026 15:33:23 GMT+0500 (Pakistan Standard Time)
+52e21aa9-0001-4696-b486-252607d79a66,under_review,Alex Grant,epiroc,Appointment Setting Request - Campaign,92,75,Fri Feb 13 2026 16:31:37 GMT+0500 (Pakistan Standard Time)
+8aa7656c-7789-4280-afb5-7aacc4f0f492,approved,Richard Turberville,,UK Export Finance_Q4 2025.,78,75,Fri Feb 13 2026 15:04:50 GMT+0500 (Pakistan Standard Time)
+a8399283-02f4-4f98-a219-a1ff37f0f721,approved,Romy Auld,,UK Export Finance_Q4 2025.,78,75,Fri Feb 13 2026 15:08:34 GMT+0500 (Pakistan Standard Time)
+0c110a68-377b-4044-9826-d82cd2633dae,approved,Lee Shepherd,,UK Export Finance_Q4 2025.,72,75,Fri Feb 13 2026 15:25:48 GMT+0500 (Pakistan Standard Time)
+e6b36fd7-d2d5-4d89-b87b-966b68c24ef7,under_review,Richard Hallewell,,UK Export Finance_Q4 2025.,68,75,Fri Feb 13 2026 15:25:49 GMT+0500 (Pakistan Standard Time)
+f865c5ce-9958-4d1c-b924-3ebb9134400c,under_review,Katy Williams,Coty,RingCentral_AppointmentGen,95,74,Fri Feb 13 2026 16:37:05 GMT+0500 (Pakistan Standard Time)
+18d7eefe-24e6-45cb-bc6a-ef993faa291c,under_review,Max Gispert,Hyperion Materials & Technologies,RingCentral_AppointmentGen,85,74,Fri Feb 13 2026 16:33:54 GMT+0500 (Pakistan Standard Time)
+6c65cb2d-f25b-4586-be13-15939e822edc,approved,Phil Dawson,,UK Export Finance_Q4 2025.,82,74,Fri Feb 13 2026 15:52:11 GMT+0500 (Pakistan Standard Time)
+c890b6cc-c0de-4170-8091-983e49fda6dd,approved,Alan Gingell,,UK Export Finance_Q4 2025.,78,74,Fri Feb 13 2026 15:02:26 GMT+0500 (Pakistan Standard Time)
+527d7bac-dbc7-40cb-86ef-4e0b395a0d90,approved,Gary Killington,,UK Export Finance_Q4 2025.,72,74,Fri Feb 13 2026 15:02:19 GMT+0500 (Pakistan Standard Time)
+6057ade4-7141-4b0d-bd9d-dd3eb14e026c,approved,Maria Jones,,UK Export Finance_Q4 2025.,72,74,Fri Feb 13 2026 15:30:45 GMT+0500 (Pakistan Standard Time)
+bac73e3c-a247-4748-9586-b711bc2ecc3f,approved,Julian Ganley,,Proton UK,68,74,Fri Feb 13 2026 15:54:58 GMT+0500 (Pakistan Standard Time)
+5b9f45e1-3128-4c7c-863c-34a3024629ef,approved,Mat Spandl,,UK Export Finance_Q4 2025.,65,74,Fri Feb 13 2026 15:53:32 GMT+0500 (Pakistan Standard Time)
+48525560-71b6-479b-a819-aeee6b856570,under_review,Sarah McOnie,,UK Export Finance_Q4 2025.,88,73,Fri Feb 13 2026 15:21:25 GMT+0500 (Pakistan Standard Time)
+26973f40-b6e6-49ca-b9b8-07aabd26138b,under_review,Dharmesh Joshi,,UK Export Finance_Q4 2025.,72,73,Fri Feb 13 2026 15:29:30 GMT+0500 (Pakistan Standard Time)
+11b2f9a7-7aad-450e-ad86-8fe5702817d5,approved,Matthew Anderson,,UK Export Finance_Q4 2025.,60,73,Fri Feb 13 2026 15:07:01 GMT+0500 (Pakistan Standard Time)
+fd397689-410e-4e85-ae2d-6ad2d73bbc77,approved,Gareth Cocks,,Proton UK,72,72,Fri Feb 13 2026 15:44:59 GMT+0500 (Pakistan Standard Time)
+2f7bf7c7-730a-45f8-9e15-e90c1b2226a4,under_review,Josh O'Brien,,UK Export Finance_Q4 2025.,72,72,Fri Feb 13 2026 15:31:33 GMT+0500 (Pakistan Standard Time)
+2041740b-e55e-4feb-afc6-6f1d2f2e77af,under_review,Jordan Radewan,Blueground,RingCentral_AppointmentGen,95,71,Fri Feb 13 2026 16:11:29 GMT+0500 (Pakistan Standard Time)
+ai-4e5e4d32-e552-477b-8371-f343dfaaf57f,approved,Jon Brown,,Proton UK,85,71,Fri Feb 13 2026 16:36:34 GMT+0500 (Pakistan Standard Time)
+38d475fc-caef-4998-b388-1918ff991108,under_review,Sarah Walder-Davis,Deloitte LLP,RingCentral_AppointmentGen,95,70,Fri Feb 13 2026 16:41:37 GMT+0500 (Pakistan Standard Time)
+1567f7ff-874c-471c-8d12-5cb21b6e30b6,under_review,Olga Pukhalskaya,Semrush,Appointment Setting Request - Campaign,92,70,Fri Feb 13 2026 16:12:45 GMT+0500 (Pakistan Standard Time)
+711bf465-f3dd-43c2-9803-55c2c507a66c,under_review,Garin Baksa,,UK Export Finance_Q4 2025.,72,70,Fri Feb 13 2026 15:24:02 GMT+0500 (Pakistan Standard Time)
+77c97880-d375-4ca6-be7d-1c1f1b9c4381,approved,Nuno Lopes,,UK Export Finance_Q4 2025.,72,70,Fri Feb 13 2026 15:47:59 GMT+0500 (Pakistan Standard Time)
+166b326c-7a99-489d-b553-054bbde7573a,approved,Steve McAuley,,UK Export Finance_Q4 2025.,68,70,Fri Feb 13 2026 15:50:25 GMT+0500 (Pakistan Standard Time)
+34ba6256-7697-4e6c-995a-d35ddcd91324,approved,Javier Abril,,UK Export Finance_Q4 2025.,65,70,Fri Feb 13 2026 15:47:39 GMT+0500 (Pakistan Standard Time)
+80a72c32-97ef-48d6-8212-e14c05886b07,under_review,Monica Chopra,Abdul Latif Jameel,RingCentral_AppointmentGen,95,69,Fri Feb 13 2026 16:34:39 GMT+0500 (Pakistan Standard Time)
+6514f716-50ff-4d03-aa13-88735d69444b,under_review,Pratik Rohra,ramco,Appointment Setting Request - Campaign,88,69,Fri Feb 13 2026 16:28:24 GMT+0500 (Pakistan Standard Time)
+c4e2f361-c640-4233-940a-108587906dee,approved,Phill Barnes,,UK Export Finance_Q4 2025.,78,69,Fri Feb 13 2026 15:22:27 GMT+0500 (Pakistan Standard Time)
+c90a1014-0906-42c6-beda-4ea1d50487a6,approved,Barry Hoyle,,UK Export Finance_Q4 2025.,72,69,Fri Feb 13 2026 15:16:40 GMT+0500 (Pakistan Standard Time)
+af33180a-b731-461a-a737-1fc8f4a091a1,under_review,Mark Chitty,Admiral Beverage Corporation,RingCentral_AppointmentGen,95,68,Fri Feb 13 2026 16:39:50 GMT+0500 (Pakistan Standard Time)
+8a4f7f19-d1a3-4bef-9b5a-3fae69453ca6,under_review,Gary Tuohy,operata,Appointment Setting Request - Campaign,95,67,Fri Feb 13 2026 16:30:35 GMT+0500 (Pakistan Standard Time)
+b127929c-a158-4e21-a03d-492d411935c9,under_review,Meg Wiseman,Snowflake,Appointment Setting Request - Campaign,92,67,Fri Feb 13 2026 16:30:18 GMT+0500 (Pakistan Standard Time)
+497fd60a-1ad3-43ec-bd23-f1e765bfe117,under_review,Sonnet Sunil,Healthy Planet,RingCentral_AppointmentGen,88,67,Fri Feb 13 2026 16:38:30 GMT+0500 (Pakistan Standard Time)
+d15a66df-5ccf-479a-8be7-f1a5e5663cea,under_review,Rohit Mirpuri,,Proton UK,62,66,Fri Feb 13 2026 15:45:14 GMT+0500 (Pakistan Standard Time)
+556b2fb2-d823-42a5-ae16-1c5696d3208a,under_review,Majid Hussain,,UK Export Finance_Q4 2025.,65,65,Fri Feb 13 2026 14:57:40 GMT+0500 (Pakistan Standard Time)
+449ee01d-c124-4628-b0c1-2addd0ff47ed,under_review,Joe Brownill,,UK Export Finance_Q4 2025.,72,63,Fri Feb 13 2026 15:14:18 GMT+0500 (Pakistan Standard Time)
+4dab73de-da76-449e-a03d-1836c8017c98,under_review,Steve Hughes,,UK Export Finance_Q4 2025.,62,63,Fri Feb 13 2026 15:56:12 GMT+0500 (Pakistan Standard Time)
+3fedef13-ab5c-4f47-87c9-74f147c9be9b,under_review,Shaun Thorp,Legacy of Sid,UK Export Finance_Q4 2025.,90,62,Fri Feb 13 2026 16:41:19 GMT+0500 (Pakistan Standard Time)
+a3bc6f99-2fc6-4c50-833b-895b8f1ccb5f,under_review,Ashley Ajgaybee,Elina PMS,UK Export Finance_Q4 2025.,85,62,Sat Feb 07 2026 10:52:16 GMT+0500 (Pakistan Standard Time)
+38d739df-894c-46dd-8b77-e4bff1460a87,approved,Mary Ellis,,UK Export Finance_Q4 2025.,72,62,Fri Feb 13 2026 15:04:39 GMT+0500 (Pakistan Standard Time)
+492510c7-7add-4143-b4bc-0a519e8e70d2,approved,Ian Loy,,UK Export Finance_Q4 2025.,65,62,Fri Feb 13 2026 15:37:23 GMT+0500 (Pakistan Standard Time)
+bdd01021-e441-4bf9-ab37-c583e17659ef,under_review,William Keane,Nando's UK & IRE,RingCentral_AppointmentGen,50,62,Fri Feb 13 2026 16:36:34 GMT+0500 (Pakistan Standard Time)
+31c98820-08ac-4ca5-bb55-3fb1951869f7,under_review,David Jenner,Kent Cosmetics Limited,UK Export Finance_Q4 2025.,85,61,Wed Feb 11 2026 12:23:03 GMT+0500 (Pakistan Standard Time)
+5e5501d6-2d3a-42ff-9d79-244a4510971f,under_review,Stephen Edwards,Inturf,UK Export Finance_Q4 2025.,85,61,Fri Feb 13 2026 16:38:28 GMT+0500 (Pakistan Standard Time)
+0ae48051-2170-497a-93a3-1ccfeaa2a522,under_review,Ben Horbul,Flow International,RingCentral_AppointmentGen,95,60,Fri Feb 13 2026 16:03:31 GMT+0500 (Pakistan Standard Time)
+af2133c5-fd1b-4e28-b68b-260c938a35a3,approved,Mark Rafael,,Proton UK,65,60,Fri Feb 13 2026 15:54:27 GMT+0500 (Pakistan Standard Time)
+a6c4cf1a-0e43-4376-a5ee-8b3bd6b39853,under_review,Clark Frost,,UK Export Finance_Q4 2025.,45,60,Fri Feb 13 2026 16:40:53 GMT+0500 (Pakistan Standard Time)
+d5517fda-635f-4023-935b-c47e66d22b97,under_review,Andrew Jones,The South African Software Development Hub,UK Export Finance_Q4 2025.,72,59,Fri Feb 13 2026 16:41:45 GMT+0500 (Pakistan Standard Time)
+c914255b-a5f9-4d41-b719-46cd58a6c74f,rejected,Alec Barton,,UK Export Finance_Q4 2025.,65,59,Fri Feb 13 2026 15:51:37 GMT+0500 (Pakistan Standard Time)
+48436d94-dde8-4e8f-ab15-295bd3b40aab,rejected,Jonathan Room,,UK Export Finance_Q4 2025.,65,59,Fri Feb 13 2026 15:08:46 GMT+0500 (Pakistan Standard Time)
+84d22374-0fcb-47c4-a774-439f050b3c8f,rejected,Jon Callander,KSR Lighting,UK Export Finance_Q4 2025.,65,58,Fri Feb 13 2026 16:38:17 GMT+0500 (Pakistan Standard Time)
+c44a368a-9a98-49f1-a1e1-8ed804ceafc4,under_review,Mano Cherian,NimbleWork,Appointment Setting Request - Campaign,62,58,Fri Feb 13 2026 16:29:48 GMT+0500 (Pakistan Standard Time)
+9580e69f-1397-41b6-b8b4-5120027bfa61,under_review,Nikolin Petro,michaeljfox,RingCentral_AppointmentGen,88,57,Fri Feb 13 2026 16:35:35 GMT+0500 (Pakistan Standard Time)
+754a51ba-1eb0-4ccc-8f7f-0b8d56e1d256,under_review,Raul Correa,F.h. Paschen,RingCentral_AppointmentGen,72,57,Fri Feb 13 2026 16:39:38 GMT+0500 (Pakistan Standard Time)
+e01362a0-2dbc-4b9b-b921-bfa64a674150,approved,Tim Watts,,Proton UK,45,56,Fri Feb 13 2026 15:56:48 GMT+0500 (Pakistan Standard Time)
+d282b570-c634-412e-a9ad-eecc690dbef7,under_review,William Darby,Chattanooga Times Free Press,RingCentral_AppointmentGen,72,55,Fri Feb 13 2026 16:36:07 GMT+0500 (Pakistan Standard Time)
+35ba7e9d-b5dd-4871-aa5c-d5c3483f6741,under_review,Richard Francisco,Duravent Group,RingCentral_AppointmentGen,60,55,Fri Feb 13 2026 16:34:54 GMT+0500 (Pakistan Standard Time)
+1a11b1aa-6ba8-4bca-9bf9-2b190b183e46,under_review,Robert Dunlap,Community Mental Health Affiliates Inc.,RingCentral_AppointmentGen,95,53,Fri Feb 13 2026 16:37:54 GMT+0500 (Pakistan Standard Time)
+f46cc546-e271-4b83-bcee-0a380813c275,under_review,Denton Lawson,Florida Crystals,RingCentral_AppointmentGen,45,53,Fri Feb 13 2026 16:35:58 GMT+0500 (Pakistan Standard Time)
+54d07d02-79ee-4073-b4f8-8c2233e45ea7,under_review,Ann Moore,Fidelity Investments,Harver Appoitnment Gen,95,52,Fri Feb 13 2026 16:41:16 GMT+0500 (Pakistan Standard Time)
+4dfb4279-68d6-4f60-a738-dff1bcdc9c72,under_review,Brano Lukic,Alberta Blue Cross,RingCentral_AppointmentGen,55,52,Fri Feb 13 2026 16:40:30 GMT+0500 (Pakistan Standard Time)
+8c640a7e-98ed-41b7-bb31-af684e88842d,under_review,Corey Monk,aurecongroup,Appointment Setting Request - Campaign,45,51,Fri Feb 13 2026 16:29:58 GMT+0500 (Pakistan Standard Time)
+9b7e59fb-ac91-465b-b724-22bfaf3846c9,rejected,Leo Flores,Switch2day Ltd.,UK Export Finance_Q4 2025.,65,50,Mon Feb 09 2026 11:16:42 GMT+0500 (Pakistan Standard Time)
+c25184d3-f6ec-4063-b356-66eddd8dc00b,under_review,Nicholas Bryan,Siemens Nederland N V,Appointment Setting Request - Campaign,45,50,Fri Feb 13 2026 16:27:14 GMT+0500 (Pakistan Standard Time)
+8cebd3e0-0b7c-4cfa-809d-183c4c64e308,rejected,James Copson,Anattic,UK Export Finance_Q4 2025.,0,50,Sat Feb 07 2026 12:30:08 GMT+0500 (Pakistan Standard Time)
+fa00579a-ae93-4930-92ad-ccd6571d04c7,rejected,Samantha McDermott,GTMaritime,UK Export Finance_Q4 2025.,0,50,Sat Feb 07 2026 11:05:43 GMT+0500 (Pakistan Standard Time)
+393bd0e3-4e74-4e44-823c-b3578a8e9a20,rejected,Steve Edery,Starlizard Consulting Ltd.,UK Export Finance_Q4 2025.,0,50,Sat Feb 07 2026 11:15:22 GMT+0500 (Pakistan Standard Time)
+ecf5f826-fefb-4563-9d6d-2beb3d7d9ee1,under_review,Mike Province,EcoWater Systems LLC,RingCentral_AppointmentGen,65,49,Fri Feb 13 2026 16:35:21 GMT+0500 (Pakistan Standard Time)
+c7db0920-1b82-41d0-97cd-a4ee6ec21e22,rejected,Arron Fellows,Polly's Brew Co.,UK Export Finance_Q4 2025.,42,49,Fri Feb 13 2026 16:29:13 GMT+0500 (Pakistan Standard Time)
+92eeb4b6-5183-47c2-bba9-3944913205b8,rejected,Chris Metcalfe,Advanced Insurance Consultants,UK Export Finance_Q4 2025.,35,48,Fri Feb 13 2026 16:42:06 GMT+0500 (Pakistan Standard Time)
+70540ac1-a5cf-4e56-8d1b-64552df5c566,rejected,Jeff Cheek,Ayers Saint Gross,RingCentral_AppointmentGen,65,43,Fri Feb 13 2026 16:03:28 GMT+0500 (Pakistan Standard Time)
+ba27e8a0-961a-4fd8-8dd3-a056fe976aaa,under_review,Aritro Chatterjee,simplifyhealthcare,Appointment Setting Request - Campaign,45,43,Fri Feb 13 2026 16:32:08 GMT+0500 (Pakistan Standard Time)
+450659ad-2bfa-4b8f-be0e-5cd5ecef754c,rejected,Shoja Shokofan,,UK Export Finance_Q4 2025.,42,43,Fri Feb 13 2026 15:50:08 GMT+0500 (Pakistan Standard Time)
+008c2e43-6a74-4296-a96a-636a9033b947,under_review,Martin Mulligan,Martin Mulligan Marketing Ltd.,UK Export Finance_Q4 2025.,45,42,Fri Feb 13 2026 16:42:09 GMT+0500 (Pakistan Standard Time)
+b3c1481c-7820-497b-8c69-5aad12f5a3bf,under_review,Rakesh Patel,Singapore Airlines,RingCentral_AppointmentGen,35,42,Fri Feb 13 2026 16:36:28 GMT+0500 (Pakistan Standard Time)
+74336a3d-7232-491b-96fd-5ae43dd9e3bd,under_review,Shivam Mishra,dotsolved,Appointment Setting Request - Campaign,35,42,Fri Feb 13 2026 16:31:11 GMT+0500 (Pakistan Standard Time)
+79457ecb-4e80-4b52-81ee-042e8a17f9ce,under_review,Lucas Thomas,pexa.com.au,Appointment Setting Request - Campaign,100,40,Fri Feb 13 2026 16:29:28 GMT+0500 (Pakistan Standard Time)
+2e4a09be-2b07-43ba-9138-69fd54fa3cd1,rejected,William Michot,California Water Service Company,RingCentral_AppointmentGen,100,40,Fri Feb 13 2026 16:12:12 GMT+0500 (Pakistan Standard Time)
+a0b29cb3-75ea-45fe-a5e7-332b25d182c3,under_review,Fouad Sindi,Saudi Airlines _ Prince Sultan Aviation Academy,RingCentral_AppointmentGen,35,40,Fri Feb 13 2026 16:34:30 GMT+0500 (Pakistan Standard Time)
+a50ac3d0-f052-47c5-af70-7a6fc5d1342c,approved,Peter Irigbhogbe,,Proton UK,35,40,Fri Feb 13 2026 15:55:25 GMT+0500 (Pakistan Standard Time)
+1cf75774-4b9a-46ca-b09c-4c4277a7bc9c,under_review,Todd Clark,Centro Inc.,RingCentral_AppointmentGen,35,40,Fri Feb 13 2026 16:38:21 GMT+0500 (Pakistan Standard Time)
+69c5482f-d535-4685-9111-b051266f55f3,under_review,Arun Shenoy,Serverfarm,Appointment Setting Request - Campaign,95,39,Fri Feb 13 2026 16:28:45 GMT+0500 (Pakistan Standard Time)
+0efb5b1a-6cb3-44dd-8c22-73769f746973,under_review,Ore Banjoko,123Dentist,RingCentral_AppointmentGen,42,39,Fri Feb 13 2026 16:40:50 GMT+0500 (Pakistan Standard Time)
+4737e540-8f0c-4e91-b13c-61cbfc50b54e,rejected,John Mullins,Data Protect,UK Export Finance_Q4 2025.,35,39,Fri Feb 13 2026 04:24:54 GMT+0500 (Pakistan Standard Time)
+cb7da6e1-0bab-4f2d-90d6-c2b6a2fe83b7,under_review,Lynn Hamilton,American Nurses Enterprise,RingCentral_AppointmentGen,10,39,Fri Feb 13 2026 16:40:03 GMT+0500 (Pakistan Standard Time)
+33331ff6-315f-4e21-8b10-6c4b8c8cf360,under_review,Ritesh Chakraborty,Cognizant,Appointment Setting Request - Campaign,45,38,Fri Feb 13 2026 16:27:15 GMT+0500 (Pakistan Standard Time)
+0b5c0fc9-de4e-4d55-bce4-af73bbe4b8f5,under_review,Nasim Raeesi,TForce Freight Canada,RingCentral_AppointmentGen,35,38,Fri Feb 13 2026 16:38:48 GMT+0500 (Pakistan Standard Time)
+5fbffe04-b821-476b-be48-88e2d4fe56a4,under_review,Simon Smith,Ramp Control Ltd.,Appointment Setting Request - Campaign,95,37,Fri Feb 13 2026 16:42:14 GMT+0500 (Pakistan Standard Time)
+d7622fb5-c1f2-4854-8c81-a5a6cce961e8,under_review,Masafumi Usuda,Qualcomm Technologies Incorporated,Appointment Setting Request - Campaign,35,37,Fri Feb 13 2026 16:31:30 GMT+0500 (Pakistan Standard Time)
+a18ed9ad-0a44-4378-9b32-fdcba32f770f,rejected,Nisha Mallya,VSC Car Servicing Hounslow,UK Export Finance_Q4 2025.,35,37,Fri Feb 13 2026 16:21:42 GMT+0500 (Pakistan Standard Time)
+7ea82c8b-6dee-4f47-98c2-1e1100c17229,rejected,Helen Rinaldi,Philips Healthcare,Harver Appoitnment Gen,45,35,Fri Feb 13 2026 11:14:21 GMT+0500 (Pakistan Standard Time)
+b1d3555d-e557-4866-a9cf-a738b0c681bb,under_review,Mark Eynon,Newbury Spring Festival,UK Export Finance_Q4 2025.,38,35,Fri Feb 13 2026 16:41:28 GMT+0500 (Pakistan Standard Time)
+c8f3066f-5753-4218-940c-e725fca0eeda,rejected,Gilbert Mudoti,GainCare,UK Export Finance_Q4 2025.,35,35,Fri Feb 13 2026 16:20:52 GMT+0500 (Pakistan Standard Time)
+b94cec1c-b709-4b80-ac65-759d6b5a87d6,rejected,Indraniel Aaikat,Firework,Appointment Setting Request - Campaign,35,34,Fri Feb 13 2026 16:12:47 GMT+0500 (Pakistan Standard Time)
+22774c4f-4807-4135-8a16-652d043b91e9,under_review,Noel Hamill,ParcelLab,Appointment Setting Request - Campaign,35,34,Fri Feb 13 2026 16:27:04 GMT+0500 (Pakistan Standard Time)
+eccf351c-2f32-4971-8069-8e3894873910,rejected,Clive Pittock,Valley Solutions Group,UK Export Finance_Q4 2025.,20,34,Wed Feb 11 2026 11:08:51 GMT+0500 (Pakistan Standard Time)
+1a547fb7-9f40-4fde-9bb7-b80266157ada,rejected,Matthew Kester,Mission Fed Credit Union,RingCentral_AppointmentGen,10,34,Fri Feb 13 2026 16:11:54 GMT+0500 (Pakistan Standard Time)
+f01f1fc3-97ef-406b-80e6-8af42b17647b,rejected,Nathan Paulden,The BNC Show,UK Export Finance_Q4 2025.,45,33,Tue Feb 10 2026 11:59:13 GMT+0500 (Pakistan Standard Time)
+27c4b9b6-11d7-44f4-8e65-66e8be20f814,rejected,Craig Steven,,UK Export Finance_Q4 2025.,35,33,Fri Feb 13 2026 15:05:14 GMT+0500 (Pakistan Standard Time)
+22820cd4-7d9e-4f6e-a7a3-599abd962814,rejected,Michael Arnold,Hardin County Schools,RingCentral_AppointmentGen,65,32,Fri Feb 13 2026 16:04:05 GMT+0500 (Pakistan Standard Time)
+a8b59510-ba79-4aff-bd3b-34901f929e9b,approved,Adrian Carley,,Proton UK,35,31,Fri Feb 13 2026 16:00:17 GMT+0500 (Pakistan Standard Time)
+18c41a17-f782-487b-ac4f-8158932ce17c,rejected,Kolawole Akeredolu,Hatfield,RingCentral_AppointmentGen,35,31,Fri Feb 13 2026 16:37:38 GMT+0500 (Pakistan Standard Time)
+cc7e099b-7877-45b5-86a1-2affb5a83357,rejected,Mike Adams,,UK Export Finance_Q4 2025.,25,30,Fri Feb 13 2026 16:36:58 GMT+0500 (Pakistan Standard Time)
+b3edc6a5-3cd5-428f-87eb-508918214ea2,rejected,Nurana Syeda,Eurostar,RingCentral_AppointmentGen,25,30,Fri Feb 13 2026 16:12:46 GMT+0500 (Pakistan Standard Time)
+0cab8436-27c0-4ea7-9f57-868b1395bca1,rejected,Jarrett Herberger,United Petroleum Transports,RingCentral_AppointmentGen,15,30,Fri Feb 13 2026 16:02:21 GMT+0500 (Pakistan Standard Time)
+50d76297-7d3e-4f81-a3ef-fc05d014a7bb,rejected,Qasim Mushtaq,Arcube,UK Export Finance_Q4 2025.,15,30,Fri Feb 13 2026 04:30:15 GMT+0500 (Pakistan Standard Time)
+ebbb665c-c4ca-461f-96dc-aa256a7816ba,under_review,Ellen Wright,Blenheim Chalcot,RingCentral_AppointmentGen,45,29,Fri Feb 13 2026 16:40:57 GMT+0500 (Pakistan Standard Time)
+b013b8a9-49ce-41d2-a0e7-f365c02c31ce,under_review,Bob Crook,Sager Electronics,RingCentral_AppointmentGen,35,29,Fri Feb 13 2026 16:35:38 GMT+0500 (Pakistan Standard Time)
+e64012d6-c261-4490-98d2-9263e4c91286,under_review,Jeff Dodd,Serval IT Systems Ltd.,UK Export Finance_Q4 2025.,35,28,Fri Feb 13 2026 16:42:00 GMT+0500 (Pakistan Standard Time)
+f975017f-5455-4d66-af41-bb3f4406e201,rejected,Mark Bailey,MC2 Audio Ltd.,UK Export Finance_Q4 2025.,35,28,Fri Feb 13 2026 16:38:40 GMT+0500 (Pakistan Standard Time)
+4a4a76ce-f3db-4380-9a35-62f20abb9fef,under_review,Ryan McCloskey,ParetoHealth,RingCentral_AppointmentGen,25,28,Fri Feb 13 2026 16:38:40 GMT+0500 (Pakistan Standard Time)
+f57937f0-38bf-4607-9569-258b79e20ed4,under_review,Chris Daubercies,Goodwill Industries of Alberta,RingCentral_AppointmentGen,35,27,Fri Feb 13 2026 16:37:19 GMT+0500 (Pakistan Standard Time)
+3214f832-2474-4d90-9002-cd477d2ac47c,under_review,Jonathon Brooks,Strata Clean Energy,RingCentral_AppointmentGen,35,27,Fri Feb 13 2026 16:39:38 GMT+0500 (Pakistan Standard Time)
+c2111c61-ec43-44ed-88b9-d688b93830ed,rejected,Joanne Morris,Al Tamimi & Company,Harver Appoitnment Gen,32,27,Fri Feb 13 2026 14:43:17 GMT+0500 (Pakistan Standard Time)
+d4752db3-dd8e-4779-8926-df589fef8c51,under_review,Ani Casillas,Moody's Corporation,Harver Appoitnment Gen,25,27,Fri Feb 13 2026 16:41:01 GMT+0500 (Pakistan Standard Time)
+d5cb2e69-f5eb-4e14-99ec-e30ef9223da6,rejected,Marcelo Esparza,Troy Design and Manufacturing,RingCentral_AppointmentGen,25,27,Fri Feb 13 2026 16:11:28 GMT+0500 (Pakistan Standard Time)
+0669574d-621b-4556-9b85-4eefd6d95096,under_review,Jerome Preese,thebus,Appointment Setting Request - Campaign,35,26,Fri Feb 13 2026 16:31:00 GMT+0500 (Pakistan Standard Time)
+05c8bffa-925d-42c9-89b8-211fb3ff14ee,under_review,Peter Kirby,MobiCode,UK Export Finance_Q4 2025.,35,26,Fri Feb 13 2026 16:41:03 GMT+0500 (Pakistan Standard Time)
+b28a22cc-ebce-4961-87f5-b8a9f3b17b23,under_review,Andrew Stempel,Artisan Partners,RingCentral_AppointmentGen,100,25,Fri Feb 13 2026 16:37:57 GMT+0500 (Pakistan Standard Time)
+31d258f2-a1a2-4e7f-af78-0b95e78a4fc1,under_review,Suzanne Maybury,Riverbed Technology,Appointment Setting Request - Campaign,100,25,Fri Feb 13 2026 16:29:26 GMT+0500 (Pakistan Standard Time)
+682e3dad-f270-44f0-8037-9c479b7cb169,rejected,William Bancroft,,UK Export Finance_Q4 2025.,100,25,Fri Feb 13 2026 16:37:06 GMT+0500 (Pakistan Standard Time)
+0f6b65bf-517d-4faf-92e3-6e8bc9e7dd40,rejected,Ashley Ajgaybee,,UK Export Finance_Q4 2025.,95,25,Fri Feb 13 2026 16:37:00 GMT+0500 (Pakistan Standard Time)
+c1277d60-adb7-43db-a25e-17a0ec4a8c3f,under_review,Jacob Cunningham,C&I Engineering,RingCentral_AppointmentGen,95,25,Fri Feb 13 2026 16:37:41 GMT+0500 (Pakistan Standard Time)
+5657dfe9-10e6-4a31-9f6c-9c00910dbfa1,under_review,Kimberly Steele,David C Cook,RingCentral_AppointmentGen,40,25,Tue Feb 10 2026 17:40:23 GMT+0500 (Pakistan Standard Time)
+34944aec-94d4-4038-861e-cd834c393e0c,under_review,Alan Hobgood,NCM Associates,RingCentral_AppointmentGen,35,25,Fri Feb 13 2026 16:39:06 GMT+0500 (Pakistan Standard Time)
+87bdd6e9-e2ca-43ac-9a78-d364690ea05e,under_review,Sean Henderson,Public Health Management Corporation,RingCentral_AppointmentGen,35,25,Fri Feb 13 2026 16:35:58 GMT+0500 (Pakistan Standard Time)
+3339d7fe-426c-4ae1-adae-53efa4baac7a,rejected,Daniel Bradley,Bcc Stone Limited,UK Export Finance_Q4 2025.,30,25,Fri Feb 13 2026 04:21:49 GMT+0500 (Pakistan Standard Time)
+3420037e-1bd1-40e2-9e15-936bd0268355,rejected,Alex Loizou,,UK Export Finance_Q4 2025.,20,25,Fri Feb 13 2026 15:56:59 GMT+0500 (Pakistan Standard Time)
+affb0563-e4ef-4bae-9fc3-9b5d8738c8a4,rejected,Russell Lyne,UK Solar Generation,UK Export Finance_Q4 2025.,10,25,Fri Feb 13 2026 04:27:17 GMT+0500 (Pakistan Standard Time)
+deaecfe7-5566-4a57-b791-7656aafd69e8,under_review,Russell Newberg,Irvine Unified School District,RingCentral_AppointmentGen,10,25,Fri Feb 13 2026 16:38:17 GMT+0500 (Pakistan Standard Time)
+cd17a85d-6d05-41db-9761-714ddafb7788,rejected,Carwyn Ellis,Motorsport Tools UK Ltd.,UK Export Finance_Q4 2025.,0,25,Fri Feb 13 2026 04:22:25 GMT+0500 (Pakistan Standard Time)
+2e27adc3-9512-47ff-b86e-baf8e7f8a297,under_review,Mei Low,Oracle,Appointment Setting Request - Campaign,0,25,Fri Feb 13 2026 16:29:35 GMT+0500 (Pakistan Standard Time)
+576f1156-aa52-4668-8c82-92dd02f041f9,rejected,Ricky Rogers,Distributed Energy Connections,UK Export Finance_Q4 2025.,0,25,Wed Feb 11 2026 10:50:15 GMT+0500 (Pakistan Standard Time)
+41589fb6-8d21-4f02-abb7-8dadaae70af0,rejected,Rob Norman,Beans and Machines Limited,UK Export Finance_Q4 2025.,0,25,Wed Feb 11 2026 12:33:26 GMT+0500 (Pakistan Standard Time)
+55fd5593-70e7-4e35-bf8d-fff6ff4161ba,rejected,Tracey Burton,Re-Wrap,UK Export Finance_Q4 2025.,45,24,Fri Feb 13 2026 04:26:25 GMT+0500 (Pakistan Standard Time)
+bf82915a-5c52-42f1-a03e-b815a1881f1d,under_review,Topper Power,Open-E Data Storage Software,Appointment Setting Request - Campaign,35,24,Fri Feb 13 2026 16:28:33 GMT+0500 (Pakistan Standard Time)
+f3606a75-56a7-4b7b-91a9-e26a2afa9d13,under_review,Andy Green,Müller UK & Ireland,RingCentral_AppointmentGen,28,24,Fri Feb 13 2026 16:41:29 GMT+0500 (Pakistan Standard Time)
+2d25e112-5ea1-4313-a19b-5f5bacd26014,rejected,Amanda Lawrence,Cowal Mobility Aids Ltd.,UK Export Finance_Q4 2025.,35,23,Fri Feb 13 2026 16:27:34 GMT+0500 (Pakistan Standard Time)
+67445941-5ee6-4577-90f0-641fe012f0ef,under_review,Lizzie Babarczy,budgetly.com.au,Appointment Setting Request - Campaign,35,23,Fri Feb 13 2026 16:29:23 GMT+0500 (Pakistan Standard Time)
+4ad8488c-db52-42a4-9f1d-f2d591a70f28,under_review,Connie Moniz,Houston Healthcare,RingCentral_AppointmentGen,25,23,Fri Feb 13 2026 16:38:29 GMT+0500 (Pakistan Standard Time)
+1c46341c-7323-451d-9a1f-5900e647cde2,under_review,Dale Carls,Joliet Public Schools District 86,RingCentral_AppointmentGen,25,23,Fri Feb 13 2026 16:38:14 GMT+0500 (Pakistan Standard Time)
+2d1293ac-a0a4-47e9-9098-b5e36061976d,under_review,James Harvey-Fiander,youngacademics.com.au,Appointment Setting Request - Campaign,25,23,Fri Feb 13 2026 16:31:09 GMT+0500 (Pakistan Standard Time)
+1d6a772a-7a5d-4d50-8cb9-a679b6bcf293,rejected,Sherian Fernandes,Rakbank,Harver Appoitnment Gen,15,23,Fri Feb 13 2026 16:20:50 GMT+0500 (Pakistan Standard Time)
+f390cb73-6df7-4ab5-9d8b-b18b4ae525a6,under_review,Diana Minglis,Viasat Inc,Appointment Setting Request - Campaign,35,22,Fri Feb 13 2026 16:30:14 GMT+0500 (Pakistan Standard Time)
+6df37436-76da-4016-a3f5-7d864f9219de,rejected,James Spencer,HolidayHost,UK Export Finance_Q4 2025.,35,22,Fri Feb 13 2026 04:29:00 GMT+0500 (Pakistan Standard Time)
+c36ac239-3b0e-42cf-b2f1-4c62ef9da81a,rejected,Jamie Revell,Revells Travel Limited,UK Export Finance_Q4 2025.,35,22,Fri Feb 13 2026 16:27:43 GMT+0500 (Pakistan Standard Time)
+bca58b90-c814-4397-afc4-0bb4476937fc,rejected,Ken Clayton,ByteBack Creative,UK Export Finance_Q4 2025.,35,22,Fri Feb 13 2026 16:28:47 GMT+0500 (Pakistan Standard Time)
+9b56d6c7-832f-45da-ab28-672ed144d62e,under_review,Kim Chang,riseandshine.edu.au,Appointment Setting Request - Campaign,35,22,Fri Feb 13 2026 16:29:48 GMT+0500 (Pakistan Standard Time)
+46645b78-bd37-4d64-89b9-e183ee7ee6ba,rejected,David Walton,Welding Mobility Limited,UK Export Finance_Q4 2025.,15,22,Fri Feb 13 2026 04:19:48 GMT+0500 (Pakistan Standard Time)
+1b3f931a-89d8-430d-945c-ddea7fd689b5,under_review,Sebastian Geldner,Visa,Appointment Setting Request - Campaign,35,21,Fri Feb 13 2026 16:30:39 GMT+0500 (Pakistan Standard Time)
+7ed0ca3d-9846-40e0-b3f4-1eeb1ca9f2fc,under_review,Stephanie McCulla,Organic Valley,RingCentral_AppointmentGen,25,21,Fri Feb 13 2026 16:37:47 GMT+0500 (Pakistan Standard Time)
+28b25435-0405-467e-8ccc-a2dd0467de11,under_review,Amit Mathad,Qlik,Appointment Setting Request - Campaign,15,21,Fri Feb 13 2026 16:32:25 GMT+0500 (Pakistan Standard Time)
+81daab7e-5872-42e5-a5c0-c40cd1b9bc59,under_review,Andrea Story,rmconsult,Appointment Setting Request - Campaign,10,21,Fri Feb 13 2026 16:30:00 GMT+0500 (Pakistan Standard Time)
+683b1dc1-b780-4fa2-ac9d-7f98fd5ead42,under_review,Chris Brodka,Aphena Pharma Solutions Inc.,RingCentral_AppointmentGen,10,21,Fri Feb 13 2026 16:35:58 GMT+0500 (Pakistan Standard Time)
+dcaaa708-113b-4b6d-a150-c821d1bc9ec4,under_review,Rohit Khullar,Canada Health Infoway,RingCentral_AppointmentGen,35,20,Fri Feb 13 2026 16:35:29 GMT+0500 (Pakistan Standard Time)
+8b25fc9d-7e15-4c81-9743-c7223de43ae6,rejected,Jarele Brickley,Garratt-Callahan Company,RingCentral_AppointmentGen,25,20,Fri Feb 13 2026 16:03:43 GMT+0500 (Pakistan Standard Time)
+37d98061-e613-4655-a65b-9762e37a0622,under_review,Somphone Sayalit,KP,RingCentral_AppointmentGen,25,20,Fri Feb 13 2026 16:39:43 GMT+0500 (Pakistan Standard Time)
+61d788e6-a4b5-47dc-933a-451e6c937836,under_review,Brian Eastwood,Almac Group,Appointment Setting Request - Campaign,15,20,Fri Feb 13 2026 16:28:51 GMT+0500 (Pakistan Standard Time)
+c38eba64-d56b-454d-9530-0007423296f1,under_review,Raimund Martin,Siemens Healthineers,Appointment Setting Request - Campaign,15,20,Fri Feb 13 2026 16:28:35 GMT+0500 (Pakistan Standard Time)
+7252458a-514e-44d7-bdd7-b8143defdb87,rejected,Robbie Gillogley,Green Sky Energy Limited,UK Export Finance_Q4 2025.,15,20,Fri Feb 13 2026 04:24:13 GMT+0500 (Pakistan Standard Time)
+55254fab-a131-42ab-be20-e352b4ba2ec0,rejected,Shenouda Ragheb,Wiss,RingCentral_AppointmentGen,15,20,Fri Feb 13 2026 16:02:35 GMT+0500 (Pakistan Standard Time)
+c7b1d910-e5cb-48d6-80a9-26ac42201689,rejected,Kyle McTiernan,The Cooperative Bank of Cape Cod,RingCentral_AppointmentGen,10,20,Fri Feb 13 2026 16:02:51 GMT+0500 (Pakistan Standard Time)
+43d3ea9d-3df4-4a54-95c0-884632413f98,rejected,Trav Oien,Nortech Systems Inc.,RingCentral_AppointmentGen,10,20,Fri Feb 13 2026 16:04:18 GMT+0500 (Pakistan Standard Time)
+bfd4bebf-6ecb-4246-acb6-ddc49ae46013,under_review,Bemnet Mehret,PMA,RingCentral_AppointmentGen,35,19,Fri Feb 13 2026 16:40:05 GMT+0500 (Pakistan Standard Time)
+e9929f95-4fcd-45c1-a066-1e0a1a017512,under_review,Nick Redmond,Glock Inc.,RingCentral_AppointmentGen,25,19,Fri Feb 13 2026 16:39:18 GMT+0500 (Pakistan Standard Time)
+e468aff3-e90f-4a57-816d-9744a38a6836,rejected,Mauricio Rosas,Source Energy Services,RingCentral_AppointmentGen,20,19,Mon Feb 09 2026 20:53:29 GMT+0500 (Pakistan Standard Time)
+986715f0-5553-4f9c-9b81-2e3ec5aabba6,rejected,Leng Vue,Organic Valley,RingCentral_AppointmentGen,10,19,Thu Feb 12 2026 18:43:21 GMT+0500 (Pakistan Standard Time)
+640032ab-fade-4c95-bfc1-2004783ee3fe,under_review,David Adewumi,Intuitive Machines,RingCentral_AppointmentGen,32,18,Fri Feb 13 2026 16:34:55 GMT+0500 (Pakistan Standard Time)
+3d5a9b09-e226-40e0-8a89-e9925d89d16e,rejected,Vijayalakshmi Subramanian,National Bank of Fujairah,RingCentral_AppointmentGen,15,18,Fri Feb 13 2026 11:17:08 GMT+0500 (Pakistan Standard Time)
+3e84ecb7-d0d8-4f5f-bc54-c849f48881e4,rejected,Ian Riddell,Achievetec Solutions Ltd.,UK Export Finance_Q4 2025.,15,17,Fri Feb 13 2026 04:30:40 GMT+0500 (Pakistan Standard Time)
+5031611e-828a-4d05-bbd1-69610ccfd8e3,rejected,Keith Haviland,Haviland Digital,UK Export Finance_Q4 2025.,15,17,Fri Feb 13 2026 16:13:04 GMT+0500 (Pakistan Standard Time)
+19e571e3-2627-4987-8324-2b5f8899af49,under_review,Olivia Davis,Stephenson Harwood Llp.,RingCentral_AppointmentGen,15,17,Fri Feb 13 2026 16:40:26 GMT+0500 (Pakistan Standard Time)
+bdf74c0c-3bef-4311-a5c6-d786fbd17238,under_review,Sue Baker,Intertek,Appointment Setting Request - Campaign,15,17,Fri Feb 13 2026 16:30:03 GMT+0500 (Pakistan Standard Time)
+8aed4620-e28f-4038-a46c-5fb688c5314d,under_review,Amit Kumar,jmrinfotech,Appointment Setting Request - Campaign,35,16,Fri Feb 13 2026 16:30:41 GMT+0500 (Pakistan Standard Time)
+55a00363-426e-45a3-b320-946003cc5c3e,under_review,Waqar Ahmad,Mckenzie-Willamette Medical Center,RingCentral_AppointmentGen,25,16,Fri Feb 13 2026 16:37:24 GMT+0500 (Pakistan Standard Time)
+12fac3d0-e1da-4f40-89db-50e82b02497f,under_review,Amber Bays,Calor Gas Ltd.,RingCentral_AppointmentGen,15,16,Fri Feb 13 2026 16:40:32 GMT+0500 (Pakistan Standard Time)
+2c987bd9-765c-4001-9399-db0d53357e4b,under_review,Kevin Garcia,Atlantic Southeast Airlines,RingCentral_AppointmentGen,15,16,Fri Feb 13 2026 16:38:43 GMT+0500 (Pakistan Standard Time)
+eb65eaef-b6bb-4307-b830-d490a43ecea7,under_review,Brian Martinez,BlueHalo,RingCentral_AppointmentGen,25,15,Fri Feb 13 2026 16:38:06 GMT+0500 (Pakistan Standard Time)
+ba320e6d-f9da-4d85-b194-3a58b7bfcbc7,under_review,Tariq Ahmed,Teleperformance,RingCentral_AppointmentGen,25,15,Fri Feb 13 2026 16:34:13 GMT+0500 (Pakistan Standard Time)
+2c3443c6-4a0e-429c-be7d-42f231576d09,under_review,Adina Muguti,Stryker,Appointment Setting Request - Campaign,15,15,Fri Feb 13 2026 16:30:44 GMT+0500 (Pakistan Standard Time)
+9e364ec5-dd1f-447b-9522-473c75ea81bd,rejected,Asiya Zargar,Indus Experiences,UK Export Finance_Q4 2025.,15,15,Fri Feb 13 2026 04:23:37 GMT+0500 (Pakistan Standard Time)
+1710a505-0764-4250-8f42-e9a66bfc6136,rejected,Caroline Metcalfe,HSBC,Harver Appoitnment Gen,15,15,Fri Feb 13 2026 04:48:23 GMT+0500 (Pakistan Standard Time)
+16308f8c-a32c-41bc-be66-fa2beaeec2ce,under_review,Greer Hamilton,aphl,RingCentral_AppointmentGen,15,15,Fri Feb 13 2026 16:39:19 GMT+0500 (Pakistan Standard Time)
+a08e851b-e81d-41a3-b182-fdd945358553,rejected,Herb Andal,Napa Valley Unified School District,RingCentral_AppointmentGen,15,15,Fri Feb 13 2026 16:02:18 GMT+0500 (Pakistan Standard Time)
+2f7d3427-f3b3-483a-a7fd-f00358280867,under_review,Ragunathan A,ramco,Appointment Setting Request - Campaign,15,15,Fri Feb 13 2026 16:30:45 GMT+0500 (Pakistan Standard Time)
+e1af7272-85e2-469d-ac98-8e5379911c1c,under_review,Syed Hassan,Iffco Group,RingCentral_AppointmentGen,15,15,Fri Feb 13 2026 16:34:23 GMT+0500 (Pakistan Standard Time)
+7eca1342-3fbe-4827-9793-f919803baa2f,under_review,Traci MacKenzie,McLane Middleton,RingCentral_AppointmentGen,15,15,Fri Feb 13 2026 16:40:01 GMT+0500 (Pakistan Standard Time)
+281cdd36-1552-45c2-86d0-846d052a6a1e,rejected,John Warwick,Phoenix Mining Consultants Limited,UK Export Finance_Q4 2025.,10,15,Fri Feb 13 2026 16:39:17 GMT+0500 (Pakistan Standard Time)
+c8f26cfb-8c58-4d1f-b935-9abf40ed504a,rejected,Ryan Rupert,Cohen-Esrey,RingCentral_AppointmentGen,10,15,Fri Feb 13 2026 11:17:19 GMT+0500 (Pakistan Standard Time)
+60dc0ca6-9078-493e-a85d-a0fb77bf1898,under_review,William Todd,Titan New Lifts,UK Export Finance_Q4 2025.,15,14,Fri Feb 13 2026 16:42:08 GMT+0500 (Pakistan Standard Time)
+7bbe91d3-e243-4ecf-aee1-315a1ef10588,under_review,Sheryl Woo,petcubes,Appointment Setting Request - Campaign,30,13,Fri Feb 13 2026 16:32:02 GMT+0500 (Pakistan Standard Time)
+086f560e-f3f3-4b8c-90cd-d66e329a7247,under_review,Akhilesh Ram,Systra,RingCentral_AppointmentGen,20,13,Fri Feb 13 2026 16:36:35 GMT+0500 (Pakistan Standard Time)
+a10520fc-1999-4f07-a4c4-beae63879f8d,rejected,Abdirahman Abdi,Vi-Jon,RingCentral_AppointmentGen,15,13,Fri Feb 13 2026 16:11:39 GMT+0500 (Pakistan Standard Time)
+2192ea7b-f8fa-4d95-a676-e4984a4158b8,under_review,Alessandro Grassetti,Hays,RingCentral_AppointmentGen,15,13,Fri Feb 13 2026 16:36:34 GMT+0500 (Pakistan Standard Time)
+b2b9632f-5602-4d2f-ba82-064ffae10f95,under_review,Barnali Chatterjee,primetals,RingCentral_AppointmentGen,15,13,Fri Feb 13 2026 16:36:58 GMT+0500 (Pakistan Standard Time)
+2a2daf34-8369-4a43-91f4-741f368655d5,rejected,Cameron Ure,Terra Visus,UK Export Finance_Q4 2025.,15,13,Fri Feb 13 2026 04:20:58 GMT+0500 (Pakistan Standard Time)
+fd33780e-c40e-40bf-827b-7cbd07fd1846,under_review,David Hamilton,Safe Credit Union,RingCentral_AppointmentGen,15,13,Fri Feb 13 2026 16:37:29 GMT+0500 (Pakistan Standard Time)
+1c38b914-4dc9-4632-83c5-4e5a61e3686b,rejected,Hafiz Mughal,Signature Trading Limited,UK Export Finance_Q4 2025.,15,13,Fri Feb 13 2026 16:39:22 GMT+0500 (Pakistan Standard Time)
+80f38093-c9fa-46f2-a63b-34134b2e176f,rejected,Kiran Francis,Cloud Dolphin,UK Export Finance_Q4 2025.,15,13,Fri Feb 13 2026 04:25:22 GMT+0500 (Pakistan Standard Time)
+ea32b3f3-ed3b-49b2-802d-29f9e936d0bf,under_review,Maud Rocher,vtech,Appointment Setting Request - Campaign,15,13,Fri Feb 13 2026 16:30:39 GMT+0500 (Pakistan Standard Time)
+dd587a75-9c4b-410c-bb80-0b26d07d0a8d,rejected,Paul Thomas,Haystack Dryers,UK Export Finance_Q4 2025.,15,13,Fri Feb 13 2026 16:27:38 GMT+0500 (Pakistan Standard Time)
+c5f62da1-7a8a-4068-a73c-afd0fb156069,rejected,Rie Kubo,rozettatechnology,Appointment Setting Request - Campaign,15,13,Fri Feb 13 2026 14:40:31 GMT+0500 (Pakistan Standard Time)
+4d8e3505-9c6d-4dad-921a-8a419b1eaf7b,rejected,Tom Mc Nally,The Dandys Derrynoose,UK Export Finance_Q4 2025.,15,13,Fri Feb 13 2026 16:39:08 GMT+0500 (Pakistan Standard Time)
+476d6c2c-63dd-4a07-bbbc-5958933b9b70,under_review,Xabier Eguskizaga,Grifols,Appointment Setting Request - Campaign,15,13,Fri Feb 13 2026 16:28:55 GMT+0500 (Pakistan Standard Time)
+42ed0fa7-959d-4d99-b33f-4eb615826ec3,rejected,Tran Phan,mjcpa,RingCentral_AppointmentGen,10,13,Fri Feb 13 2026 16:02:52 GMT+0500 (Pakistan Standard Time)
+a765ccea-ba70-4c9d-ab8d-54530b303560,rejected,Sharn Prime,Prime Media Agency,UK Export Finance_Q4 2025.,0,13,Tue Feb 10 2026 14:01:55 GMT+0500 (Pakistan Standard Time)
+636b95ee-e085-47c0-a9d1-d0320e73fe97,under_review,Cory White,Virginia Garcia Memorial Health Center,RingCentral_AppointmentGen,15,12,Fri Feb 13 2026 16:34:58 GMT+0500 (Pakistan Standard Time)
+46e44ceb-0bc4-4dd3-bcff-aa7915986365,under_review,Heidi Scott,Bridgeland Copyright,UK Export Finance_Q4 2025.,15,12,Fri Feb 13 2026 16:41:28 GMT+0500 (Pakistan Standard Time)
+b3c81185-d6fa-40ac-b8ae-c96ce6885838,under_review,Philip Kilian,Meter Group,RingCentral_AppointmentGen,15,12,Fri Feb 13 2026 16:34:44 GMT+0500 (Pakistan Standard Time)
+9e288d52-2998-4740-997c-d36e55109a23,under_review,Renata Seixas,Aggreko,Harver Appoitnment Gen,15,12,Fri Feb 13 2026 16:32:39 GMT+0500 (Pakistan Standard Time)
+fe95658f-bc73-4fce-b76e-5b6f6af28849,rejected,Stephanie Clinkard,Globec Limited,UK Export Finance_Q4 2025.,15,12,Fri Feb 13 2026 16:21:32 GMT+0500 (Pakistan Standard Time)
+b27897c3-1794-49e8-970e-6b887f7c8c1a,under_review,Michele Dunn,mlcsyd.nsw.edu.au,Appointment Setting Request - Campaign,10,12,Fri Feb 13 2026 16:30:23 GMT+0500 (Pakistan Standard Time)
+4b376de3-f38a-4880-8aac-645df60dee94,under_review,Numaan Riaz,BuyerForesight,Appointment Setting Request - Campaign,10,12,Fri Feb 13 2026 16:30:44 GMT+0500 (Pakistan Standard Time)
+424b1b0b-3362-405f-8d22-3b8b3cd356ca,rejected,Allan Pearson,HSBC,Harver Appoitnment Gen,20,11,Tue Feb 10 2026 14:15:08 GMT+0500 (Pakistan Standard Time)
+218d6b7c-65ef-480e-9e2b-861ebb267b08,under_review,Faris Khayyat,Almarai,RingCentral_AppointmentGen,15,11,Fri Feb 13 2026 16:36:56 GMT+0500 (Pakistan Standard Time)
+e9fd6bf0-f59a-4cd7-bf06-9e50015aef3b,under_review,Allen Hitchen,NHS,Harver Appoitnment Gen,10,11,Fri Feb 13 2026 16:33:14 GMT+0500 (Pakistan Standard Time)
+bbffc9c2-84fd-4118-a82c-f1bff53f09a1,under_review,Ryan Thompson,restoke,Appointment Setting Request - Campaign,10,11,Fri Feb 13 2026 16:31:33 GMT+0500 (Pakistan Standard Time)
+77bd9180-9ede-4663-9f5c-5ab5bcd9e2d7,under_review,Erin Koues,Lapeer Community Schools,RingCentral_AppointmentGen,15,10,Fri Feb 13 2026 16:40:11 GMT+0500 (Pakistan Standard Time)
+a418ae60-5f11-4ced-af2f-48ea46c18fc4,under_review,Takayuki Murakami,Astellas Pharma,Appointment Setting Request - Campaign,10,10,Fri Feb 13 2026 16:31:36 GMT+0500 (Pakistan Standard Time)
+c97c0f98-3b8c-43fb-980d-eb776d41ca90,under_review,Andrew Duca,Bethpage Federal Credit Union,RingCentral_AppointmentGen,15,9,Fri Feb 13 2026 16:38:45 GMT+0500 (Pakistan Standard Time)
+384ba962-58f1-4234-babd-968bcd62c9a1,under_review,Daniel Cranmer,Remote Pharma Solutions Ltd.,UK Export Finance_Q4 2025.,15,9,Fri Feb 13 2026 16:41:28 GMT+0500 (Pakistan Standard Time)
+fe0f2055-1ba7-49cf-a2b1-e19b200b6d1f,rejected,Greg Collins,Redefine IT Limited,UK Export Finance_Q4 2025.,15,9,Fri Feb 13 2026 16:41:53 GMT+0500 (Pakistan Standard Time)
+44115fab-c843-40f2-acca-45bb20025039,rejected,Jacques Fegghali,AGL,Harver Appoitnment Gen,15,9,Fri Feb 13 2026 14:42:54 GMT+0500 (Pakistan Standard Time)
+f0340fb7-2e19-4575-9ad6-ea81a3de2032,under_review,Jason Vaught,Yadkin County Schools,RingCentral_AppointmentGen,15,9,Fri Feb 13 2026 16:39:30 GMT+0500 (Pakistan Standard Time)
+d83da32f-e683-4618-8554-868c1050a4ca,under_review,Scott Shultis,JND Legal Administration,RingCentral_AppointmentGen,10,9,Fri Feb 13 2026 16:37:28 GMT+0500 (Pakistan Standard Time)
+74bc73db-207d-40c2-8349-463681c6e5fe,under_review,Marie-Eve Farah,White & Case Llp.,Appointment Setting Request - Campaign,20,8,Fri Feb 13 2026 10:59:27 GMT+0500 (Pakistan Standard Time)
+e1b803d2-8c7b-4a27-be49-903da05f786b,under_review,Balasujai Raja,etisalat ae,Harver Appoitnment Gen,10,8,Fri Feb 13 2026 16:32:46 GMT+0500 (Pakistan Standard Time)
+b1ec44fb-90e8-4f32-b05d-8c64381ac122,under_review,Dario Venturini,agoda,Appointment Setting Request - Campaign,10,8,Fri Feb 13 2026 16:31:52 GMT+0500 (Pakistan Standard Time)
+913a9772-3c11-44f5-9c10-f3010ef0f4b8,under_review,Kon Maragelis,Blancco Technology Group,Appointment Setting Request - Campaign,10,8,Fri Feb 13 2026 16:30:37 GMT+0500 (Pakistan Standard Time)
+3c2e0cbc-92e8-43c5-97b0-8f518264131c,rejected,Eddie Grant,The Aerogen Company,UK Export Finance_Q4 2025.,5,8,Fri Feb 13 2026 16:38:56 GMT+0500 (Pakistan Standard Time)
+b5a0257a-5b8a-448e-9767-25e6b279f59c,rejected,Rohan Lean,wdtl,Appointment Setting Request - Campaign,15,7,Fri Feb 13 2026 16:12:11 GMT+0500 (Pakistan Standard Time)
+926e4311-3098-4f0c-b423-a2154b91f587,under_review,Lee Davis,cybercx.com.au,Appointment Setting Request - Campaign,10,7,Fri Feb 13 2026 16:31:12 GMT+0500 (Pakistan Standard Time)
+150f1655-d0e6-4ba9-81ef-304135f3a7d8,rejected,Neil Middleton,BatAbility Courses & Tuition,UK Export Finance_Q4 2025.,10,7,Fri Feb 13 2026 04:31:08 GMT+0500 (Pakistan Standard Time)
+a09e76c1-977d-4caa-9a48-24c1019c522f,under_review,Remco Reints,Canon Europe,RingCentral_AppointmentGen,10,7,Fri Feb 13 2026 16:36:27 GMT+0500 (Pakistan Standard Time)
+ca2d2243-5764-400b-94bc-aa0ffbeab815,under_review,Stef Lim,S&P Global,Appointment Setting Request - Campaign,10,7,Fri Feb 13 2026 16:42:02 GMT+0500 (Pakistan Standard Time)
+d3c90cb1-45a2-4366-8015-2d8e9c0d6e28,rejected,Adam Barr,Off the Pole,UK Export Finance_Q4 2025.,5,7,Fri Feb 13 2026 04:28:21 GMT+0500 (Pakistan Standard Time)
+bf28ff67-00f7-455e-9a1e-e9b0398e2279,under_review,Siddhesh Sawant,ufaber,Appointment Setting Request - Campaign,5,7,Fri Feb 13 2026 16:31:03 GMT+0500 (Pakistan Standard Time)
+454887ab-83fb-4ef0-879a-6aa95466dc16,rejected,Chris Allen,Bridwey Precision Manufacturing,UK Export Finance_Q4 2025.,15,6,Tue Feb 10 2026 15:59:39 GMT+0500 (Pakistan Standard Time)
+d5ca1062-9452-45a1-9ed0-3cac020f9208,rejected,Parker Robinson,Electrical Consultants Inc.,RingCentral_AppointmentGen,15,6,Thu Feb 12 2026 22:30:14 GMT+0500 (Pakistan Standard Time)
+35cb4d17-d142-42b3-805f-86286f0dc1ff,under_review,Safa AlMadhoob,alfuttaim,RingCentral_AppointmentGen,5,6,Fri Feb 13 2026 16:36:55 GMT+0500 (Pakistan Standard Time)
+29e0f5d7-92a1-4e59-b8c4-841684f9a486,rejected,Colin Yuhas,Midwest Surveys,RingCentral_AppointmentGen,15,5,Fri Feb 13 2026 16:12:18 GMT+0500 (Pakistan Standard Time)
+97217ba6-2cd0-419a-9d4a-064f0af9d96d,under_review,Hansel Doan,Westwood Professional Services,RingCentral_AppointmentGen,10,5,Fri Feb 13 2026 16:38:04 GMT+0500 (Pakistan Standard Time)
+a84e426d-8655-47f4-ba26-c6b34f580436,under_review,Neeru Arora,Mazda North American Operations,RingCentral_AppointmentGen,10,5,Fri Feb 13 2026 16:37:20 GMT+0500 (Pakistan Standard Time)
+58a13600-de14-4a18-bc19-fdf99c949281,under_review,Ralph Pascuzzo,Locust Valley Central School District,RingCentral_AppointmentGen,10,5,Fri Feb 13 2026 16:39:06 GMT+0500 (Pakistan Standard Time)
+83bd94aa-1cc2-4eca-90d4-255e3264a0ae,under_review,Antony Lyons,Rio School District,RingCentral_AppointmentGen,5,5,Fri Feb 13 2026 16:35:30 GMT+0500 (Pakistan Standard Time)
+3c4a18ca-6903-4bbf-93b9-8895e546ec70,rejected,Edward Carter,Take2 Consulting LLC,RingCentral_AppointmentGen,5,5,Fri Feb 13 2026 04:49:00 GMT+0500 (Pakistan Standard Time)
+4dca878f-4605-477b-9564-5b89c31ea5e6,rejected,Emma Broadhead,Digitally Charged Ltd.,UK Export Finance_Q4 2025.,5,5,Fri Feb 13 2026 04:29:30 GMT+0500 (Pakistan Standard Time)
+19b856b7-bbbe-49de-a052-24cf88336a5d,under_review,Helmar Bruwer,Corelle Brands,RingCentral_AppointmentGen,5,3,Fri Feb 13 2026 16:39:24 GMT+0500 (Pakistan Standard Time)
+5e64e188-4290-436a-ad42-4b4db6deadf9,under_review,Manny Castaneda,Twin Falls School District 411,RingCentral_AppointmentGen,5,3,Fri Feb 13 2026 16:35:08 GMT+0500 (Pakistan Standard Time)
+1d553ce6-1e83-432e-9611-736f22365646,rejected,Charlie Ralph,Pitt County School District,RingCentral_AppointmentGen,100,0,Fri Feb 13 2026 16:37:17 GMT+0500 (Pakistan Standard Time)
+12e1f34f-fb1c-429e-817b-2e502f0fc16a,rejected,Derek Seedenburg,Tanner Clinic,RingCentral_AppointmentGen,100,0,Fri Feb 13 2026 16:02:15 GMT+0500 (Pakistan Standard Time)
+a9f2276d-a913-4b31-b4c4-a508a846b2fd,rejected,Jacob Montanez,Archdiocese of San Antonio,RingCentral_AppointmentGen,100,0,Fri Feb 13 2026 16:11:46 GMT+0500 (Pakistan Standard Time)
+edd15b40-00b1-4bca-a53b-c98cb3a6cf79,under_review,Jake Bonenfant,Noble and Greenough School,RingCentral_AppointmentGen,100,0,Fri Feb 13 2026 16:40:29 GMT+0500 (Pakistan Standard Time)
+61ef9b96-e249-4655-942a-2c3fa1a441c0,under_review,Paul Sims,The Joint Commission,RingCentral_AppointmentGen,100,0,Fri Feb 13 2026 04:05:49 GMT+0500 (Pakistan Standard Time)
+bfd72392-c58e-400a-a245-e8930b25a5b3,rejected,Nad Ghani,Morrisons,Harver Appoitnment Gen,10,0,Tue Feb 10 2026 14:02:26 GMT+0500 (Pakistan Standard Time)
+9e138820-7144-4d55-8639-489c6911a020,rejected,Amanda Lawrence,Cowal Mobility Aids Ltd.,UK Export Finance_Q4 2025.,0,0,Mon Feb 09 2026 12:56:12 GMT+0500 (Pakistan Standard Time)
+3ce92bca-cf25-4ea5-9dd0-e763d04c4c56,rejected,Andrew Nel,,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 14:58:01 GMT+0500 (Pakistan Standard Time)
+62965b58-c560-415e-a21d-85a30d2c6edf,rejected,Carl Goff,,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 14:57:33 GMT+0500 (Pakistan Standard Time)
+9d96eb9c-0268-43e4-aab6-b29df24fc1dd,rejected,Chris Roche,GameDev Market,UK Export Finance_Q4 2025.,0,0,Wed Feb 11 2026 10:50:00 GMT+0500 (Pakistan Standard Time)
+85efb2c7-8238-45f7-a76c-5b293b5c5e40,rejected,David Heavens,Design Supply Ltd.,UK Export Finance_Q4 2025.,0,0,Wed Feb 11 2026 11:56:45 GMT+0500 (Pakistan Standard Time)
+c78b911e-3d3c-4435-a516-7893ae95616c,rejected,Dom Short,Setsquare Creative Limited,UK Export Finance_Q4 2025.,0,0,Wed Feb 11 2026 10:50:00 GMT+0500 (Pakistan Standard Time)
+3ac6e0a4-f12e-4659-a16b-34ac529d96f3,rejected,Genevieve Gordon-Thomson,Tactic Connect Ltd.,UK Export Finance_Q4 2025.,0,0,Mon Feb 09 2026 13:02:03 GMT+0500 (Pakistan Standard Time)
+f741b624-6681-4ee4-a07f-4ea23f864eea,rejected,Guy Butters,Rise & Vine,UK Export Finance_Q4 2025.,0,0,Mon Feb 09 2026 12:52:38 GMT+0500 (Pakistan Standard Time)
+3137ce4f-c15c-41d4-b481-a19b7e97ff79,rejected,Harvey Cracknell,,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 14:58:00 GMT+0500 (Pakistan Standard Time)
+b599b3ef-6020-4d01-8e4b-3ee19d237bb9,new,Ian Slater,,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 14:53:47 GMT+0500 (Pakistan Standard Time)
+8b3b16e7-cfe4-4e3e-a327-47a27f82f1e5,rejected,Jackie Topham,The Cotton Textile Company Ltd.,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 04:27:42 GMT+0500 (Pakistan Standard Time)
+1304852e-35a4-4623-a4fd-7af711ea640e,rejected,Jackie Topham,The Cotton Textile Company Ltd.,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 04:27:42 GMT+0500 (Pakistan Standard Time)
+5f8375c0-7e0e-4990-a7ff-84f6d1fea399,rejected,James Allatt,,Proton UK,0,0,Fri Feb 13 2026 15:46:28 GMT+0500 (Pakistan Standard Time)
+9425caef-9e91-417b-9b8e-0420f3e3417f,rejected,Katie Anderson,Four Stroke Media Ltd.,UK Export Finance_Q4 2025.,0,0,Mon Feb 09 2026 10:15:03 GMT+0500 (Pakistan Standard Time)
+94c551c8-0e3d-4b01-8d7c-fb6380170bb0,under_review,Kenny T,pinnacletravelgroup.com.au,Appointment Setting Request - Campaign,0,0,Fri Feb 13 2026 16:30:19 GMT+0500 (Pakistan Standard Time)
+bcd01718-3181-40d3-8888-aa54620de9e0,rejected,Mario Martino,Amphastar Pharmaceuticals Inc.,RingCentral_AppointmentGen,0,0,Tue Feb 10 2026 21:17:15 GMT+0500 (Pakistan Standard Time)
+81f8055b-347f-47b3-8e23-bf93fd4ab8e6,rejected,Mike Adams,Santorini Scientific,UK Export Finance_Q4 2025.,0,0,Mon Feb 02 2026 16:17:11 GMT+0500 (Pakistan Standard Time)
+a82499f7-6658-4bdd-b266-6cfe075f8493,rejected,Nazim Osmancik,,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 15:07:04 GMT+0500 (Pakistan Standard Time)
+eb71e114-84db-491d-ae72-6a120211766c,rejected,Neil Patterson,Property118.com,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 04:20:22 GMT+0500 (Pakistan Standard Time)
+ee11de5f-ef22-4e29-a00f-126b6e351011,rejected,Ray Sarka,Alera Group Inc.,RingCentral_AppointmentGen,0,0,Fri Feb 13 2026 16:11:44 GMT+0500 (Pakistan Standard Time)
+5658e98c-a4d1-43b8-9e5c-7f2af4d17eb1,under_review,Richard Hodgson,Flora Food Group,RingCentral_AppointmentGen,0,0,Fri Feb 13 2026 16:40:48 GMT+0500 (Pakistan Standard Time)
+db1e0471-6a0b-493a-932d-c1a0738e5e88,rejected,Robbie Vann-Adibé,Wine Owners,UK Export Finance_Q4 2025.,0,0,Wed Feb 11 2026 10:48:22 GMT+0500 (Pakistan Standard Time)
+b2edf32f-2bd9-4c1b-af09-fd164375089b,rejected,Roma Estoril,pa.com.au,Appointment Setting Request - Campaign,0,0,Fri Feb 13 2026 16:12:25 GMT+0500 (Pakistan Standard Time)
+10921f15-5af9-4ed5-8c45-0abe00c2507e,rejected,Shawn Christie,Hubbard Broadcasting Inc.,RingCentral_AppointmentGen,0,0,Fri Feb 13 2026 16:37:38 GMT+0500 (Pakistan Standard Time)
+0ebffd2b-11b5-47f2-8669-448b3b92c9fb,under_review,Stephen Butters,KQED,RingCentral_AppointmentGen,0,0,Fri Feb 13 2026 16:37:51 GMT+0500 (Pakistan Standard Time)
+10d49e21-269e-4b84-bb7a-d6ce3fe01df2,rejected,Stephen Hales,,UK Export Finance_Q4 2025.,0,0,Fri Feb 13 2026 14:57:58 GMT+0500 (Pakistan Standard Time)
+e35df1d4-e562-4660-9d31-3a9b0426da42,rejected,Steven Bloor,Domestic Heroes Ltd.,UK Export Finance_Q4 2025.,0,0,Wed Feb 11 2026 12:14:54 GMT+0500 (Pakistan Standard Time)
+9795c656-3b37-4399-917d-2f2ca78a16f9,rejected,Tanya Johnson,Morrisons,Harver Appoitnment Gen,0,0,Wed Feb 11 2026 10:40:17 GMT+0500 (Pakistan Standard Time)
+8b26ad5d-49a5-4859-910e-e0b3d2fdf30e,rejected,William Bancroft,Bidmark,UK Export Finance_Q4 2025.,0,0,Sat Feb 07 2026 11:21:11 GMT+0500 (Pakistan Standard Time)
+52a01c31-e42e-4951-a25a-44054b099eeb,rejected,Aaron Bachelor,Advisors Excel,Unknown,,0,
+c6632683-b961-4a74-99eb-10624237839f,approved,Adam Halsey,,Proton UK,,0,
+ai-96570ee7-95a7-4554-8218-fbd9e7984a69,rejected,Adam Roose,,Unknown,,0,
+ai-3f6c8f39-60b2-45f1-b1f5-8d4ae2e46df0,rejected,Adam Wright,,Unknown,,0,
+13ca8c99-f90a-4894-998a-e7a507cf971c,rejected,Albert Little,Greenleaf Trust,Unknown,,0,
+1d486a40-0a90-4c42-96fb-bc294a79ee9a,rejected,Alejandra Arteaga,WebCreek,Unknown,,0,
+ai-53db66fb-f116-49a0-bcf8-37471ebbe4ad,rejected,Alex Magid,,Unknown,,0,
+bc044ab7-95f5-4bd5-9e84-4ab3c670fda3,approved,Alex Robertson,,Proton UK,,0,
+e92f5bd0-e1ab-4ee9-9a7d-e7453d24db65,approved,Alex Templeman,,Proton UK,,0,
+ai-424af607-02c5-4fae-afc8-e47c209f37a8,rejected,Allan Simmons,,Unknown,,0,
+31a3d9f0-6055-4e31-b5c8-926916c568d1,rejected,Alyssa Paldo,Finn Partners,Unknown,,0,
+b9e8a641-9976-4477-aafd-ab4965a2410c,rejected,Amanda Baker,BlackLine,Unknown,,0,
+25be279a-b923-46fe-8fc5-de0dbc5eea4c,rejected,Amanda Dean,Sierra Pacific Mortgage Company Inc.,Unknown,,0,
+5a5b62c8-7d61-48e1-9961-72dc21d62376,rejected,Amelia Erickson,WorkFusion,Unknown,,0,
+ai-8ec762e6-5a4a-45dc-b2e4-4a3437d043b1,rejected,Andrew Brizek,,Unknown,,0,
+e2421637-69bf-4e86-b2ee-81291d373714,rejected,Andrew Denholm,,UK Export Finance_Q4 2025.,,0,
+6ba5c4e1-b783-410e-b8b7-c545656b17f6,rejected,Andrew Savitz,Azul,Unknown,,0,
+e489a8b6-00c8-4070-b51d-089e281db97b,rejected,Anna Shusterman,Grid Dynamics,Unknown,,0,
+0fd7b311-2467-46e3-af01-f580f7d59e27,approved,Anthony Eaton,,Proton UK,,0,
+ce02ebe1-64c1-40e2-b293-dd0acaa91efd,rejected,Anushika Rupasinghe,,Proton UK,,0,
+bcc5887c-8145-4c0a-b69d-02bdcf7adbfe,rejected,Arun Bagga,,UK Export Finance_Q4 2025.,,0,
+e137db3b-4cdf-4533-bd90-77bccd1e4f26,rejected,Ashleigh Von Einem,Carter-Haston,Unknown,,0,
+b89a63b5-567b-40a5-8884-20ea998eba72,rejected,Ashley Makuh,Incisive Health,Unknown,,0,
+ffd0e188-0845-4d7b-882e-cca53ebb062e,rejected,Ben Da Costa,,UK Export Finance_Q4 2025.,,0,
+ai-106f428f-3c8c-4e5d-b399-a7073a8bdbe8,rejected,Ben Oskarsson,,Unknown,,0,
+ai-9915cc68-8a0e-439b-b32b-3753e5269fac,rejected,Ben Reddy,,Unknown,,0,
+7e47503c-87b5-44dd-83a2-06794192647a,approved,Benjamin Larkin,,Proton UK,,0,
+54757ed0-3590-466d-a9a9-281169dd4662,rejected,Benjamin Smith,Celtic Bank,Unknown,,0,
+ai-af97bb06-384b-4b6f-88e0-fcb22ba9a031,rejected,Beth Fischer,,Unknown,,0,
+ai-e3f443e3-6721-4e06-8dfc-730dac92e441,rejected,Bill McDonough,,Unknown,,0,
+8ed5c585-6743-4ac3-b2cc-48639de22f90,rejected,Bob Thomas,American Litho Inc.,Unknown,,0,
+ai-65596ea0-b187-4155-824f-15f5a63433d7,rejected,Brad Serres,,Unknown,,0,
+ai-f5607e96-d5e7-4ea7-8ba8-b846cbff6245,rejected,Bradford Stroble,,Unknown,,0,
+d6c2ff29-51b6-4990-989e-0159c766f8e7,rejected,Brandy Kline,Greenway Health,Unknown,,0,
+ai-55393589-3fe6-4c84-b392-de75ab417ced,approved,Brendan Gaffney,,Unknown,,0,
+952813d1-dcd8-4f88-a52f-eeac89c0d12e,rejected,Brian Brown,Accu-Tech Corporation,Unknown,,0,
+caf24716-a679-42cd-bcd0-18036bfc323f,rejected,Brian Hadley,SentinelOne,Unknown,,0,
+a5dca60a-afd1-4310-8cb6-10503bafaf22,rejected,Brian Irving,Lyft,Unknown,,0,
+ai-99ca770d-4bee-4c90-b38a-5e9eca1c8a37,approved,Brian Rode,,Unknown,,0,
+9e4c0a88-ea23-4f3e-ac6d-e476bc2f31b1,rejected,Briana Manrique,BenchPrep,Unknown,,0,
+ai-c9924968-b2aa-44d9-b5bf-d0b790a06ed0,rejected,Brooke Hamstra,,Unknown,,0,
+ai-1aa628ff-7d03-4e42-b124-9c1a61a79394,rejected,Bryan Virnig,,Unknown,,0,
+ai-e8b05837-1917-42aa-be21-feed00713943,approved,CJ Heinbach,,Unknown,,0,
+ai-95a8778e-fa08-4988-8bf3-a34b4e0a0d70,rejected,Caleb Nitz,,Unknown,,0,
+4c8775f8-560a-4299-a4b9-513cc82a6059,approved,Carmel Mannix,,UK Export Finance_Q4 2025.,,0,
+ai-30701799-ade9-491e-a4f3-bb4bd4514319,rejected,Carrie Griffin,,Unknown,,0,
+b650c6eb-167e-4320-a9c9-6ea4e318b84b,approved,Carter Pilcher,ShortsTV,Unknown,,0,
+5b17a085-5d9e-4fe0-897b-a87c23dac803,rejected,Catherine Paice,,UK Export Finance_Q4 2025.,,0,
+b45ac772-3d81-49d2-a59d-29b29f2ed319,rejected,Cathy Calver,Global Relay,Unknown,,0,
+ai-d1942787-769f-4983-9600-4d229c2cdd44,rejected,Chad Kooiman,,Unknown,,0,
+ai-7f5acba6-1a87-4e54-8e92-429e932658ef,rejected,Chris Hoffman,,Unknown,,0,
+fa3c8b82-ea77-4222-947c-b89a086526ee,rejected,Christopher Hitchen,,UK Export Finance_Q4 2025.,,0,
+ai-3149f195-7c0a-40e1-b385-20002561614c,rejected,Chuck Noll,,Unknown,,0,
+ai-574d9643-bea2-4d14-a467-f0d810e7d3e1,rejected,Cynthia Tetkoskie-Artz,,Unknown,,0,
+268653f2-a744-4cdc-b8e5-11276e851346,published,Dan Pearce,,UK Export Finance_Q4 2025.,,0,
+fa0bbbec-d47a-4b2e-9fd8-8c55e584fb65,rejected,Daniel Mawji,,UK Export Finance_Q4 2025.,,0,
+ai-fb8095ae-9f35-4e20-988c-490a6e0ead9b,rejected,Daniel Tani,,Unknown,,0,
+ai-5c2acd99-8b8e-44a1-9f97-5325f3fe7646,rejected,Danielle Diamond,,Unknown,,0,
+9b58e707-79ad-4f02-b475-25283815ff49,approved,Darren Fletcher,,Proton UK,,0,
+5f8a867f-858c-45d1-83e4-e71424961306,rejected,Darren Hartshorne,,UK Export Finance_Q4 2025.,,0,
+032cc6e7-8bf5-453f-959c-1a2318b7815e,rejected,Darren Siekman,Valley Irrigation,Unknown,,0,
+ai-375a329c-fba7-4fe5-b1a6-5e6886a96f7e,rejected,Dave Gray,,Unknown,,0,
+0f811842-ef97-4f5e-897d-f20fd0a80758,rejected,Dave Green,,UK Export Finance_Q4 2025.,,0,
+ai-b50f21df-8f6b-4d1a-ba37-098788a203b0,rejected,Dave Niles,,Unknown,,0,
+ai-b8313245-a5de-4628-a94e-e88c8d653c03,approved,Dave Tasse,Printex Transparent Packaging,Unknown,,0,
+54b87a11-c69f-4b53-803a-2e6a41f629b8,approved,David Barton,,UK Export Finance_Q4 2025.,,0,
+ai-1c295454-26e7-41bc-a7e8-66c234a261b6,rejected,David Cozens,,Unknown,,0,
+a2acbd57-d44a-4dfb-8995-25ef2e154853,rejected,David Miet,,UK Export Finance_Q4 2025.,,0,
+ai-603e52f6-a7fe-4ee7-8b88-a38956472650,rejected,David Nicomini,,Unknown,,0,
+ai-93532a77-e816-4c3d-b6b5-0c813b3dc904,rejected,David Oliver,,Unknown,,0,
+ai-c3893c0c-3858-4150-adcd-5144e112e9c0,rejected,Dawn DiLorenzo,,Unknown,,0,
+385514e3-2730-43fe-9c8b-dbd444cb55bc,rejected,Dean Gainsley,,UK Export Finance_Q4 2025.,,0,
+e49fb9a1-c465-4554-863e-516861e34902,rejected,Debbie Montague,,UK Export Finance_Q4 2025.,,0,
+ai-5615087b-d3dc-4532-a373-566dcb7ab049,rejected,Delight Oelerich,,Unknown,,0,
+4feb0e1a-9aee-4d6b-be8f-8d4e91ff6752,rejected,Don Fritz,Multi-Pack Solutions,Unknown,,0,
+ai-2a8625b4-a07c-4d08-8d8e-dc727a058054,rejected,Donna Wright,,Unknown,,0,
+ai-b1875706-7352-46e8-bd83-fb425d366c28,rejected,Doug Abbott,,Unknown,,0,
+ai-cd6d540c-89d3-4b18-91d6-13ec40f7c0d6,rejected,Doug Helm,,Unknown,,0,
+d66ebbd5-9852-4308-89e7-b02e6c9bf129,rejected,Doug Lord,,UK Export Finance_Q4 2025.,,0,
+65b4dccf-b170-490a-8607-e458de1cf980,rejected,Doug Sechrist,Zenoti,Unknown,,0,
+ai-547efda8-9086-48e3-847f-f3eb4c4e78e7,rejected,Drew Minnig,,Unknown,,0,
+99cbc720-dcf0-4495-a6d6-5350e9c03a4b,rejected,Eddie Burhouse,,UK Export Finance_Q4 2025.,,0,
+ai-7555fd1d-c20f-4dba-9c82-20848ac8d47c,rejected,Eduardo Kalil,,Unknown,,0,
+ai-a44bc2ba-c271-4791-ae6d-f0ba8be01907,approved,Elizabeth Thomae,,Unknown,,0,
+ai-c3838cad-eca9-444a-96e6-8c887e0ed8af,approved,Emily Utting,Atrium Mortgage Investment Corporation,Unknown,,0,
+ai-6b2657d8-1c9b-47d2-9421-f1fe4af04d58,rejected,Ezequiel Cohen,,Unknown,,0,
+35145ddd-8a47-4196-9779-74764fb5dac2,rejected,Fabio Ginex,,UK Export Finance_Q4 2025.,,0,
+ai-dcf886bc-cf2f-4cbd-ba53-ef0cbfe28777,rejected,Felicia Lindau,,Unknown,,0,
+f221f72e-4f45-4876-89ce-9053aced0721,rejected,Florin Neacsu,,UK Export Finance_Q4 2025.,,0,
+444ec6a1-0135-4e15-b867-cf6921f36359,rejected,Fraser McDonald,,UK Export Finance_Q4 2025.,,0,
+748a5410-b939-4d3e-8184-b58e9b819cbc,rejected,Garima Kalra,CrestCura Energy Services,Unknown,,0,
+22ceaadc-f83c-4c69-ab9c-e33230c5fd67,rejected,Garry York,,UK Export Finance_Q4 2025.,,0,
+ffcf617a-afe6-4f60-9446-c96f671f60d5,rejected,Gerry Foote,,UK Export Finance_Q4 2025.,,0,
+f673082f-ba4a-42d2-bda3-7e26eb531549,approved,Graham Rees,,Proton UK,,0,
+7cdc16c0-3d7a-47d7-a5c1-65c90e9696fb,rejected,Greg Kuenzel,,UK Export Finance_Q4 2025.,,0,
+a6237872-00a3-4dbc-aeca-7d376b4f6f17,rejected,Greg Matranga,Clarip Inc.,Unknown,,0,
+ai-b2abac68-9133-4b39-911b-e5dc3fda20c8,rejected,Handell Hall,,Unknown,,0,
+1ccc8a1f-4503-4379-85c2-c69b09942031,approved,Heather McNicol,,Proton UK,,0,
+e3f42989-c224-4fbd-be26-461b66e6cedc,rejected,Heidi Cerenzia,BigCommerce,Unknown,,0,
+08f06436-bfbe-4472-b51d-09e7fa31640f,rejected,Helen Cass,,Proton UK,,0,
+8af55cc6-24af-4f5f-bfdd-1345ea2d43d5,rejected,Henry Oliver,,UK Export Finance_Q4 2025.,,0,
+dcecf5e8-b951-465e-b7c7-ac1f9ba8a691,rejected,Holli Anderson,RF-Smart,Unknown,,0,
+65176f92-0b22-4c6d-819c-ed8567ec6f5b,rejected,Ian Devonshire,,UK Export Finance_Q4 2025.,,0,
+ff025349-8cd5-46ac-9c71-2b170f8a996b,approved,Ian Jennings,,Proton UK,,0,
+ae6a8107-7795-44a5-befd-cfb4b462881c,approved,Ijaz Tahir,,Proton UK,,0,
+ai-2f048fdc-f001-4da4-848c-ae2eb655a156,rejected,Ira Citron,,Unknown,,0,
+ai-377c0640-2bac-4b81-8ac7-bda8707fc997,approved,Ivor Home,,Unknown,,0,
+ai-102a18eb-8c90-4313-b62e-addcf0e1d1df,rejected,Jack Brown,,Unknown,,0,
+ai-36349b99-8b7e-42ec-a5c4-c1838ccd23a9,rejected,Jaclyn Shingara,,Unknown,,0,
+8101b135-f171-4aef-8356-ddd78e8ec014,rejected,James Mair,,UK Export Finance_Q4 2025.,,0,
+fd0d58fc-55d5-4786-9b1a-854dc9cc2788,rejected,James Smith,ArangoDB,Unknown,,0,
+0ab7c737-dd84-4dbf-a09e-c65a21e76c52,rejected,James Swindlehurst,,UK Export Finance_Q4 2025.,,0,
+a431d9ea-b5cc-4b2f-bf0a-7651a214efbb,approved,Jamie Johnson,,Proton UK,,0,
+347be679-5dc4-40dd-86fb-9acbb981b7fa,rejected,Jason Liang,SuperAnnotate,Unknown,,0,
+ai-aedf669a-8333-4144-9abe-b197899309da,rejected,Jason Powe,,Unknown,,0,
+ai-ed0e443a-b186-4bd2-804b-1270641c9ce6,rejected,Jeffrey Fincher,,Unknown,,0,
+ai-0b2dea2c-13f0-4715-86a5-9675413582f0,rejected,Jeffrey Lewis,,Unknown,,0,
+ai-e373c454-d3ba-4083-ad96-b7036f72742d,rejected,Jenika Pouliot,,Unknown,,0,
+7307f4c9-fc87-4240-89fb-5d808940e643,rejected,Jennifer Campisi,Vast Data,Unknown,,0,
+1db4c7e9-882c-4618-9cf2-684d11b1940b,rejected,Jennifer Sipala,Unitrends,Unknown,,0,
+8a3634d6-5931-4594-9995-7825b6b9f4da,rejected,Jennifer Tully,,UK Export Finance_Q4 2025.,,0,
+ai-1c617df0-29bf-4e6e-bb60-3d2fa01e5022,rejected,Jill Allen,,Unknown,,0,
+4f00c188-b4e9-4030-9258-bf5f4507ad6f,rejected,Jill Maughan,Iss Esg,Unknown,,0,
+ai-94f4b8f4-a156-4c28-b0c7-9e110551664c,rejected,Jim Read,,Unknown,,0,
+c373dcc7-cb40-4e43-8736-9eb521833191,rejected,Joanne Cox,,UK Export Finance_Q4 2025.,,0,
+ai-8886f11e-084b-4c60-bd7c-04ff06997335,rejected,John Altamirano,,Unknown,,0,
+ai-274e1c39-c733-4085-97f4-25dccb6f5328,rejected,John Anderson,,Unknown,,0,
+ai-68aca9aa-3503-4173-92d9-d9541636852d,rejected,John Davis,,Unknown,,0,
+e5ef5a6b-bec7-417e-b50a-d3a22721f05e,rejected,John McCall,,UK Export Finance_Q4 2025.,,0,
+ai-d2cb52ec-7a29-4adb-9356-1f11d6c05133,rejected,John Williston,,Unknown,,0,
+c1399c8e-598d-4003-9a99-56316f36688d,approved,Jon Tamplin,,Proton UK,,0,
+db7acb80-091a-4036-93eb-b33a2e8eb5fe,approved,Jonathon Pilmoor,,Proton UK,,0,
+ai-3d4a19bb-cc5a-4cbd-aeaa-576750187fa7,rejected,Josh Miller,,Unknown,,0,
+a284c258-b0e0-46d9-ad00-81b5771e4dc5,rejected,Julia Kendall,Tract,Unknown,,0,
+ad118d73-bc9a-49f8-a079-7e5bfab3745a,rejected,Justin Augat,Rackspace Technology,Unknown,,0,
+ai-6ca127fb-97bf-42bf-b979-eabc8de251e6,rejected,Justin Hill,,Unknown,,0,
+f003f099-fce3-4b63-960c-70f2f6ab6e3c,rejected,Karen Phelan,Peter Gribby,UK Export Finance_Q4 2025.,,0,
+f6bd87da-c857-4818-be9d-8c43fc53e027,rejected,Karen Weston,,UK Export Finance_Q4 2025.,,0,
+9b1300ed-c94d-4bcb-921a-655667aaabd7,rejected,Kat Lewis,Opswat,Unknown,,0,
+6e0e4432-7bc0-4fc6-b437-f31b939fb427,rejected,Kate Blizzard,,UK Export Finance_Q4 2025.,,0,
+ai-d4ad5d80-074e-46f9-8e70-e1cdf7c97418,rejected,Katie Hall,,Unknown,,0,
+ai-a2e5e5c3-0301-4106-9ff0-204c69d2a1ca,rejected,Kazuko Aoyagi,,Unknown,,0,
+ffc0bfde-a5e6-4737-98df-0dbdac6f9e4a,approved,Kenny Moyes,,UK Export Finance_Q4 2025.,,0,
+853ace05-9d09-4508-b5a8-6e70904a9723,approved,Kerry Watton,,Proton UK,,0,
+ai-72494caf-a4fc-42e6-a809-883ba3c4b3d6,rejected,Kevin Kaplan,,Unknown,,0,
+1b2220e5-962f-4e89-b089-e4052ebe24b1,rejected,Kollin Stagnito,AOPA-Malta,Unknown,,0,
+ai-9e66b70c-5c1b-4bd7-8320-339e860f27bf,rejected,Larry Nelson,,Unknown,,0,
+39cfefd6-d39e-44d7-b818-0c7e021a077e,rejected,Laura Broderick,Abrigo,Unknown,,0,
+e4795087-9dd0-42f3-8b72-14982a44fa70,rejected,Laura Sexton,,UK Export Finance_Q4 2025.,,0,
+6443c185-9ac6-4df0-96e8-0f92f7ee022d,rejected,Lee Parfitt,,UK Export Finance_Q4 2025.,,0,
+ai-9a085923-650d-462b-9f06-b96cc52a0291,rejected,Lindsay Levesque,,Unknown,,0,
+ai-cb68f30e-bc37-4b14-9c2d-3da3626dbaa0,rejected,Lindsay McGowan,,Unknown,,0,
+7b1e7af8-db4f-4c4d-b01d-4e291d137875,rejected,Lindsey Gallagher,Authenticom,Unknown,,0,
+ai-1a97c510-eef2-4890-9451-35b1c5b72744,rejected,Loren Wojcik,,Unknown,,0,
+ai-0757aa27-a53e-4ce6-8755-57db0b7ed720,rejected,Louise French,,Unknown,,0,
+ai-8ad1b072-2caf-4eb8-b0aa-52528c7ccdc9,rejected,Louise Meyer,,Unknown,,0,
+ai-b1aae660-0580-4195-86b6-9d46f25d4257,rejected,Luc Janson,,Unknown,,0,
+ai-8d00c65f-5b2f-43da-bfa0-346c216726ea,approved,Manoj Meena,,Unknown,,0,
+ai-ce8c2e2e-ae69-4965-8377-c688ac97a9cb,rejected,Marcus Gault,,Unknown,,0,
+ai-e3c7f106-1891-43e7-ab55-523ea75a3808,rejected,Marcus Mares,,Unknown,,0,
+f6e4222a-d08d-405d-b2ee-9f50e7f0bed6,approved,Marek P,,Proton UK,,0,
+ai-6d668dd3-c666-4394-bb39-2e664a821d82,approved,Mark Faulkner,FIS,Unknown,,0,
+ai-ee6cd0f0-430d-4127-b939-146517145368,rejected,Mark Gibbs,,Unknown,,0,
+ai-8e7857f7-bcc0-4809-83b0-74fb5dd9b691,rejected,Mark Sidebottom,,Unknown,,0,
+ai-8c21d0fa-ad1b-445f-9edb-bfd3ed6f561c,rejected,Marvin Jobs,,Unknown,,0,
+ai-c6db448c-11c0-45bf-9e17-63ee85e1228b,rejected,Mary Johnson,,Unknown,,0,
+ai-073a3b78-6292-4955-8a3d-1e2d8dd373c2,rejected,Mateen Hussain,,Unknown,,0,
+190dd158-8b7f-4ea1-aebf-6ec107801507,rejected,Matthew Allen,Advisors Excel,Unknown,,0,
+ai-b01acf6e-d132-438f-858a-d535866cfaf4,rejected,Matthew Bach,,Unknown,,0,
+46aea00e-0839-4bf3-8a21-e50602de4e57,rejected,Maureen McGinness,TalentNeuron,Unknown,,0,
+ai-18ab3e41-6f2f-4ea2-88fd-b76417af2cc4,rejected,Megan Lippner,,Unknown,,0,
+7ba21c53-b455-4480-95be-4ed2356548ed,rejected,Meha Varier,Aqua Security,Unknown,,0,
+483096e4-81bd-4e91-9ad7-f7b0f256519b,rejected,Melissa Gutierrez,Couchbase,Unknown,,0,
+ai-f77e232d-35bd-44e4-8c12-afd88a0c8d48,approved,Michael Barrons,,Unknown,,0,
+7fe885de-950e-4cc7-9b0b-c53c80703ff1,rejected,Michael Buffong,,UK Export Finance_Q4 2025.,,0,
+b393c1d5-6989-4e11-9aad-21ff3e25cf25,rejected,Michael Gregson,,UK Export Finance_Q4 2025.,,0,
+ai-9dae5bde-7dc4-42c8-9253-53514b54cccc,rejected,Michael Massicott,,Unknown,,0,
+ai-e3ac0d16-5401-4ff5-9817-7e11ab8571d4,rejected,Michael Rochon,,Unknown,,0,
+8d2415a5-54c5-4da9-94d0-d504166776d2,rejected,Michelle Genser,Community.com,Unknown,,0,
+69e4b542-9a33-4bea-80e2-9f32868c6c8b,rejected,Michelle Marshall,Graylog Inc.,Unknown,,0,
+2aae371f-7d7b-40cb-9aa1-913870df7152,approved,Miguel Batista,,Proton UK,,0,
+14d89f0f-f920-4fb7-9375-5732312807db,rejected,Mike Kochevar,OLI Systems Inc.,Unknown,,0,
+ai-3e61c96f-a04b-4cd1-8944-d88b180ae656,rejected,Mike Nymberg,,Unknown,,0,
+ai-8646b765-e53d-4061-87a5-45a2b3a51bab,rejected,Mike Woods,,Unknown,,0,
+ai-46a9d287-67cd-4031-936e-88f16f26839d,rejected,Monica Stoka,,Unknown,,0,
+0410d9a7-9a0d-44ea-9349-e69e85bb68d6,rejected,Natasha del Amo,Precision,Unknown,,0,
+ai-db4fb729-9715-43a0-bfa0-afd8216b58ee,rejected,Nicolas Perdrillat,,Unknown,,0,
+0416d3d2-0200-4cb0-aef9-9514aa5a890c,rejected,Noam Lenzini,,UK Export Finance_Q4 2025.,,0,
+ai-ff159461-ef06-46f1-a3ad-46c0c2f9e085,rejected,Noel Hamill,,Unknown,,0,
+ai-252c6935-2df8-42f4-9e89-120b4b3a9073,rejected,Norm Duncan,,Unknown,,0,
+ai-e18221d0-e70e-41e4-8863-fb2d5e908011,rejected,Osama Zaghloul,,Unknown,,0,
+1a804435-acbe-45f1-b164-40351eb1665c,rejected,Pal Mayuranathan,Syneos Health,Unknown,,0,
+ai-1c190264-1c2e-4ae1-8f9e-ac62396a10db,approved,Pankaj Dixit,Manav,Unknown,,0,
+d22ae203-2b66-457c-8c24-662580763711,rejected,Paul Bates,,UK Export Finance_Q4 2025.,,0,
+7697148d-acec-4d6d-a5b0-6a9744b0e29f,published,Paul Bennett,,UK Export Finance_Q4 2025.,,0,
+77add32f-1fb4-4e59-b488-d749f85d5529,approved,Paul Buckler,,UK Export Finance_Q4 2025.,,0,
+ffc81f83-983a-4c5b-a1a8-6bdf3eecb8b0,rejected,Paul Giardina,OneStream Software,Unknown,,0,
+2bdd87ed-d50c-45b2-b95b-257c699ec87a,rejected,Paul Manning,,UK Export Finance_Q4 2025.,,0,
+3fd3a75e-2f27-4db0-897f-7bf8c44a0185,rejected,Paul Marshall,,UK Export Finance_Q4 2025.,,0,
+ai-a915cf84-1c06-4421-83eb-c70a93fb0022,rejected,Phil Nimmo,,Unknown,,0,
+c29c0476-7488-4af2-b5d1-7c90917ded1c,approved,Raja Ali,,Proton UK,,0,
+ai-41d53aa5-3145-497d-a34b-b9b16d008e1d,rejected,Raja Sankar,,Unknown,,0,
+ai-ee4abd1a-7b04-44e2-b865-19c029d61999,rejected,Rex Keen,,Unknown,,0,
+02e620bf-cbf2-4878-8485-9595850ce895,rejected,Richard Dart,,UK Export Finance_Q4 2025.,,0,
+45eb15cf-925b-48fc-a561-d762b6c9921d,rejected,Richard Ricciardi,Evolve Bank & Trust,Unknown,,0,
+ai-0476c867-eed1-4a06-b710-6514712a99ea,rejected,Richard Vassallo,,Unknown,,0,
+15ad703e-8abb-45b7-9a7a-b156e33d00e0,approved,Rob Ingram,,Proton UK,,0,
+36993129-22a9-49f2-9f71-fc3a743e9b25,approved,Robert Blay,,Proton UK,,0,
+1cd2ac5f-0501-4924-928b-df2cc14325a3,approved,Robert McCoy,,Proton UK,,0,
+ai-4a02dc3e-20cc-4460-aa1c-bd1357c9ff1e,rejected,Rosanna Marabella,,Unknown,,0,
+ai-acc92213-e953-4528-b468-ce7fc85c3f43,rejected,Roseanne Myhill,,Unknown,,0,
+bf7a53cb-9029-49cc-a2ae-979f321e0236,rejected,Ross Elliott,,UK Export Finance_Q4 2025.,,0,
+ai-edd1027e-c310-49ed-8c36-310290adcdae,rejected,Ryan McAllister,,Unknown,,0,
+858dac86-116c-4935-a765-a8dd020c23da,rejected,Ryan McCracken,,UK Export Finance_Q4 2025.,,0,
+20466f4f-3c2f-4311-af3d-6db1207be0d2,approved,Sam Foot,,Proton UK,,0,
+ai-8f215fb3-0405-4ea2-8aa6-776ff382d24c,rejected,Sara Muñoz,,Unknown,,0,
+ai-b29129fa-19c1-4730-a8b0-37016f15e4ed,rejected,Sarah Casebolt,,Unknown,,0,
+fd520bb0-5390-42f9-af97-05ada4c0ad43,rejected,Sarah Edelman,Homie,Unknown,,0,
+ai-25d26a3b-c847-4ccd-b67e-cc0ffbc9a7c0,rejected,Scott Thibodeau,,Unknown,,0,
+fb8e461e-a0fe-43eb-95bf-94fcb5a04bec,rejected,Shane Mason,,UK Export Finance_Q4 2025.,,0,
+c2d6588f-3a39-45e9-b4cb-089b24f76a41,rejected,Shaun Martin,,UK Export Finance_Q4 2025.,,0,
+ai-672bb007-173f-4f2a-9ccc-62956d9840d4,rejected,Sierra Lee-Dunson,,Unknown,,0,
+ai-7d517ebd-2e3c-4969-a5d9-4a593f4d3b62,rejected,Simon Murray,,Unknown,,0,
+aa87510d-d6ce-4156-a44a-6230d3ef3ff5,rejected,Simon Owen,,UK Export Finance_Q4 2025.,,0,
+aad34ffe-a777-4b95-8c95-f1ac161ae0e5,rejected,Sophie Strongman,,UK Export Finance_Q4 2025.,,0,
+ai-0743c1bf-fd41-452f-a601-753f17e977c0,rejected,Stephanie Kaplan,,Unknown,,0,
+ec6ab7ae-81a0-4085-9983-a2bdb1b79d78,rejected,Stephen Johnstone,,UK Export Finance_Q4 2025.,,0,
+ai-87668787-9d8e-485a-adf7-844dda4c40f9,rejected,Steve Kurtz,,Unknown,,0,
+ai-3ddc911e-b8e0-40b4-8e9c-08eef901516b,rejected,Stuart Ashley,,Unknown,,0,
+ebdeb0f6-6d3a-4608-a1d8-93948ec2b025,rejected,Stuart Plumbly,,UK Export Finance_Q4 2025.,,0,
+ai-9d8f27d6-d9ae-43de-b54c-d756ac81b95e,rejected,Sue Harkey,,Unknown,,0,
+ai-9b30f639-6800-40b2-8210-6c54fe2ba574,rejected,Sumit Pal,,Unknown,,0,
+68b9af55-e922-4288-8d7c-476bc31456bd,rejected,Susan Sanderson,,UK Export Finance_Q4 2025.,,0,
+ai-d1375178-4e46-4e58-9617-606959ebc3ac,rejected,Tate Byberg,,Unknown,,0,
+b584ae2c-965a-46ab-9a65-3e0889c9b92f,rejected,Tetst BJJSHD,,UK Export Finance_Q4 2025.,,0,
+ai-8f7dee0e-b334-4382-8b4a-b9781bf2acea,rejected,Theodore Stefan,,Unknown,,0,
+ai-4ec1e9a2-7180-441d-8b11-ba5427747b35,rejected,Thierry Vourc'h,,Unknown,,0,
+adb06226-3295-400c-b96a-334b4decbe9b,rejected,Thomas LeDuc,Semperis,Unknown,,0,
+4478b4a4-6e27-4490-8883-d696af5cd7b4,rejected,Tim Diplock,,UK Export Finance_Q4 2025.,,0,
+ai-abaf1c8e-b705-4e15-af0c-c0711133a549,rejected,Tim O'Hara,,Unknown,,0,
+ai-3595a0a1-ef01-4c73-a31e-4fd00b002073,rejected,Tim Pierson,,Unknown,,0,
+efceb855-eb7f-4c95-8427-9faa38eaaf91,rejected,Tim Skrmetti,American First Finance,Unknown,,0,
+a05f99cf-3f01-447b-89b4-2e8050139b36,rejected,Tim Zack,LeadingAgile,Unknown,,0,
+7e21f2ab-c708-4590-a707-486bd9f1bbf6,rejected,Tom Gavin,Workato,Unknown,,0,
+ab3fe04f-9786-4838-bf31-0289065c4691,rejected,Tom Robb,,UK Export Finance_Q4 2025.,,0,
+ai-069c60b5-5798-46cd-b357-613db619b320,rejected,Tom Stacy,,Unknown,,0,
+ai-f2388f1d-af96-40a1-8165-c7b752c31a15,rejected,Tony Lorriman,,Unknown,,0,
+ai-ff9943b0-9705-484c-861a-cae9858c07d5,rejected,Tracy Williams,,Unknown,,0,
+605c1186-251d-4fb4-b1df-a6585efb0aa5,rejected,Trevor Clayton,,UK Export Finance_Q4 2025.,,0,
+d449ccc6-00c1-4d97-a419-19faa56e3b36,rejected,Veronica Velasquez,Payden & Rygel,Unknown,,0,
+a8d30846-d4b2-41af-8894-28a6b462dd0f,rejected,Vicki Center,DDI,Unknown,,0,
+ai-25dde92c-b91e-4529-95be-35222f702bc3,rejected,Vince Marinelli,,Unknown,,0,
+ai-a1d30a38-4040-4e1b-b3a9-9fc01abc72b1,approved,Waqar Sheikh,,Unknown,,0,
+047d1b01-6c0f-4378-9856-0c3c67ba81e0,rejected,Whit Jackson,Wasabi Technologies,Unknown,,0,
+ai-aeaabfc2-aff6-4fef-8629-94121a32b262,rejected,William McCullough,,Unknown,,0,
+ai-f4a0a44a-858c-4a08-aa9b-5b51ff977353,rejected,Zachary Kabb,,Unknown,,0,
+18dc8a5e-4cb8-49aa-a618-dd1875bb60b7,rejected,Zahid Mohammadi,,UK Export Finance_Q4 2025.,,0,

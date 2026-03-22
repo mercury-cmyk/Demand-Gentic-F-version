@@ -186,7 +186,7 @@ export const DEFAULT_PERSONAS: Record<string, SimulatedHumanProfile> = {
 // HELPERS
 // ============================================================================
 
-const GEMINI_MODELS = ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-2.5-flash"] as const;
+const GEMINI_MODELS = ["gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash"] as const;
 const DEFAULT_MODEL = GEMINI_MODELS[0]; // gemini-2.0-flash-lite — highest free-tier quota
 
 function sleep(ms: number) {

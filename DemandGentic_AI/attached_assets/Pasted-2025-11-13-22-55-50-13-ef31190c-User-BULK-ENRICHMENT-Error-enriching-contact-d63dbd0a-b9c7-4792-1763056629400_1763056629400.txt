@@ -1,0 +1,93 @@
+2025-11-13 22:55:50.13
+ef31190c
+User
+[BULK ENRICHMENT] Error enriching contact d63dbd0a-b9c7-4792-8333-47f026322716: TypeError: fetch failed
+
+2025-11-13 22:55:50.13
+ef31190c
+User
+at node:internal/deps/undici/undici:13510:13
+2025-11-13 22:55:50.13
+ef31190c
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 22:55:50.13
+ef31190c
+User
+at async file:///home/runner/workspace/dist/index.js:14451:30 {
+2025-11-13 22:55:50.13
+ef31190c
+User
+[cause]: Error: connect ECONNREFUSED 127.0.0.1:5000
+2025-11-13 22:55:50.13
+ef31190c
+User
+at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16) {
+2025-11-13 22:55:50.13
+ef31190c
+User
+errno: -111,
+2025-11-13 22:55:50.13
+ef31190c
+User
+syscall: 'connect',
+2025-11-13 22:55:50.13
+ef31190c
+User
+address: '127.0.0.1',
+2025-11-13 22:55:50.13
+ef31190c
+User
+port: 5000
+2025-11-13 22:55:50.13
+ef31190c
+User
+}
+2025-11-13 22:55:50.17
+ef31190c
+User
+[BULK ENRICHMENT] Error enriching contact 9228bc80-644e-4f97-ba51-609dbf19ebb1: TypeError: fetch failed
+2025-11-13 22:55:50.17
+ef31190c
+User
+at node:internal/deps/undici/undici:13510:13
+2025-11-13 22:55:50.17
+ef31190c
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 22:55:50.17
+ef31190c
+User
+[cause]: Error: connect ECONNREFUSED 127.0.0.1:5000
+2025-11-13 22:55:50.17
+ef31190c
+User
+errno: -111,
+2025-11-13 22:55:50.21
+ef31190c
+User
+[BULK ENRICHMENT] Error enriching contact a600216e-f38c-4348-a5fa-841c0dc04bdd: TypeError: fetch failed
+2025-11-13 22:55:50.21
+ef31190c
+User
+at async file:///home/runner/workspace/dist/index.js:14451:30 {
+2025-11-13 22:55:50.21
+ef31190c
+User
+address: '127.0.0.1',
+2025-11-13 22:55:50.21
+ef31190c
+User
+port: 5000
+2025-11-13 22:55:50.25
+ef31190c
+User
+[BULK ENRICHMENT] Error enriching contact a861dd83-95ca-43db-8ab7-334b1edfb199: TypeError: fetch failed
+2025-11-13 22:55:55.02
+ef31190c
+User
+[BULK ENRICHMENT] Error enriching contact bca153ff-82cc-4bb7-a98b-a865d5742c89: TypeError: fetch failed
+2025-11-13 22:55:55.02
+ef31190c
+User
+at node:internal/deps/undici/undici:13510:13

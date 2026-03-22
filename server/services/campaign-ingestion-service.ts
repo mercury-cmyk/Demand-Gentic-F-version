@@ -220,7 +220,7 @@ export class CampaignIngestionService {
 
       // Call Gemini
       const model = this.genai.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         generationConfig: {
           temperature: 0.7,
           maxOutputTokens: 4096,
@@ -401,7 +401,7 @@ Apply these refinements and return the updated campaign configuration as JSON wi
 Return ONLY the JSON object, no additional text.`;
 
       const model = this.genai.getGenerativeModel({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         generationConfig: {
           temperature: 0.5,
           maxOutputTokens: 4096,

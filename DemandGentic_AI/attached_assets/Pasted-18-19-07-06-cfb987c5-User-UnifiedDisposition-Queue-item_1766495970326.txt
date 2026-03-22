@@ -1,0 +1,104 @@
+18:19:07.06
+cfb987c5
+User
+[UnifiedDisposition] Queue item marked as done: Completed
+2025-12-23 18:19:07.06
+cfb987c5
+User
+[ElevenLabs Webhook] ✅ Disposition applied: Completed, action: remove_from_campaign_queue
+2025-12-23 18:19:07.06
+cfb987c5
+User
+1:19:07 PM [express] POST /api/webhooks/elevenlabs 200 in 181ms :: {"status":"ok","conversation_id":…
+2025-12-23 18:19:07.30
+cfb987c5
+User
+[AI Orchestrator] Replenish triggered for campaign 4187fb46-c634-42d1-aeb1-d3833f325856
+2025-12-23 18:19:08.60
+cfb987c5
+User
+[Queue:ai-campaign-orchestrator] Job replenish-4187fb46-c634-42d1-aeb1-d3833f325856-1766495947061 started processing
+2025-12-23 18:19:08.67
+cfb987c5
+User
+[AI Orchestrator] Campaign 4187fb46-c634-42d1-aeb1-d3833f325856: 54/50 in progress, -4 slots available
+2025-12-23 18:19:08.67
+cfb987c5
+User
+[AI Orchestrator] Campaign 4187fb46-c634-42d1-aeb1-d3833f325856: 54/50 in progress, -4 slots available
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"contact_title": "Founder",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-23 18:19:08.99
+cfb987c5
+User
+- To (raw): 447919550050
+2025-12-23 18:19:08.99
+cfb987c5
+User
+- Agent ID: agent_4701kctbjseeeefakcshzhks3whw
+2025-12-23 18:19:08.99
+cfb987c5
+User
+- To (E.164): +447919550050
+2025-12-23 18:19:08.99
+cfb987c5
+User
+}
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"company_name": "Deepsink",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+- Phone Number ID: phnum_3601kd38f5gjejyantqszzvsqcvh
+2025-12-23 18:19:08.99
+cfb987c5
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"contact_lastName": "McCullough",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+- Dynamic Variables: {
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"contact_email": "adam@deepsink.co",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"queue_item_id": "921cb719-5ea8-4ace-aba1-23a53f6a287f",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"contact_phone": "447919550050",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"contact_fullName": "Adam McCullough",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"contact_firstName": "Adam",
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"agent_fullName": "Emma Willson"
+2025-12-23 18:19:08.99
+cfb987c5
+User
+"campaign_id": "4187fb46-c634-42d1-aeb1-d3833f325856",
+2025-12-23 18:19:09.16
+cfb987c5
+User
+[Queue:ai-campaign-orchestrator] Job replenish-4187fb46-c634-42d1-aeb1-d3833f325856-1766495947061 completed

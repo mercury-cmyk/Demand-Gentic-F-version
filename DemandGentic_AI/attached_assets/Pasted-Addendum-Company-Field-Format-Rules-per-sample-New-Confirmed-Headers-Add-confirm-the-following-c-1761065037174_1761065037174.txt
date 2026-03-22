@@ -1,0 +1,183 @@
+Addendum: Company Field Format Rules (per sample)
+New/Confirmed Headers
+
+Add/confirm the following company headers and behaviors:
+
+Company Annual Revenue → annualRevenue
+
+Accept integer/decimal strings (e.g., 1000000001), not 1E+09.
+
+Parser must reject scientific notation and preserve exact value.
+
+Store as numeric(20,2) (or decimal(20,2)) to avoid overflow, OR store as text and mirror to a numeric shadow field if needed for math.
+
+Company Description → description
+
+Multi-paragraph text with line breaks.
+
+Must support quotes and commas; CSV importer must treat it as a quoted, multiline field.
+
+Encoding: enforce UTF-8 end-to-end to avoid mojibake (see “Encoding” below).
+
+Company Website Domain → websiteDomain
+
+Normalize to naked domain, lowercase (e.g., aircanada.com), strip scheme and paths.
+
+Company Founded Date → foundedDate
+
+Accept YYYY or YYYY-MM-DD. If YYYY only, store founded_date_precision='year'.
+
+Company Industry → industry
+
+Company LI Profile Url → linkedinUrl
+
+Normalize to https://www.linkedin.com/....
+
+Company LinkedIn ID → linkedinId
+
+Treat as string (IDs can exceed 32-bit int; preserve leading zeros).
+
+Company Revenue Range → revenueRange
+
+Company Staff Count Range → staffCountRange
+
+Web Technologies → webTechnologies
+
+Accept either a URL (e.g., BuiltWith profile) or a comma-separated list of tech names.
+
+Store as text. If comma-separated list is detected, also store a normalized JSON array in a shadow field web_technologies_json jsonb (optional but recommended) for filtering.
+
+SIC Code → sicCode (string)
+
+NAICS Code → naicsCode (string)
+
+Former Position → formerPosition
+
+Time in Current Position → timeInCurrentPosition
+
+Keep raw string; attempt to compute time_in_current_position_months int if parseable.
+
+Time in Current Company → timeInCurrentCompany
+
+Keep raw string; attempt to compute time_in_current_company_months int if parseable.
+
+These append to the previously approved field list. Do not drop earlier fields.
+
+CSV Import/Export — Critical Serialization Rules
+
+Encoding (fix mojibake)
+
+Importer: Assume input is UTF-8; auto-detect and transcode Windows-1252 → UTF-8 if detected.
+
+Exporter: Always output UTF-8 with BOM for CSV; XLSX for Excel-safe exports.
+
+QA check: the French accents and punctuation in “Société aérienne / d’envergure / Amérique du Nord” render correctly—no Ã©, â€™, etc.
+
+Multiline text
+
+Fields like Company Description may contain line breaks. Ensure RFC-4180 quoting on import and export.
+
+Exporter must keep quotes and embedded newlines intact.
+
+Large numbers & scientific notation
+
+Do not output scientific notation for Company Annual Revenue.
+
+CSV export: write as plain digits (e.g., 1000000001).
+
+To avoid Excel auto-formatting: offer XLSX export; for CSV, optionally prefix a \t at write-time or provide a UI tip “Open in Excel → Data → From Text/CSV (treat column as Text)”.
+
+API should return revenue as JSON number (or string if you choose string storage).
+
+URLs & Domains
+
+websiteDomain: export domain only, no scheme.
+
+linkedinUrl: export normalized https://www.linkedin.com/....
+
+webTechnologies: if it’s a list, export as-entered in CSV plus the JSON array in a separate field only if web_technologies_json is implemented.
+
+IDs
+
+linkedinId: string type across DB/API to prevent truncation.
+
+Durations
+
+Keep the original strings, and if shadow months fields exist, export both (raw + months).
+
+Database Migration (append)
+-- Companies
+ALTER TABLE verification_companies
+  ADD COLUMN IF NOT EXISTS web_technologies text,
+  ADD COLUMN IF NOT EXISTS web_technologies_json jsonb,
+  ALTER COLUMN annual_revenue TYPE numeric(20,2) USING
+    CASE
+      WHEN annual_revenue IS NULL THEN NULL
+      WHEN annual_revenue::text ~ '^[0-9]+(\.[0-9]+)?$' THEN annual_revenue::numeric
+      ELSE NULL
+    END;
+
+-- Ensure LinkedIn ID stored as text
+ALTER TABLE verification_companies
+  ALTER COLUMN linkedin_id TYPE text;
+
+-- Optional functional index for domain lookups
+CREATE INDEX IF NOT EXISTS idx_verif_companies_domain_ci
+  ON verification_companies ((lower(website_domain)));
+
+
+(Adjust the USING clause if annual_revenue was text previously.)
+
+CSV Mapper Updates
+
+Add header → field map for Web Technologies → webTechnologies.
+
+If value starts with http, store as web_technologies (URL only).
+
+Else, split on , → trim → lowercase (for JSON array), store both:
+
+web_technologies (original string)
+
+web_technologies_json (normalized list)
+
+API & UI
+
+GET /verification/companies should include:
+
+annualRevenue, revenueRange, staffCountRange, description, websiteDomain,
+
+foundedDate, foundedDatePrecision, industry, linkedinUrl, linkedinId,
+
+webTechnologies, webTechnologiesJson, sicCode, naicsCode.
+
+Filters:
+
+webTechnologies (contains), sicCode (exact/contains), naicsCode (exact/contains),
+
+annualRevenue (min/max), revenueRange (select), staffCountRange (select).
+
+Grid Columns:
+
+Show all above; truncate Company Description with tooltip.
+
+Export:
+
+Include all fields with data (and columns with no data) in both CSV and XLSX.
+
+Preserve multiline description, no scientific notation for revenue.
+
+QA Checklist (use your sample row)
+
+ Import the provided row; description retains paragraphs and punctuation (no mojibake).
+
+ annualRevenue stored exactly as 1000000001 (no 1E+09).
+
+ websiteDomain becomes aircanada.com; linkedinUrl normalized; linkedinId stored as text ("4737").
+
+ webTechnologies captures the BuiltWith URL and appears in UI & export.
+
+ CSV & XLSX exports contain all specified columns, correct order, correct encodings.
+
+ Opening CSV in Excel via “Data → From Text/CSV” shows annualRevenue as full digits.
+
+ Filters work on sicCode, naicsCode, webTechnologies, and revenue/size ranges.

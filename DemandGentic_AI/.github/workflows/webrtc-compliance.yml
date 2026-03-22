@@ -1,0 +1,121 @@
+name: WebRTC Compliance Check
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - staging
+
+jobs:
+  websocket-ban-check:
+    name: No WebSocket Usage
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check for forbidden WebSocket patterns in WebRTC calling stack
+        run: |
+          echo "🔍 Checking for WebSocket usage in WebRTC calling components..."
+          
+          # Define paths that should be WebSocket-free
+          WEBRTC_PATHS="client/src/lib/webrtc client/src/hooks/useUnifiedWebRTC.ts client/src/components/softphone"
+          
+          # Check for forbidden patterns in WebRTC paths
+          FOUND_VIOLATIONS=false
+          
+          for path in $WEBRTC_PATHS; do
+            if [ -d "$path" ] || [ -f "$path" ]; then
+              echo "📁 Checking $path..."
+              
+              # Check for new WebSocket() usage
+              if grep -rn "new WebSocket(" "$path" 2>/dev/null; then
+                echo "❌ Found 'new WebSocket(' in $path"
+                FOUND_VIOLATIONS=true
+              fi
+              
+              # Check for socket.io imports
+              if grep -rn "socket\.io" "$path" 2>/dev/null; then
+                echo "❌ Found 'socket.io' in $path"
+                FOUND_VIOLATIONS=true
+              fi
+              
+              # Check for ws library imports
+              if grep -rn "from ['\"]ws['\"]" "$path" 2>/dev/null; then
+                echo "❌ Found 'ws' library import in $path"
+                FOUND_VIOLATIONS=true
+              fi
+              
+              # Check for wss:// URLs (except in comments)
+              if grep -rn "wss://" "$path" 2>/dev/null | grep -v "^\s*//" | grep -v "^\s*\*"; then
+                echo "❌ Found 'wss://' URL in $path"
+                FOUND_VIOLATIONS=true
+              fi
+              
+            fi
+          done
+          
+          if [ "$FOUND_VIOLATIONS" = true ]; then
+            echo ""
+            echo "❌ COMPLIANCE FAILURE: WebSocket usage detected in WebRTC calling stack"
+            echo ""
+            echo "The unified calling stack must use WebRTC only:"
+            echo "  - Telnyx WebRTC SDK for PSTN calls"
+            echo "  - OpenAI Realtime API over WebRTC (not WebSocket)"
+            echo ""
+            echo "Remove WebSocket usage and use WebRTC peer connections instead."
+            exit 1
+          fi
+          
+          echo "✅ No WebSocket usage found in WebRTC calling stack"
+      
+      - name: Verify Telnyx WebRTC SDK usage
+        run: |
+          echo "🔍 Verifying Telnyx WebRTC SDK import..."
+          
+          if grep -rn "@telnyx/webrtc" client/src/lib/webrtc/telnyx-webrtc-client.ts; then
+            echo "✅ Telnyx WebRTC SDK is being used"
+          else
+            echo "⚠️ Warning: @telnyx/webrtc not found in telnyx-webrtc-client.ts"
+          fi
+      
+      - name: Check for RTCPeerConnection usage (WebRTC verification)
+        run: |
+          echo "🔍 Verifying WebRTC peer connection usage..."
+          
+          WEBRTC_FILE="client/src/lib/webrtc/openai-realtime-webrtc-client.ts"
+          
+          if [ -f "$WEBRTC_FILE" ]; then
+            if grep -n "RTCPeerConnection" "$WEBRTC_FILE"; then
+              echo "✅ RTCPeerConnection found in OpenAI WebRTC client"
+            else
+              echo "❌ RTCPeerConnection not found - OpenAI client must use WebRTC"
+              exit 1
+            fi
+            
+            if grep -n "RTCDataChannel\|createDataChannel" "$WEBRTC_FILE"; then
+              echo "✅ Data channel usage found for OpenAI events"
+            else
+              echo "⚠️ Warning: Data channel not explicitly used for events"
+            fi
+          else
+            echo "⚠️ OpenAI WebRTC client file not found"
+          fi
+      
+      - name: Summary
+        run: |
+          echo ""
+          echo "=================================="
+          echo "  WebRTC Compliance Check Passed"
+          echo "=================================="
+          echo ""
+          echo "✅ No WebSocket usage in calling stack"
+          echo "✅ Telnyx WebRTC SDK for PSTN calls"
+          echo "✅ OpenAI Realtime over WebRTC"
+          echo ""

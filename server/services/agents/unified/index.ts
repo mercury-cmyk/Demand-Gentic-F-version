@@ -16,7 +16,7 @@ export { UnifiedVoiceAgent, unifiedVoiceAgent } from './unified-voice-agent';
 export { UnifiedEmailAgent, unifiedEmailAgent } from './unified-email-agent';
 export { UnifiedStrategyAgent, unifiedStrategyAgent } from './unified-strategy-agent';
 export { UnifiedQAAgent, unifiedQAAgent } from './unified-qa-agent';
-export { UnifiedAgentXAgent, unifiedAgentXAgent } from './unified-agentx-agent';
+export { UnifiedAgentCAgent, unifiedAgentCAgent } from './unified-agentx-agent';
 export { UnifiedMemoryAgent, unifiedMemoryAgent } from './unified-memory-agent';
 export { UnifiedContentAgent, unifiedContentAgent } from './unified-content-agent';
 export { UnifiedPipelineAgent, unifiedPipelineAgent } from './unified-pipeline-agent';

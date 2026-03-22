@@ -872,7 +872,7 @@ Return ONLY valid JSON, no other text.`;
     const genai = new GoogleGenerativeAI(geminiKey);
 
     // Try multiple Gemini models in order of preference
-    const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+    const candidateModels = ["gemini-2.5-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
     let analysisContent: string | null = null;
     let lastError: Error | null = null;
 

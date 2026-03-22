@@ -1,0 +1,71 @@
+14.7 Bulk Operations (Enhanced with Global Selection & Pagination Awareness)
+Functional Overview
+
+The bulk-action system must support large-scale selection and actions across paginated data sets, preserving all selected records that meet current filters and search criteria, not just those visible on the active page.
+
+Selection Capabilities
+
+Page-Level Selection
+
+Users can select individual records or “Select All on This Page” (e.g., 50 records per page).
+
+Checkboxes remain sticky when navigating between pages until cleared or actioned.
+
+Global Selection (Across All Pages)
+
+When a filter or search query is active, the system presents a confirmation prompt:
+
+“You’ve selected 50 records on this page. Would you like to select all 1 ,742 records that match your current filter?”
+
+Upon confirmation, the selection expands to include all filtered results, regardless of pagination.
+
+A server-side tokenized selection context is created (e.g., selection_id) so subsequent bulk actions operate reliably on the same result set.
+
+Persistent Selection Context
+
+The backend maintains selected IDs in memory / Redis for up to 15 minutes of inactivity or until the user resets.
+
+Any change in filter or search automatically invalidates the existing selection context to prevent unintended edits.
+
+Visual Feedback
+
+Toolbar displays a dynamic counter (Selected 54 of 1 ,742) and a “Clear Selection” option.
+
+When scrolling or paginating, selected rows remain highlighted for continuity.
+
+Supported Bulk Actions
+
+(All actions can operate on the current page or full selection context.)
+
+Bulk Update Fields — multi-field editor with preview before applying.
+
+Bulk Delete (Soft Delete) — confirm, audit, 30-day recovery.
+
+Bulk Export — apply suppression rules automatically; exports entire selection if chosen.
+
+Bulk Assign Owner — reassign in one operation with notifications.
+
+Bulk Add to List — supports:
+
+Add to Existing List, or
+
+Create New List on the Fly (name, description, visibility).
+Works for Accounts or Contacts and respects filter-based global selections.
+
+Bulk Link to Campaign (Optional Phase 2.2) — assign selected Contacts to a campaign audience queue.
+
+Technical Implementation Notes
+
+API endpoints accept either:
+
+explicit ids[] array (for ≤ 10 k records), or
+
+selection_context_token representing all filtered results.
+
+Background jobs (BullMQ) handle large-batch operations asynchronously.
+
+Frontend state management (e.g., Redux / Zustand) stores temporary selection context for smooth UX.
+
+Backend validation ensures user has permission on every record in bulk actions (RBAC enforced per role).
+
+Outcome: Users can safely perform large-scale updates, list management, and exports on tens of thousands of Accounts or Contacts with confidence and full auditability — matching enterprise-grade CRM ergonomics.

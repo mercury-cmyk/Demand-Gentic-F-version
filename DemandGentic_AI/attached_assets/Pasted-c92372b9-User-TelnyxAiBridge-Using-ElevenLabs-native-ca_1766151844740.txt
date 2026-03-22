@@ -1,0 +1,103 @@
+c92372b9
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-19 18:43:50.20
+c92372b9
+User
+- To (raw): 441621817336
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_title": "IT Manager",
+2025-12-19 18:43:50.20
+c92372b9
+User
+"agent_fullName": "Sarah"
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_lastName": "Bloomfield",
+2025-12-19 18:43:50.20
+c92372b9
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-19 18:43:50.20
+c92372b9
+User
+"campaign_id": "ae5b353d-64a9-44d8-92cf-69d4726ca121",
+2025-12-19 18:43:50.20
+c92372b9
+User
+"company_name": "JobServe",
+2025-12-19 18:43:50.20
+c92372b9
+User
+- Agent ID: agent_4701kctbjseeeefakcshzhks3whw
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_firstName": "John",
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_firstName": "John",
+2025-12-19 18:43:50.20
+c92372b9
+User
+- Agent ID: agent_4701kctbjseeeefakcshzhks3whw
+2025-12-19 18:43:50.20
+c92372b9
+User
+"company_name": "JobServe",
+2025-12-19 18:43:50.20
+c92372b9
+User
+"campaign_id": "ae5b353d-64a9-44d8-92cf-69d4726ca121",
+2025-12-19 18:43:50.20
+c92372b9
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_lastName": "Bloomfield",
+2025-12-19 18:43:50.20
+c92372b9
+User
+"agent_fullName": "Sarah"
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_title": "IT Manager",
+2025-12-19 18:43:50.20
+c92372b9
+User
+- To (raw): 441621817336
+2025-12-19 18:43:50.20
+c92372b9
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-19 18:43:50.20
+c92372b9
+User
+- To (E.164): +441621817336
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_fullName": "John Bloomfield",
+2025-12-19 18:43:50.20
+c92372b9
+User
+- Dynamic Variables: {
+2025-12-19 18:43:50.20
+c92372b9
+User
+}
+2025-12-19 18:43:50.20
+c92372b9
+User
+- Phone Number ID: phnum_8701kctbg4v4fkw8jq03h8f1kxq9
+2025-12-19 18:43:50.20
+c92372b9
+User
+"contact_email": "john.bloomfield@jobserve.com",

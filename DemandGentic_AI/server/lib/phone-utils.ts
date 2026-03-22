@@ -1,0 +1,207 @@
+// Shared phone number helpers for AI calling pipelines
+import { formatPhoneWithCountryCode } from './phone-formatter';
+
+export function normalizeToE164(phoneNumber: string): string {
+  let normalized = phoneNumber.replace(/[^\d+]/g, "");
+
+  if (normalized.startsWith("+")) {
+    if (normalized.startsWith("+00")) {
+      normalized = "+" + normalized.substring(3);
+    } else if (normalized.startsWith("+0")) {
+      const withoutPlus = normalized.substring(1);
+      if (/^0[1-9]/.test(withoutPlus)) {
+        normalized = "+44" + withoutPlus.substring(1);
+      }
+    }
+    return normalized;
+  }
+
+  if (normalized.startsWith("00")) {
+    return "+" + normalized.substring(2);
+  }
+
+  if (/^0[1-9]/.test(normalized)) {
+    return "+44" + normalized.substring(1);
+  }
+
+  if (normalized.startsWith("44") && normalized.length >= 12 && normalized.length = 10 && normalized.length = 10 && normalized.length = 11) {
+    subscriberDigits = digits.substring(1); // US/CA: 1 + 10 digits
+  } else if (digits.length >= 10) {
+    // Try 2-digit country code (most common: 44, 49, 33, etc.)
+    subscriberDigits = digits.substring(2);
+  }
+
+  // All zeros in subscriber part → placeholder (e.g. +44000000000)
+  if (/^0+$/.test(subscriberDigits)) return true;
+
+  // Subscriber is a single repeated digit (e.g. +44111111111, +44999999999)
+  if (subscriberDigits.length >= 7 && /^(.)\1+$/.test(subscriberDigits)) return true;
+
+  // Entire number (minus +) is all zeros
+  if (/^0+$/.test(digits)) return true;
+
+  return false;
+}
+
+/**
+ * Check if an E.164 phone number is a toll-free/freephone/service number
+ * These are inbound-only company lines, not useful for reaching a specific contact
+ */
+export function isTollFreeOrServiceNumber(phone: string): boolean {
+  const digits = phone.replace(/[^\d]/g, '');
+
+  // UK toll-free/service prefixes (after country code 44):
+  // 0800/0808 = freephone, 0845/0870 = non-geographic, 0844/0843 = business rate
+  if (digits.startsWith('44')) {
+    const subscriber = digits.substring(2);
+    if (/^(800|808|845|870|844|843|842|871|872|873)/.test(subscriber)) {
+      return true;
+    }
+  }
+
+  // US/CA toll-free prefixes (after country code 1):
+  // 800, 888, 877, 866, 855, 844, 833
+  if (digits.startsWith('1')) {
+    const subscriber = digits.substring(1);
+    if (/^(800|888|877|866|855|844|833)/.test(subscriber)) {
+      return true;
+    }
+  }
+
+  // International toll-free: +800 (UIFN)
+  if (digits.startsWith('800')) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Get the best phone number for a contact with fallback logic.
+ *
+ * Priority:
+ *   1. dialingPhoneE164  – pre-computed unified field set at upload time (fastest path)
+ *   2. directPhoneE164   – normalised direct phone
+ *   3. directPhone       – raw direct phone (normalised on the fly)
+ *   4. mobilePhoneE164   – normalised mobile phone
+ *   5. mobilePhone       – raw mobile phone (normalised on the fly)
+ *   6. hqPhoneE164 / hqPhone – account HQ phone (last resort)
+ *
+ * Toll-free / service numbers are always skipped.
+ */
+export function getBestPhoneForContact(contact: {
+  dialingPhoneE164?: string | null;  // unified pre-computed field
+  directPhone?: string | null;
+  directPhoneE164?: string | null;
+  mobilePhone?: string | null;
+  mobilePhoneE164?: string | null;
+  hqPhone?: string | null;
+  hqPhoneE164?: string | null;
+  hqCountry?: string | null;
+  country?: string | null;
+}): { phone: string | null; type: 'direct' | 'mobile' | 'hq' | null } {
+  const country = contact.country || undefined;
+
+  // Helper: normalize using country-aware formatter, then fallback to heuristic
+  function normalize(phone: string, overrideCountry?: string): string | null {
+    // Try country-aware normalization first (handles local numbers correctly)
+    const countryAware = formatPhoneWithCountryCode(phone, overrideCountry || country);
+    if (countryAware && isValidE164(countryAware)) return countryAware;
+    // Fallback to heuristic normalization
+    const heuristic = normalizeToE164(phone);
+    return isValidE164(heuristic) ? heuristic : null;
+  }
+
+  // FAST PATH: use the pre-computed unified dialing phone stored at upload time
+  if (contact.dialingPhoneE164 && isValidE164(contact.dialingPhoneE164) && !isTollFreeOrServiceNumber(contact.dialingPhoneE164)) {
+    // Determine the original type for caller awareness (direct takes precedence)
+    const type = (contact.directPhoneE164 === contact.dialingPhoneE164 ||
+                  normalize(contact.directPhone || '') === contact.dialingPhoneE164)
+      ? 'direct'
+      : (contact.mobilePhoneE164 === contact.dialingPhoneE164 ||
+         normalize(contact.mobilePhone || '') === contact.dialingPhoneE164)
+        ? 'mobile'
+        : 'direct'; // default to 'direct' when origin is ambiguous
+    return { phone: contact.dialingPhoneE164, type };
+  }
+
+  // Try direct phone: prefer pre-normalized E164, then normalize raw
+  // Skip toll-free numbers - they are company inbound lines, not direct contact numbers
+  if (contact.directPhoneE164 && isValidE164(contact.directPhoneE164) && !isTollFreeOrServiceNumber(contact.directPhoneE164)) {
+    return { phone: contact.directPhoneE164, type: 'direct' };
+  }
+  if (contact.directPhone) {
+    const normalized = normalize(contact.directPhone);
+    if (normalized && !isTollFreeOrServiceNumber(normalized)) return { phone: normalized, type: 'direct' };
+  }
+
+  // Fallback to mobile phone
+  if (contact.mobilePhoneE164 && isValidE164(contact.mobilePhoneE164) && !isTollFreeOrServiceNumber(contact.mobilePhoneE164)) {
+    return { phone: contact.mobilePhoneE164, type: 'mobile' };
+  }
+  if (contact.mobilePhone) {
+    const normalized = normalize(contact.mobilePhone);
+    if (normalized && !isTollFreeOrServiceNumber(normalized)) return { phone: normalized, type: 'mobile' };
+  }
+
+  // Last resort: HQ phone (use account's country, not contact's country)
+  // Skip toll-free/freephone numbers - these are inbound-only company lines (e.g. 0800, 1-800)
+  if (contact.hqPhoneE164 && isValidE164(contact.hqPhoneE164) && !isTollFreeOrServiceNumber(contact.hqPhoneE164)) {
+    return { phone: contact.hqPhoneE164, type: 'hq' };
+  }
+  if (contact.hqPhone) {
+    const hqCountry = contact.hqCountry || undefined;
+    const normalized = normalize(contact.hqPhone, hqCountry);
+    if (normalized && !isTollFreeOrServiceNumber(normalized)) return { phone: normalized, type: 'hq' };
+  }
+
+  return { phone: null, type: null };
+}
+
+/**
+ * Normalize phone number with country code
+ */
+export function normalizePhoneWithCountryCode(
+  phone: string | null | undefined,
+  country: string | null | undefined
+): { e164: string | null; normalizedPhone: string | null } {
+  if (!phone) {
+    return { e164: null, normalizedPhone: null };
+  }
+
+  // Try country-aware normalization first
+  const countryAware = formatPhoneWithCountryCode(phone, country);
+  if (countryAware && isValidE164(countryAware)) {
+    return { e164: countryAware, normalizedPhone: countryAware };
+  }
+
+  // Fallback to heuristic
+  const normalized = normalizeToE164(phone);
+  return {
+    e164: isValidE164(normalized) ? normalized : null,
+    normalizedPhone: normalized
+  };
+}
+
+/**
+ * Normalize country to country code
+ */
+export function normalizeCountryToCode(country: string | null | undefined): string | null {
+  if (!country) return null;
+  
+  const countryCodeMap: Record = {
+    'United States': 'US',
+    'United Kingdom': 'GB',
+    'Canada': 'CA',
+    'Australia': 'AU',
+    'Germany': 'DE',
+    'France': 'FR',
+    'Italy': 'IT',
+    'Spain': 'ES',
+    'Japan': 'JP',
+    'China': 'CN',
+    'India': 'IN',
+  };
+  
+  return countryCodeMap[country] || country.toUpperCase().substring(0, 2);
+}

@@ -1,0 +1,101 @@
+2025-11-18 16:36:27.49
+40448806
+User
+hint: undefined,
+
+2025-11-18 16:36:27.49
+40448806
+User
+column: undefined,
+2025-11-18 16:36:27.49
+40448806
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-18 16:36:27.62
+40448806
+User
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+2025-11-18 16:36:27.78
+40448806
+User
+hint: undefined,
+2025-11-18 16:36:27.78
+40448806
+User
+Error inserting batch 97: error: duplicate key value violates unique constraint "agent_queue_agent_campaign_contact_uniq"
+2025-11-18 16:36:27.78
+40448806
+User
+code: '23505',
+2025-11-18 16:36:27.78
+40448806
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-18 16:36:27.78
+40448806
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-18 16:36:27.78
+40448806
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-18 16:36:27.78
+40448806
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-18 16:36:27.78
+40448806
+User
+severity: 'ERROR',
+2025-11-18 16:36:27.78
+40448806
+User
+at async file:///home/runner/workspace/dist/index.js:42616:32 {
+2025-11-18 16:36:27.78
+40448806
+User
+length: 386,
+2025-11-18 16:36:32.30
+40448806
+User
+Error inserting batch 112: error: duplicate key value violates unique constraint "agent_queue_agent_campaign_contact_uniq"
+2025-11-18 16:36:32.30
+40448806
+User
+detail: 'Key (agent_id, campaign_id, contact_id)=(ae3698b7-9de5-4124-b6e0-f635d5dc5099, 70434f6e-3ab6-49e4-acf7-350b81f60ea2, 71048b9a-0f53-4035-ae99-f6c7852e0da0) already exists.',
+2025-11-18 16:36:32.30
+40448806
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-18 16:36:32.30
+40448806
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-18 16:36:32.30
+40448806
+User
+routine: '_bt_check_unique'
+2025-11-18 16:36:32.30
+40448806
+User
+dataType: undefined,
+2025-11-18 16:36:32.30
+40448806
+User
+where: undefined,
+2025-11-18 16:36:32.30
+40448806
+User
+severity: 'ERROR',
+2025-11-18 16:36:32.30
+40448806
+User
+schema: 'public',
+2025-11-18 16:36:32.30
+40448806
+User
+position: undefined,
+2025-11-18 16:36:32.30
+40448806
+User
+at async file:///home/runner/workspace/dist/index.js:42616:32 {

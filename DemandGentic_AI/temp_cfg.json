@@ -1,0 +1,670 @@
+{
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+    "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "558.0.0",
+      "run.googleapis.com/ingress": "all",
+      "run.googleapis.com/ingress-status": "all",
+      "run.googleapis.com/maxScale": "50",
+      "run.googleapis.com/operation-id": "df64e417-b1df-487a-9047-810d0f3d67d1",
+      "run.googleapis.com/urls": "[\"https://demandgentic-voice-823201449858.us-central1.run.app\",\"https://demandgentic-voice-yehu6cmsbq-uc.a.run.app\"]",
+      "serving.knative.dev/creator": "zahid.m@pivotal-b2b.com",
+      "serving.knative.dev/lastModifier": "823201449858-compute@developer.gserviceaccount.com"
+    },
+    "creationTimestamp": "2026-03-01T05:44:41.745326Z",
+    "generation": 13,
+    "labels": {
+      "cloud.googleapis.com/location": "us-central1",
+      "commit-sha": "3fa18dd3c09df0c9895488167e759e42be258b74",
+      "gcb-build-id": "65230c88-762d-4184-aff0-1218b3462adf",
+      "gcb-trigger-id": "84b77228-86d1-4001-912c-1e3797811cb3",
+      "gcb-trigger-region": "global",
+      "managed-by": "gcp-cloud-build-deploy-cloud-run"
+    },
+    "name": "demandgentic-voice",
+    "namespace": "823201449858",
+    "resourceVersion": "AAZL+hWR1js",
+    "selfLink": "/apis/serving.knative.dev/v1/namespaces/823201449858/services/demandgentic-voice",
+    "uid": "e4d64187-4aa4-400b-b1c0-345d9a950223"
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "autoscaling.knative.dev/maxScale": "50",
+          "autoscaling.knative.dev/minScale": "1",
+          "run.googleapis.com/client-name": "gcloud",
+          "run.googleapis.com/client-version": "558.0.0",
+          "run.googleapis.com/startup-cpu-boost": "true"
+        },
+        "labels": {
+          "client.knative.dev/nonce": "ywwbfgplsp",
+          "commit-sha": "3fa18dd3c09df0c9895488167e759e42be258b74",
+          "gcb-build-id": "65230c88-762d-4184-aff0-1218b3462adf",
+          "gcb-trigger-id": "84b77228-86d1-4001-912c-1e3797811cb3",
+          "gcb-trigger-region": "global",
+          "managed-by": "gcp-cloud-build-deploy-cloud-run",
+          "run.googleapis.com/startupProbeType": "Default"
+        }
+      },
+      "spec": {
+        "containerConcurrency": 150,
+        "containers": [
+          {
+            "env": [
+              {
+                "name": "NODE_ENV",
+                "value": "production"
+              },
+              {
+                "name": "TELNYX_NUMBER_POOL_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "TELNYX_TEXML_APP_ID",
+                "value": "2870970047591876264"
+              },
+              {
+                "name": "VOICE_PROVIDER",
+                "value": "google"
+              },
+              {
+                "name": "VOICE_PROVIDER_FALLBACK",
+                "value": "true"
+              },
+              {
+                "name": "VOICE_PROVIDER_FALLBACK_TARGET",
+                "value": "openai"
+              },
+              {
+                "name": "GEMINI_LIVE_MODEL",
+                "value": "gemini-live-2.5-flash-native-audio"
+              },
+              {
+                "name": "USE_VERTEX_AI",
+                "value": "true"
+              },
+              {
+                "name": "GOOGLE_CLOUD_PROJECT",
+                "value": "gen-lang-client-0789558283"
+              },
+              {
+                "name": "GCP_PROJECT_ID",
+                "value": "gen-lang-client-0789558283"
+              },
+              {
+                "name": "GCS_PROJECT_ID",
+                "value": "gen-lang-client-0789558283"
+              },
+              {
+                "name": "GCS_BUCKET",
+                "value": "demandgentic-prod-storage-2026"
+              },
+              {
+                "name": "DEEPGRAM_MODEL",
+                "value": "nova-2-phonecall"
+              },
+              {
+                "name": "DEEPGRAM_LANGUAGE",
+                "value": "en-US"
+              },
+              {
+                "name": "CONVERSATION_QUALITY_MODEL",
+                "value": "deepseek-chat"
+              },
+              {
+                "name": "CALL_EXECUTION_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "GLOBAL_MAX_CONCURRENT_CALLS",
+                "value": "100"
+              },
+              {
+                "name": "MAX_CONCURRENT_CALLS",
+                "value": "100"
+              },
+              {
+                "name": "ENABLE_LOG_STREAMING",
+                "value": "true"
+              },
+              {
+                "name": "APP_GIT_SHA",
+                "value": "815d338"
+              },
+              {
+                "name": "LIVEKIT_URL",
+                "value": "wss://demandgentic-wmczsvyo.livekit.cloud"
+              },
+              {
+                "name": "LIVEKIT_SIP_URI",
+                "value": "sip:demandgentic-wmczsvyo.sip.livekit.cloud"
+              },
+              {
+                "name": "LIVEKIT_SIP_CONNECTION_ID",
+                "value": "2903106223836497802"
+              },
+              {
+                "name": "SERVICE_ROLE",
+                "value": "voice"
+              },
+              {
+                "name": "BASE_URL",
+                "value": "https://demandgentic.ai"
+              },
+              {
+                "name": "PUBLIC_TEXML_HOST",
+                "value": "demandgentic.ai"
+              },
+              {
+                "name": "DATABASE_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "DATABASE_URL"
+                  }
+                }
+              },
+              {
+                "name": "JWT_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "JWT_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "SESSION_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SESSION_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "SECRET_MANAGER_MASTER_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SECRET_MANAGER_MASTER_KEY"
+                  }
+                }
+              },
+              {
+                "name": "OPENAI_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "OPENAI_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "OPENAI_WEBHOOK_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "OPENAI_WEBHOOK_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "AI_INTEGRATIONS_OPENAI_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "AI_INTEGRATIONS_OPENAI_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "AI_INTEGRATIONS_OPENAI_BASE_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "AI_INTEGRATIONS_OPENAI_BASE_URL"
+                  }
+                }
+              },
+              {
+                "name": "AI_INTEGRATIONS_ANTHROPIC_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "AI_INTEGRATIONS_ANTHROPIC_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "AI_INTEGRATIONS_GEMINI_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "AI_INTEGRATIONS_GEMINI_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "AI_INTEGRATIONS_GEMINI_BASE_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "AI_INTEGRATIONS_GEMINI_BASE_URL"
+                  }
+                }
+              },
+              {
+                "name": "GEMINI_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "GEMINI_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "DEEPSEEK_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "DEEPSEEK_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "BRAVE_SEARCH_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "BRAVE_SEARCH_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "EMAIL_LIST_VERIFY_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "EMAIL_LIST_VERIFY_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "PSE_GOOGLE",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PSE_GOOGLE"
+                  }
+                }
+              },
+              {
+                "name": "GOOGLE_SEARCH_ENGINE_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "GOOGLE_SEARCH_ENGINE_ID"
+                  }
+                }
+              },
+              {
+                "name": "GOOGLE_SEARCH_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "GOOGLE_SEARCH_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "MICROSOFT_CLIENT_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "MICROSOFT_CLIENT_ID"
+                  }
+                }
+              },
+              {
+                "name": "MICROSOFT_CLIENT_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "MICROSOFT_CLIENT_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "MICROSOFT_TENANT_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "MICROSOFT_TENANT_ID"
+                  }
+                }
+              },
+              {
+                "name": "COMPANIES_HOUSE_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "COMPANIES_HOUSE_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "GOOGLE_AUTH_CLIENT_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "GOOGLE_AUTH_CLIENT_ID"
+                  }
+                }
+              },
+              {
+                "name": "GOOGLE_CLIENT_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "GOOGLE_CLIENT_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_CONNECTION_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_CONNECTION_ID"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_CALL_CONTROL_APP_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_CALL_CONTROL_APP_ID"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_FROM_NUMBER",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_FROM_NUMBER"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_SIP_CONNECTION_ID",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_SIP_CONNECTION_ID"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_SIP_PASSWORD",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_SIP_PASSWORD"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_SIP_USERNAME",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_SIP_USERNAME"
+                  }
+                }
+              },
+              {
+                "name": "TELNYX_WEBHOOK_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "TELNYX_WEBHOOK_URL"
+                  }
+                }
+              },
+              {
+                "name": "PUBLIC_WEBSOCKET_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PUBLIC_WEBSOCKET_URL"
+                  }
+                }
+              },
+              {
+                "name": "PUBLIC_WEBHOOK_HOST",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PUBLIC_WEBHOOK_HOST"
+                  }
+                }
+              },
+              {
+                "name": "ELEVENLABS_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "ELEVENLABS_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "ELEVENLABS_WEBHOOK_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "ELEVENLABS_WEBHOOK_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "REDIS_URL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "REDIS_URL"
+                  }
+                }
+              },
+              {
+                "name": "MAILGUN_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "MAILGUN_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "MAILGUN_DOMAIN",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "MAILGUN_DOMAIN"
+                  }
+                }
+              },
+              {
+                "name": "DEEPGRAM_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "DEEPGRAM_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "ORG_INTELLIGENCE_OPENAI_MODEL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "ORG_INTELLIGENCE_OPENAI_MODEL"
+                  }
+                }
+              },
+              {
+                "name": "PGDATABASE",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PGDATABASE"
+                  }
+                }
+              },
+              {
+                "name": "PGHOST",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PGHOST"
+                  }
+                }
+              },
+              {
+                "name": "PGPORT",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PGPORT"
+                  }
+                }
+              },
+              {
+                "name": "PGUSER",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PGUSER"
+                  }
+                }
+              },
+              {
+                "name": "PGPASSWORD",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "PGPASSWORD"
+                  }
+                }
+              },
+              {
+                "name": "LIVEKIT_WEBHOOK_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "LIVEKIT_WEBHOOK_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "LIVEKIT_API_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "LIVEKIT_API_KEY"
+                  }
+                }
+              },
+              {
+                "name": "LIVEKIT_API_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "LIVEKIT_API_SECRET"
+                  }
+                }
+              }
+            ],
+            "image": "us-central1-docker.pkg.dev/gen-lang-client-0789558283/cloud-run-source-deploy/demandgentic-v.01/demandgentic-voice:3fa18dd3c09df0c9895488167e759e42be258b74",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "name": "http1"
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "4",
+                "memory": "4Gi"
+              }
+            },
+            "startupProbe": {
+              "failureThreshold": 1,
+              "periodSeconds": 240,
+              "tcpSocket": {
+                "port": 8080
+              },
+              "timeoutSeconds": 240
+            }
+          }
+        ],
+        "serviceAccountName": "823201449858-compute@developer.gserviceaccount.com",
+        "timeoutSeconds": 3600
+      }
+    },
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100
+      }
+    ]
+  },
+  "status": {
+    "address": {
+      "url": "https://demandgentic-voice-yehu6cmsbq-uc.a.run.app"
+    },
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-03-01T17:48:56.050235Z",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-03-01T17:48:39.473803Z",
+        "status": "True",
+        "type": "ConfigurationsReady"
+      },
+      {
+        "lastTransitionTime": "2026-03-01T17:48:56.018902Z",
+        "status": "True",
+        "type": "RoutesReady"
+      }
+    ],
+    "latestCreatedRevisionName": "demandgentic-voice-00011-csv",
+    "latestReadyRevisionName": "demandgentic-voice-00011-csv",
+    "observedGeneration": 13,
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100,
+        "revisionName": "demandgentic-voice-00011-csv"
+      }
+    ],
+    "url": "https://demandgentic-voice-yehu6cmsbq-uc.a.run.app"
+  }
+}

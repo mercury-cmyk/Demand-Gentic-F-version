@@ -1,0 +1,377 @@
+Build Brief — Pivotal B2B CRM (ABM + Campaigns + Client Orders, Bridge Model)
+0) Goal & Success Criteria
+
+Goal: Implement a B2B-optimized CRM with ABM capabilities, mass email + telemarketing campaigns, segmentation, QA, compliance, and a Client Portal where customers create Campaign Orders. Orders use a bridge model: no auto-creation of campaigns; ops manually link campaigns to orders.
+
+Success Criteria
+
+Clean, minimal UX with 2–click access to primary actions.
+
+Role-based navigation; users see only what they need.
+
+Bulk import (≥100k), fast filtering/segmentation, reliable sending/calling integrations (adapters).
+
+Orders → manual linking to internal campaigns; order-scoped reporting + approved leads download.
+
+1) Tech Stack (Recommended)
+
+Frontend: React + Vite, TypeScript, TailwindCSS, shadcn/ui, React Router, Zustand (or Redux Toolkit) for state.
+
+Backend: Node.js (NestJS) + TypeScript OR Python (FastAPI). Choose one; the brief assumes NestJS.
+
+DB: PostgreSQL (Prisma ORM or TypeORM).
+
+Cache/Queues: Redis (BullMQ).
+
+Search (optional Phase 2): OpenSearch/Elasticsearch.
+
+Files/Recordings: S3-compatible (e.g., MinIO in dev).
+
+Telephony: Telnyx WebRTC/Voice (adapter).
+
+Email: SES/SendGrid/Mailgun (adapter).
+
+Verification: phone (libphonenumber-equiv); email (DNS + SMTP handshake via adapter).
+
+Auth: JWT + OAuth2/OIDC ready.
+
+Infra (dev): Docker Compose for Postgres + Redis + MinIO.
+
+2) Architecture Principles
+
+Hexagonal/Clean architecture: domain core decoupled from adapters.
+
+Bounded Contexts: Audience, Campaigns, Telephony, Email, QA, Suppression, Reporting, Automation, Client Orders (Portal).
+
+Bridge Model: Orders never create campaigns automatically; ops links existing/internal campaigns.
+
+Contracts: OpenAPI for REST; versioned endpoints.
+
+Events (Phase 2): Outbox pattern → Kafka/Redis Streams for projections/reporting.
+
+3) UX/UI — Simplification & Ease-of-Use (Strongly Enforce)
+
+Design Tenets
+
+Minimal screens, obvious hierarchy, consistent components.
+
+Primary actions fixed and visible (Create, Import, Launch, Approve, Link).
+
+Large, legible typography (Inter), generous spacing, low cognitive load.
+
+Keyboard-first forms, optimistic save, undo toasts.
+
+Global Layout
+
+Left Sidebar: Dashboard, Accounts, Contacts, Segments & Lists, Campaigns (Email, Telemarketing), Leads & QA, Reports, Automations, Client Orders, Settings.
+
+Top Bar: Universal search, notifications, profile, help.
+
+Right Drawer (contextual): Quick details & actions.
+
+High-value UX Patterns
+
+Step Wizards where complexity exists (CSV import, Campaign creation, Client Order).
+
+Audience Builder with visual chips, AND/OR groups, dynamic preview count.
+
+Domain Set Uploader → normalize, match, expand to contacts, “Assign to Campaign” in 1 click.
+
+Caller Panel: softphone + script + qualification form + dispositions in a single page.
+
+QA Grid: approve/reject in bulk with side-drawer context.
+
+Order–Campaign Link Modal: search internal campaigns, link, confirm.
+
+4) Core Features (MVP Scope)
+4.1 Audience (Accounts & Contacts)
+
+Fields per PRD (company domain, LinkedIn URL, phones E.164, custom fields JSONB).
+
+Linking rule: Contact.email domain ↔ Account.domain.
+
+Advanced filter operators: equals/contains/starts/ends/in/is_empty/has_value… across Contact & Account, including custom fields.
+
+4.2 Segmentation & Lists
+
+Segments (dynamic) and Lists (static).
+
+Domain Sets: upload CSV/TXT of domains → normalize → match Accounts → optional expand to Contacts → save as set; can export or assign to campaigns.
+
+4.3 Bulk Import (≥100k)
+
+Chunked processing with Redis/BullMQ.
+
+Validators: phone to E.164, email DNS+SMTP (no send), address normalization.
+
+Error queue + downloadable reject file.
+
+4.4 Campaigns
+
+Email: audience picker (Lists/Segments/Domain Sets/Filters), responsive HTML editor, personalization placeholders, mandatory unsubscribe, tracking (delivered/open/click/reply/bounce/complaint), pre-send guard exclude invalid/bounced.
+
+Telemarketing: audience picker; Telnyx click-to-call; script panel; qualification questions (dropdown/radio/checkbox/text/number/date); standard dispositions with queue rules; DNC enforcement.
+
+4.5 Lead QA Portal
+
+Status flow: New → Under Review → Approved/Rejected → Returned → Published.
+
+Checklist (fields/ICP/consent/recordings).
+
+Only Approved leads count and are deliverable.
+
+4.6 Compliance & Suppression
+
+Global DNC (phone) & Unsubscribe (email).
+
+Consent basis, source, timestamp.
+
+Real-time suppression check pre-send / pre-dial.
+
+4.7 Client Portal (Bridge Model)
+
+Clients create Campaign Orders: define audience (incl. Domain Sets), select type (Email/Telemarketing/Combo), upload assets, set lead goal & pacing, custom qualification criteria, compliance confirmation.
+
+No auto-creation of campaigns. Internal ops links existing/internal campaigns to orders via Order–Campaign Links.
+
+Order-scoped dashboards; download Approved Leads and engagement reports.
+
+5) Data Model (DDL-Level Outline)
+
+Account (id, name, industry, annual_revenue, employees_size_range, staff_count, description, hq_*, year_founded, sic_code, naics_code, domain (unique), linkedin_url, main_phone, main_phone_e164, main_phone_extension, intent_topics[], tech_stack[], owner_id, timestamps, custom_fields JSONB)
+
+Contact (id, account_id FK, full_name, first_name, last_name, job_title, email, email_verification_status, direct_phone, phone_extension, seniority_level, department, address, linkedin_url, intent_topics[], consent fields, owner/timestamps, derived email_status, phone_status, custom_fields)
+
+List/Segment (id, name, type, definition_json, owner/timestamps)
+
+Campaign (id, type email|call, name, status, brand_id, schedule, assigned_teams[], audience refs, throttling)
+
+EmailMessage (events & provider ids)
+Call (agent, disposition, recording, callback)
+Lead (qa_status, checklist, approved_at)
+Suppression (email/phone tables)
+AuditLog
+
+DomainSet (id, name, domains[], stats_json, owner/timestamps)
+
+Client Orders (Bridge)
+
+CampaignOrder (client + order metadata; no campaign auto-creation)
+
+OrderAudienceSnapshot (immutable audience definition)
+
+OrderAsset (creatives/scripts)
+
+OrderQualification (question version/flags)
+
+OrderCampaignLink (manual mapping: order ↔ campaign)
+
+OrderDelivery (portal/webhook/SFTP)
+
+Indexes: btree FKs & timestamps; trigram/GIN on email/phone/domain; partial indexes on active contacts.
+
+6) API (OpenAPI-style, Top Routes)
+Auth
+
+POST /auth/login → JWT; roles: admin, campaign_manager, data_ops, qa_analyst, agent, client_user.
+
+Audience
+
+GET /accounts / GET /contacts (filter, sort, paginate)
+
+POST /domain-sets (upload) · GET /domain-sets/:id · POST /domain-sets/:id/expand-to-contacts
+
+Segments & Lists
+
+POST /segments · GET /segments/:id/run
+
+POST /lists · POST /lists/:id/snapshot
+
+Bulk Import
+
+POST /imports (upload file → mapping → validate → run)
+
+GET /imports/:id/errors.csv
+
+Campaigns
+
+POST /campaigns/email | POST /campaigns/call
+
+POST /campaigns/:id/launch (guards check)
+
+POST /calls/:id/disposition (DNC/Not Interested/Success rules)
+
+Webhooks: /webhooks/email/*, /webhooks/telnyx/*
+
+QA
+
+GET /leads?qa_status=UnderReview · POST /leads/:id/approve
+
+Client Orders (Bridge)
+
+POST /client/orders · PATCH /client/orders/:id · POST /client/orders/:id/submit
+
+POST /client/orders/:id/audience (snapshot or attach segment/domain set)
+
+POST /client/orders/:id/assets
+
+Internal: POST /orders/:id/campaign-links (manual link) · GET /orders/:id/campaign-links
+
+GET /client/orders/:id/reports · GET /client/orders/:id/leads/download (approved only)
+
+Suppression
+
+POST /suppressions/email · POST /suppressions/phone
+
+7) Integrations (Adapters)
+
+Telnyx: place/receive calls, click-to-call, recordings, events.
+
+ESP: pluggable (SES/SendGrid/Mailgun).
+
+Email Verification: DNS + SMTP handshake (no send).
+
+Phone Validation: libphonenumber-equiv + optional carrier lookup.
+
+Storage: S3 for assets & recordings.
+
+Adapters must be swap-friendly: internal ports & interfaces, config via env.
+
+8) Automation & Triggers (Phase 1 Light)
+
+Trigger sources: Contact/Account updates, Campaign events, QA decisions, Order status changes.
+
+Actions: notify user, assign record, update field, call webhook, enqueue task.
+
+Visual “If–Then–Else” builder (Phase 2 polish).
+
+9) Reporting
+
+Email KPIs: delivery/open/click/CTR/bounce/complaint by campaign/domain.
+
+Telemarketing KPIs: attempts/connects/talk time/dispositions/conversions.
+
+ABM: account coverage & contact penetration.
+
+Order-scoped dashboards (aggregate linked campaigns only).
+
+Exports (CSV/XLSX). Schedule send.
+
+10) Security, Compliance, Quality
+
+RBAC by role + resource; client users scoped to their orders only.
+
+DNC/Unsub enforced before dial/send.
+
+Audit log all critical actions + downloads.
+
+Accessibility: WCAG AA (contrast, keyboard nav, ARIA).
+
+Tests: unit (domain), API contract, integration (adapters), E2E smoke (Cypress/Playwright).
+
+Observability: request logs, metrics, traces; sane defaults.
+
+11) Developer Experience (DX)
+
+Monorepo: /apps/api, /apps/web, /packages/ui, /infra.
+
+Scripts: dev, build, lint, test, db:migrate, seed.
+
+Seed Data: a few accounts/contacts, a domain set, a sample campaign, a sample order (unlinked), 3 leads in QA.
+
+Env Templates: .env.example for DB, Redis, S3, Telnyx, ESP.
+
+Docker Compose (dev minimal):
+
+postgres, redis, minio (S3), (optional) mailhog.
+
+12) Milestones (MVP First)
+
+M0 — Skeleton (Week 1)
+
+Repo, auth + roles, navigation shell, Prisma/TypeORM + migrations, seed, CI.
+
+M1 — Audience & Segments
+
+Accounts/Contacts CRUD, filters, segments/lists, Domain Set uploader + expand to contacts.
+
+M2 — Campaigns
+
+Email (editor, send, tracking, guards), Telemarketing (softphone, dispositions, script + qualification form).
+
+M3 — QA & Compliance
+
+QA portal flow; DNC/Unsub tables; enforcement hooks.
+
+M4 — Client Orders (Bridge)
+
+Order wizard, assets, qualification mapping, manual Order–Campaign linking, order-scoped reporting + downloads.
+
+M5 — Polish & Docs
+
+Performance passes, accessibility, help texts, empty states, error states.
+
+13) UI Blueprints (Key Screens — brief specs)
+A) Audience Builder
+
+Filters as chips; AND/OR groups; “Preview Count”.
+
+Buttons: Save Segment, Make List, Export, Assign to Campaign.
+
+B) Domain Set Uploader
+
+Drag/drop → normalize → match rate report → actions: Convert to Segment, Expand to Contacts, Assign.
+
+C) Email Campaign Builder (wizard)
+
+Audience 2. Content (HTML editor + placeholders) 3. Schedule 4. Review (guards) 5. Launch.
+
+D) Telemarketing Agent Panel
+
+Left: softphone; Center: script; Right: qualification form; bottom: dispositions row.
+
+E) QA Portal
+
+Grid + side drawer; approve/reject; checklist; playback recordings.
+
+F) Client Orders (Bridge)
+
+Wizard: Audience → Type → Assets → Lead Goal/Pacing → Qualification → Review → Submit.
+
+Link Campaigns button (internal view): modal to search and link existing campaigns.
+
+14) Acceptance Tests (MVP)
+
+Import 100k contacts → finish ≤ 2h with error CSV.
+
+Email send excludes invalid/bounced; unsubscribe enforced.
+
+Telemarketing DNC request → immediate global suppression + removed from active queues.
+
+Order wizard completes; no campaign auto-creation; ops links campaign; order reports aggregate linked campaign data only.
+
+Approved lead appears for client download ≤ 15 minutes after QA approval.
+
+15) Nice-to-Haves (Phase 2)
+
+Event bus projections to OpenSearch for fast analytics.
+
+Predictive lead scoring + send time optimization.
+
+Natural-language search (“show me…”) and AI assistant.
+
+Lookalike segment recommendations.
+
+16) Getting Started (Dev)
+
+pnpm i (or npm i)
+
+docker compose up -d (db, redis, s3)
+
+pnpm db:migrate && pnpm db:seed
+
+pnpm dev (runs api + web)
+
+Open http://localhost:5173 → login (seeded admin)
+
+Deliver a product that’s calm and fast. Keep screens uncluttered, errors helpful, and primary actions obvious. Every extra click must justify itself.

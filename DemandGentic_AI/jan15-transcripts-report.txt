@@ -1,0 +1,101 @@
+TELNYX CALLS ANALYSIS - JAN 15+ 2026
+Generated: 2026-01-17T11:00:54.861Z
+================================================================================
+
+Total Calls: 5
+Average Duration: 49s
+Average Transcript Length: 588 chars
+
+================================================================================
+
+CALL 1
+--------------------------------------------------------------------------------
+ID: 5fecfe05-fcbc-4fcb-a894-c17ee36d8b9a
+Contact: Paige Tills
+Phone: +18064331045
+Duration: 10s
+Call Time: Sat Jan 17 2026 10:45:50 GMT+0500 (Pakistan Standard Time)
+Telnyx ID: v3:9bs2SI16OmGGFV-XeatG04zVPPk71Wg4RMhRy9OyGph7xAGwbIfrow
+AI Score: N/A
+AI Status: N/A
+
+TRANSCRIPT:
+[Transcript]
+assistant: Hello, may I please speak with Paige Tills, the Vice President Marketing at Samsales Consulting?You're welcome. Have a great day.
+user: possible. Thank you.
+
+================================================================================
+
+CALL 2
+--------------------------------------------------------------------------------
+ID: efceb855-eb7f-4c95-8427-9faa38eaaf91
+Contact: Tim Skrmetti
+Phone: +16014215695
+Duration: 61s
+Call Time: Sat Jan 17 2026 08:26:03 GMT+0500 (Pakistan Standard Time)
+Telnyx ID: v3:OlVsrqCpSFYc2_FlJydUc-sLVezJM6HbzGuXGYjjqY-be_qsP-W20A
+AI Score: 18.50
+AI Status: not_qualified
+
+TRANSCRIPT:
+Hi, I'm Call Assist by Google, recording this call for the person you're trying to reach. Before I try to connect you, can I ask what you're calling about? Hello? Hello. May I please speak with Tim Schermetti, the Senior Director, VP of Business Development, Automotive at American First Finance? Before I try to connect you, could you please give me a quick description of why you're calling? Thank you for confirming, Tim. I appreciate your time. I'm calling from Pivotal B2B, and this isn't a sales call. We're speaking with a select group of leaders about AI-driven, account-based ways to earn demand, grounded in real account intelligence, not just personalization. To start, how do you currently ensure that your outreach is truly tied to a real account Unfortunately, the person you're calling cannot take your call right now. Have a nice day.
+
+================================================================================
+
+CALL 3
+--------------------------------------------------------------------------------
+ID: d4132d9c-3157-424f-957f-74a5c3dd5725
+Contact: Yadira Rosas
+Phone: +13103483609
+Duration: 52s
+Call Time: Fri Jan 16 2026 06:34:29 GMT+0500 (Pakistan Standard Time)
+Telnyx ID: v3:xXtJdh0imP79N7O3HWjD_y4imShfCvFGRck3mZSXuxgT_pycvNExfA
+AI Score: N/A
+AI Status: N/A
+
+TRANSCRIPT:
+Sorry? Yeah, dear Roses. Is not available? Record your message at the tone. When you are finished, hang up or press pound for more options. To send this message, press pound or hang up. To play it, 3. To re-record it, 4. To add to it, 5. To discard it, 6. To send this message, press pound or hang up. To play it, 3. To re-record it, 4. To add to it, 5. To discard it, 6. If you would like to try an extension, you may do so now. Goodbye.
+
+================================================================================
+
+CALL 4
+--------------------------------------------------------------------------------
+ID: 2d0b2d7d-15f1-42b4-97e0-b6b0afc9ea01
+Contact: Jason Reiling
+Phone: +17327188927
+Duration: 84s
+Call Time: Fri Jan 16 2026 06:34:29 GMT+0500 (Pakistan Standard Time)
+Telnyx ID: v3:ji_BIQjjKDbOWSARGBQjy9kMkQkqg25Y5mjxHFKWvL8ed9s7GKo4FQ
+AI Score: N/A
+AI Status: N/A
+
+TRANSCRIPT:
+You've reached Jason Reiling at MXV Rail. Please leave your name, number, and a brief message, and I'll be sure to get back to you. Thank you very much. At the tone, please record your message. When you've finished recording, you may hang up or press one for more options. To send a fax, press four now. To leave a callback number, press five. You've reached Jason Reiling at MXV Rail. Please leave your name, number, and a brief message, and I'll be sure to get back to you. Thank you very much. You've reached Jason Reiling at MXV Rail. Please leave your name, number, and a brief message, and I'll be sure to get back to you. Thank you very much.
+
+================================================================================
+
+CALL 5
+--------------------------------------------------------------------------------
+ID: 2a244f3a-d5f2-49d5-b0de-e4bfa96936bd
+Contact: Gray Bekurs
+Phone: +12054840419
+Duration: 40s
+Call Time: Fri Jan 16 2026 02:31:45 GMT+0500 (Pakistan Standard Time)
+Telnyx ID: v3:MnwVUStMbjEfB7cFJ7sDFGTy4mh5xgAv0_Caw8h_rhnRZc9aEiHCzA
+AI Score: N/A
+AI Status: N/A
+
+TRANSCRIPT:
+[AI Call Summary]
+Summary: Gray Bekurs confirmed identity and engaged in a thoughtful conversation about AI-driven account-based marketing and the importance of intelligence-led outreach. Discussed their current challenges with aligning outreach to account problems and expressed interest in receiving follow-up details. Verified email address for further information.
+Engagement: high
+Sentiment: reflective
+Time pressure: no
+Primary challenge: Aligning marketing outreach with real account problems and improving intelligence-led ABM
+Follow-up consent: yes
+Next step: Send follow-up information to verified email address
+
+[Transcript]
+assistant: Hello, may I please speak with Gray Bekurs, the Executive Vice President of Marketing at COCM?Before I let you go—quick one since this is an AI reaching out—is there anything you
+
+================================================================================

@@ -1,0 +1,24 @@
+{"id":"ex001","text":"Welcome to Acme Corporation. Please listen carefully as our options have changed. For sales press 1, for support press 2, for dial-by-name directory press 3, to reach the operator press 0.","labels":{"entry":"IVR_MENU"},"action":{"type":"STATE_ENTER_IVR_MODE","next":"SEND_DTMF","dtmf":"3"}}
+{"id":"ex002","text":"If you know your party's extension, you may dial it at any time. To use the dial-by-name directory, press 9.","labels":{"entry":"IVR_MENU"},"action":{"type":"SEND_DTMF","dtmf":"9"}}
+{"id":"ex003","text":"Please say the name of the person you are trying to reach.","labels":{"entry":"IVR_MENU"},"action":{"type":"STATE_ENTER_IVR_MODE","next":"PROVIDE_NAME_FOR_DIRECTORY","value":"{{contact_full_name}}"}}
+{"id":"ex004","text":"Good morning, Globex Corporation, this is Sarah. How may I direct your call?","labels":{"entry":"RECEPTIONIST_SWITCHBOARD"},"action":{"type":"STATE_ENTER_GATEKEEPER_MODE","next":"REQUEST_TRANSFER_TO_CONTACT"}}
+{"id":"ex005","text":"How may I help you?","labels":{"entry":"RECEPTIONIST_SWITCHBOARD"},"action":{"type":"STATE_ENTER_GATEKEEPER_MODE","next":"REQUEST_TRANSFER_TO_CONTACT"}}
+{"id":"ex006","text":"May I ask what this is regarding?","labels":{"entry":"GATEKEEPER_HUMAN","objection":"CLARITY_OBJECTION"},"action":{"type":"RESPOND_NEUTRAL_REASON","next":"REQUEST_TRANSFER_TO_CONTACT"}}
+{"id":"ex007","text":"Hello?","labels":{"entry":"UNKNOWN","identity":"AMBIGUOUS_IDENTITY"},"action":{"type":"ASK_CLARIFY_IDENTITY"}}
+{"id":"ex008","text":"Speaking.","labels":{"entry":"RIGHT_PARTY","identity":"CONFIRMED_RIGHT_PARTY"},"action":{"type":"STATE_ADVANCE_RIGHT_PARTY_INTRO"}}
+{"id":"ex009","text":"Yes, this is him.","labels":{"entry":"RIGHT_PARTY","identity":"CONFIRMED_RIGHT_PARTY"},"action":{"type":"STATE_ADVANCE_RIGHT_PARTY_INTRO"}}
+{"id":"ex010","text":"Yeah?","labels":{"entry":"UNKNOWN","identity":"AMBIGUOUS_IDENTITY"},"action":{"type":"ASK_CLARIFY_IDENTITY"}}
+{"id":"ex011","text":"You have reached the voicemail of John Smith. I'm not available to take your call. Please leave a message after the tone.","labels":{"entry":"VOICEMAIL_PERSONAL"},"action":{"type":"STATE_ENTER_VOICEMAIL_MODE","policy":"NO_VM_DROP","next":"END_CALL_POLITE"}}
+{"id":"ex012","text":"Hi, you've reached John. I can't take your call. Leave a message and I'll call you back.","labels":{"entry":"VOICEMAIL_PERSONAL"},"action":{"type":"STATE_ENTER_VOICEMAIL_MODE","policy":"LEAVE_VM","next":"LEAVE_VM"}}
+{"id":"ex013","text":"The mailbox is full and cannot accept messages at this time.","labels":{"entry":"VOICEMAIL_GENERIC"},"action":{"type":"STATE_ENTER_VOICEMAIL_MODE","next":"END_CALL_POLITE","note":"mark mailbox full"}}
+{"id":"ex014","text":"He's not available right now.","labels":{"entry":"GATEKEEPER_HUMAN","gatekeeper_outcome":"GATEKEEPER_BLOCKED_SOFT"},"action":{"type":"GATEKEEPER_BLOCKED_SOFT","next":"ASK_FOR_BEST_EXTENSION_OR_TIME"}}
+{"id":"ex015","text":"We don't accept sales calls. Remove us.","labels":{"entry":"GATEKEEPER_HUMAN","gatekeeper_outcome":"GATEKEEPER_BLOCKED_HARD"},"action":{"type":"GATEKEEPER_BLOCKED_HARD","next":"SUPPRESS_CONTACT"}}
+{"id":"ex016","text":"Wrong number.","labels":{"entry":"WRONG_NUMBER"},"action":{"type":"END_CALL_POLITE","next":"SUPPRESS_CONTACT"}}
+{"id":"ex017","text":"I only have 30 seconds.","labels":{"entry":"RIGHT_PARTY","time_pressure":"EXPLICIT"},"action":{"type":"COMPRESS_FLOW_ONE_QUESTION","next":"STATE_DISCOVERY_QUESTION"}}
+{"id":"ex018","text":"Send an email.","labels":{"entry":"RIGHT_PARTY","objection":"DEFLECTION"},"action":{"type":"ASK_PERMISSION_AND_CONFIRM_EMAIL","requires":["contact.email"]}}
+{"id":"ex019","text":"Who is this?","labels":{"entry":"GATEKEEPER_HUMAN","objection":"CLARITY_OBJECTION"},"action":{"type":"MINIMAL_IDENTITY_ONLY","next":"REQUEST_TRANSFER_TO_CONTACT"}}
+{"id":"ex020","text":"(system) Missing variable: contact.full_name","labels":{"preflight":"MISSING_REQUIRED"},"action":{"type":"ASK_FOR_MISSING_VARIABLES_FORM","missing":["contact.full_name"]}}
+{"id":"ex021","text":"how how could you answer","labels":{"entry":"UNKNOWN","identity":"AMBIGUOUS_IDENTITY"},"action":{"type":"ASK_CLARIFY_IDENTITY","reasoning":"Unclear/garbled audio - repeated words"}}
+{"id":"ex022","text":"Yes.","labels":{"entry":"RIGHT_PARTY","identity":"CONFIRMED_RIGHT_PARTY"},"action":{"type":"STATE_ADVANCE_RIGHT_PARTY_INTRO","note":"Short affirmative - must not deadlock"}}
+{"id":"ex023","text":"One moment.","labels":{"entry":"RECEPTIONIST_SWITCHBOARD"},"action":{"type":"STATE_ENTER_GATEKEEPER_MODE","note":"Transfer initiated, wait for next speaker"}}
+{"id":"ex024","text":"Try tomorrow morning.","labels":{"entry":"GATEKEEPER_HUMAN","gatekeeper_outcome":"GATEKEEPER_BLOCKED_SOFT"},"action":{"type":"ASK_FOR_BEST_EXTENSION_OR_TIME","note":"Log best time and exit politely"}}

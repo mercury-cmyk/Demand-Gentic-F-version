@@ -515,7 +515,7 @@ export class MultiProviderOrchestrator {
             `OPS_HUB_GEMINI_${profile.toUpperCase()}_MODEL`,
             "OPS_HUB_GEMINI_MODEL",
           ],
-          "gemini-2.0-flash",
+          "gemini-2.5-flash",
         );
       case LLMProvider.KIMI:
         return selectFirstEnv(

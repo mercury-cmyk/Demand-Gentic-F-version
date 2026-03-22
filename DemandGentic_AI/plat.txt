@@ -1,0 +1,151 @@
+{/* --- PLATFORM OVERVIEW (STRATEGIC, INTELLIGENCE, EXECUTION) --- */}
+      
+        
+          
+            
+              The Platform
+            
+            
+              Three Distinct Layers of{" "}
+              B2B Demand
+            
+            
+              Our architecture combines human strategic expertise, organization-specific intelligence, and 
+              AI-powered execution to deliver cohesive, reasoning-first campaigns.
+            
+          
+
+          
+            {/* Layer 1: The Strategic Layer */}
+            
+              
+                
+                  
+                    
+                  
+                  The Strategic Layer
+                
+                Human-Led Strategy
+                
+                  Before any automation executes, we define the roadmap. Built on 11+ years of pure B2B demand generation experience, our human experts orchestrate the foundational plays. 
+                
+                
+                  {[
+                    "Deep problem-solution mapping tailored to your ICP",
+                    "Precise targeting informed by human intelligence and precision data",
+                    "Brand and message positioning that respects your market authority",
+                  ].map((item, i) => (
+                    
+                      
+                      {item}
+                    
+                  ))}
+                
+              
+              
+                
+                  
+                  
+                    
+                    
+                  
+                  
+                    
+                    
+                  
+                
+                {/* Decorative background elements */}
+                
+                
+              
+            
+
+            {/* Layer 2: The Intelligence Layer */}
+            
+              
+                 
+                  
+                    
+                      
+                    
+                    
+                       
+                       
+                    
+                  
+                  
+                    
+                       
+                       Organization-Exclusive Studio
+                    
+                    
+                    
+                  
+                 
+                 
+              
+              
+                
+                  
+                    
+                  
+                  The Intelligence Layer
+                
+                Data, Insight & Content
+                
+                  We bridge your strategic objectives with an organization-exclusive intelligence system that ensures every action is aligned with your truth.
+                
+                
+                  {[
+                    "Continuous intelligence gathering at the account and contact level",
+                    "Precision data enrichment for accurate targeting",
+                    "An organization-exclusive content studio guided by the client�s brand",
+                  ].map((item, i) => (
+                    
+                      
+                      {item}
+                    
+                  ))}
+                
+              
+            
+
+            {/* Layer 3: The Execution Layer */}
+            
+              
+                
+                  
+                    
+                  
+                  The Execution Layer
+                
+                AI Agents & Orchestration
+                
+                  Our unified execution engine transforms strategy and intelligence into massive-scale, highly personalized outreach.
+                
+                
+                  {[
+                    "Core Capabilities: AI-powered calls, email execution, and workflow orchestration",
+                    "AI agents trained on 11+ years of B2B demand experience",
+                    "Full lifecycle coordination � from initial touches to verified handoffs",
+                  ].map((item, i) => (
+                    
+                      
+                      {item}
+                    
+                  ))}
+                
+              
+              
+                 
+                   
+                     
+                     AI Voice
+                   
+                   
+                     
+                     Email Gen
+                   
+                   
+                     
+                     Campaign Orchestration

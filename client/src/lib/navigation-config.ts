@@ -140,7 +140,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
           {
             id: 'pipeline-engagement',
             title: 'Pipeline & Engagement',
-            url: '/pipeline',
+            url: '/pipeline/unified',
             roles: MANAGEMENT_ROLES,
           },
           {
@@ -167,11 +167,49 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
   },
 
   // ============================================
-  // ARGYLE AI STUDIO
+  // QUALITY & LEADS
+  // ============================================
+  {
+    id: 'quality-control',
+    label: 'Quality & Leads',
+    domain: NAVIGATION_DOMAINS.QUALITY_CONTROL,
+    roles: [...QA_ROLES, USER_ROLES.AGENT],
+    items: [
+      {
+        id: 'quality-group',
+        title: 'Quality & Leads',
+        icon: 'CheckCircle',
+        roles: [...QA_ROLES, USER_ROLES.AGENT],
+        items: [
+          {
+            id: 'disposition-intelligence',
+            title: 'Disposition Intelligence',
+            url: '/disposition-intelligence',
+            roles: [...QA_ROLES, USER_ROLES.AGENT],
+          },
+          {
+            id: 'potential-leads',
+            title: 'Potential Leads',
+            url: '/disposition-intelligence/potential-leads',
+            roles: QA_ROLES,
+          },
+          {
+            id: 'qa-lead-review',
+            title: 'Leads & QA Review',
+            url: '/leads',
+            roles: [...QA_ROLES, USER_ROLES.AGENT],
+          },
+        ],
+      },
+    ],
+  },
+
+  // ============================================
+  // AI STUDIO
   // ============================================
   {
     id: 'ai-intelligence',
-    label: 'Argyle AI Studio',
+    label: 'AI Studio',
     domain: NAVIGATION_DOMAINS.AI_INTELLIGENCE,
     roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
     items: [
@@ -188,12 +226,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: MANAGEMENT_ROLES,
           },
           {
-            id: 'target-markets',
-            title: 'Target Markets',
-            url: '/domain-sets',
-            roles: MANAGEMENT_ROLES,
-          },
-          {
             id: 'creative-studio',
             title: 'Creative Studio',
             url: '/generative-studio',
@@ -204,6 +236,62 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             title: 'Preview Studio',
             url: '/preview-studio',
             roles: [...MANAGEMENT_ROLES, USER_ROLES.CLIENT_USER],
+          },
+          {
+            id: 'campaign-planner',
+            title: 'Campaign Planner',
+            url: '/ai-studio/campaign-manager',
+            roles: MANAGEMENT_ROLES,
+          },
+        ],
+      },
+    ],
+  },
+
+  // ============================================
+  // DATA MANAGEMENT
+  // ============================================
+  {
+    id: 'data-management',
+    label: 'Data Management',
+    domain: NAVIGATION_DOMAINS.CORE_CRM,
+    roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS, USER_ROLES.CLIENT_USER],
+    items: [
+      {
+        id: 'data-management-group',
+        title: 'Data Management',
+        icon: 'Database',
+        roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS, USER_ROLES.CLIENT_USER],
+        items: [
+          {
+            id: 'dm-accounts',
+            title: 'Accounts',
+            url: '/accounts',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS, USER_ROLES.CLIENT_USER],
+          },
+          {
+            id: 'dm-contacts',
+            title: 'Contacts',
+            url: '/contacts',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS, USER_ROLES.CLIENT_USER],
+          },
+          {
+            id: 'dm-segments',
+            title: 'Segments & Lists',
+            url: '/segments',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
+          },
+          {
+            id: 'dm-domain-sets',
+            title: 'Domain Sets',
+            url: '/domain-sets',
+            roles: [...MANAGEMENT_ROLES, USER_ROLES.DATA_OPS],
+          },
+          {
+            id: 'dm-forms',
+            title: 'Forms',
+            url: '/lead-forms',
+            roles: MANAGEMENT_ROLES,
           },
         ],
       },
@@ -226,7 +314,6 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
         icon: 'Inbox',
         roles: MANAGEMENT_ROLES,
         badge: { text: 'New', variant: 'new' as BadgeVariant },
-        description: 'Unified shared inbox for all communications',
       },
     ],
   },
@@ -272,8 +359,8 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
             roles: [USER_ROLES.ADMIN],
           },
           {
-            id: 'client-guide',
-            title: 'Client Guide',
+            id: 'account-management',
+            title: 'Account Management',
             url: '/client-portal-admin',
             roles: MANAGEMENT_ROLES,
           },
@@ -282,104 +369,7 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
     ],
   },
 
-  // ============================================
-  // SETTINGS (admin only, collapsed by default)
-  // ============================================
-  {
-    id: 'settings',
-    label: 'Settings',
-    domain: NAVIGATION_DOMAINS.SETTINGS,
-    roles: [USER_ROLES.ADMIN],
-    collapsedByDefault: true,
-    items: [
-      {
-        id: 'settings-general',
-        title: 'General',
-        icon: 'Settings',
-        roles: [USER_ROLES.ADMIN],
-        items: [
-          {
-            id: 'settings-profile',
-            title: 'Profile',
-            url: '/settings/profile',
-            roles: ALL_ROLES,
-          },
-          {
-            id: 'settings-users',
-            title: 'Users & Roles',
-            url: '/settings/users',
-            roles: [USER_ROLES.ADMIN],
-          },
-          {
-            id: 'settings-integrations',
-            title: 'Integrations',
-            url: '/settings/integrations',
-            roles: [USER_ROLES.ADMIN],
-          },
-        ],
-      },
-      {
-        id: 'settings-telephony-group',
-        title: 'Telephony',
-        icon: 'Phone',
-        roles: [USER_ROLES.ADMIN],
-        items: [
-          {
-            id: 'settings-telephony',
-            title: 'Telephony (SIP)',
-            url: '/settings/telephony',
-            roles: [USER_ROLES.ADMIN],
-          },
-          {
-            id: 'settings-number-pool',
-            title: 'Number Pool',
-            url: '/number-pool',
-            roles: [USER_ROLES.ADMIN],
-          },
-        ],
-      },
-      {
-        id: 'settings-ai-group',
-        title: 'AI Configuration',
-        icon: 'Bot',
-        roles: [USER_ROLES.ADMIN],
-        items: [
-          {
-            id: 'settings-agent-defaults',
-            title: 'Agent Defaults',
-            url: '/settings/agent-defaults',
-            roles: [USER_ROLES.ADMIN],
-          },
-          {
-            id: 'settings-ai-governance',
-            title: 'AI Governance',
-            url: '/settings/ai-governance',
-            roles: [USER_ROLES.ADMIN, USER_ROLES.CAMPAIGN_MANAGER],
-          },
-        ],
-      },
-      {
-        id: 'settings-email-group',
-        title: 'Email & Messaging',
-        icon: 'Mail',
-        roles: [USER_ROLES.ADMIN],
-        items: [
-          {
-            id: 'settings-mercury-notifications',
-            title: 'Mercury & Transactional',
-            url: '/settings/mercury-notifications',
-            roles: [USER_ROLES.ADMIN],
-          },
-          {
-            id: 'settings-email-management',
-            title: 'Campaign Email',
-            url: '/settings/email-management',
-            roles: [USER_ROLES.ADMIN],
-          },
-        ],
-      },
-    ],
-  },
+  // Settings moved to top-right corner menu (TopBar component)
 ];
 
 /**

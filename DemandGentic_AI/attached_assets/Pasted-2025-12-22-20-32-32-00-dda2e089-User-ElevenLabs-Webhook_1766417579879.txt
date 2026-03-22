@@ -1,0 +1,112 @@
+2025-12-22 20:32:32.00
+dda2e089
+User
+[ElevenLabs Webhook] Looking up campaign from queue for conversation: conv_0901kd3b1k9qe7f8g7v6pf5sns4j
+2025-12-22 20:32:32.03
+dda2e089
+User
+[ElevenLabs Webhook] No campaign_id found - skipping
+2025-12-22 20:32:32.03
+dda2e089
+User
+3:32:32 PM [express] POST /api/webhooks/elevenlabs 200 in 32ms :: {"status":"ok","message":"No campa…
+2025-12-22 20:32:32.08
+dda2e089
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766417549503-mhbdpe93j, conversation: conv_0901kd3b1k9qe7f8g7v6pf5sns4j
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=undefined, queue=null, phone=undefined
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766417553, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_9901kd3b1k9qfj9ve5e21y3qdn10", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447402112345", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_9901kd3b1k9qfj9ve5e21y3qdn10
+2025-12-22 20:32:33.15
+dda2e089
+User
+- Received: v0=c2a845176e52116e6...
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-22 20:32:33.15
+dda2e089
+User
+- Timestamp: 1766417553
+2025-12-22 20:32:33.15
+dda2e089
+User
+- Expected: v0=c2a845176e52116e6...
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Looking up campaign from queue for conversation: conv_9901kd3b1k9qfj9ve5e21y3qdn10
+2025-12-22 20:32:33.15
+dda2e089
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-22 20:32:33.18
+dda2e089
+User
+[ElevenLabs Webhook] No campaign_id found - skipping
+2025-12-22 20:32:33.18
+dda2e089
+User
+3:32:33 PM [express] POST /api/webhooks/elevenlabs 200 in 33ms :: {"status":"ok","message":"No campa…
+2025-12-22 20:32:33.24
+dda2e089
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766417549504-5ua38uq4q, conversation: conv_9901kd3b1k9qfj9ve5e21y3qdn10
+2025-12-22 20:32:33.27
+dda2e089
+User
+[AI Orchestrator] Batch 1: 2/2 calls initiated (total: 2/2)
+2025-12-22 20:32:33.70
+dda2e089
+User
+[Queue:ai-campaign-orchestrator] Job replenish-ae5b353d-64a9-44d8-92cf-69d4726ca121-1766417546330 completed
+2025-12-22 20:32:34.00
+dda2e089
+User
+[Queue:ai-campaign-orchestrator] Job repeat:a133e31eedc0a91680edfe56feb492e0:1766417550000 started processing
+2025-12-22 20:32:34.50
+dda2e089
+User
+[AI Orchestrator] Processing 3 active AI campaign(s)
+2025-12-22 20:32:35.10
+dda2e089
+User
+[AI Orchestrator] Campaign 4187fb46-c634-42d1-aeb1-d3833f325856: 7/10 in progress, 3 slots available
+2025-12-22 20:32:35.30
+dda2e089
+User
+[AI Orchestrator] Found 9 queued items for campaign 4187fb46-c634-42d1-aeb1-d3833f325856
+2025-12-22 20:32:35.40
+dda2e089
+User
+"campaign_id": "4187fb46-c634-42d1-aeb1-d3833f325856",
+2025-12-22 20:32:35.40
+dda2e089
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-22 20:32:35.40
+dda2e089
+User
+"contact_firstName": "there",
+2025-12-22 20:32:35.40
+dda2e089
+User
+"contact_firstName": "there",

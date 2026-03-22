@@ -1,0 +1,100 @@
+025-12-23 18:29:09.98
+609ad58d
+User
+1:29:09 PM [express] POST /api/webhooks/elevenlabs 200 in 64ms :: {"status":"ok","message":"Call fai…
+2025-12-23 18:29:09.98
+609ad58d
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 18:29:09.98
+609ad58d
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 18:29:09.98
+609ad58d
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766496549, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_6501kd5pce36fjp8jerr6asd80cc", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447792730360", "sip_status_code": 403, "error_reason": "unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447792730360 exceeded D66 (SIP 403)", "call_
+2025-12-23 18:29:12.26
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545362-zz496f75j, conversation: conv_2301kd5pcekrex0rm5g8x7qyqtvb
+2025-12-23 18:29:12.76
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545364-f0q68tbg1, conversation: conv_3601kd5pcekyf8y8a3saphme10ns
+2025-12-23 18:29:12.76
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_2301kd5pcekrex0rm5g8x7qyqtvb
+2025-12-23 18:29:13.06
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545363-gbz8pl12s, conversation: conv_2901kd5pce1ce8h8mrgdft2cc66f
+2025-12-23 18:29:13.56
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545364-4knclsq4l, conversation: conv_4301kd5pcem4ejrvtf4g3tvv98r2
+2025-12-23 18:29:13.56
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545364-4knclsq4l, conversation: conv_4301kd5pcem4ejrvtf4g3tvv98r2
+2025-12-23 18:29:14.36
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_3601kd5pcekyf8y8a3saphme10ns
+2025-12-23 18:29:14.36
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545361-p2axifhw2, conversation: conv_4401kd5pce1nee88nqpgcdk8tjzw
+2025-12-23 18:29:14.36
+cfb987c5
+User
+[DB Pool] Client removed | Total: 4, Idle: 1, Waiting: 0
+2025-12-23 18:29:15.06
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_2901kd5pce1ce8h8mrgdft2cc66f
+2025-12-23 18:29:15.46
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_4301kd5pcem4ejrvtf4g3tvv98r2
+2025-12-23 18:29:15.56
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496546661-b72jduo0l, conversation: conv_1001kd5pcd8fe3rbgqsc6wz875f7
+2025-12-23 18:29:15.96
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_4401kd5pce1nee88nqpgcdk8tjzw
+2025-12-23 18:29:17.46
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545761-o2vxbuopk, conversation: conv_4101kd5pcem4er4s775h90pr8djm
+2025-12-23 18:29:17.66
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545764-6blomkxq7, conversation: conv_5501kd5pcf0gf1ha73qsrhpfvahg
+2025-12-23 18:29:18.46
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545763-w7tt6kh4h, conversation: conv_7401kd5pcf0qf97rjr4j5qv2d03h
+2025-12-23 18:29:18.46
+cfb987c5
+User
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+2025-12-23 18:29:18.46
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_4101kd5pcem4er4s775h90pr8djm
+2025-12-23 18:29:18.76
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_5501kd5pcf0gf1ha73qsrhpfvahg
+2025-12-23 18:29:18.76
+cfb987c5
+User
+[TelnyxAiBridge] Stored call session for conversation conv_7401kd5pcf0qf97rjr4j5qv2d03h
+2025-12-23 18:29:18.76
+cfb987c5
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766496545763-ec3d0tahi, conversation: conv_0101kd5pcf0jep

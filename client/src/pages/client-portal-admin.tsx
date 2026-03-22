@@ -1713,99 +1713,92 @@ export default function ClientPortalAdmin() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-[2fr,1fr]">
-        <div className="rounded-2xl border bg-gradient-to-r from-slate-900 via-slate-800 to-sky-800 text-white p-6 shadow-lg">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm uppercase tracking-wide text-slate-300">Outbound Admin</p>
-              <h1 className="text-3xl font-semibold mt-1">Client Portal Management</h1>
-              <p className="text-slate-200/80 mt-2 max-w-2xl">
-                Curate access, manage billing, and ship invite links that only match verified company domains.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setShowCreateClient(true)}>
-                <Plus className="h-4 w-4 mr-1" />
-                New Client
-              </Button>
-              {selectedClient && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-white border-white/40 hover:border-white"
-                  onClick={() => setShowGrantAccess(true)}
-                >
-                  <ShieldCheck className="h-4 w-4 mr-1" />
-                  Grant Access
-                </Button>
-              )}
-            </div>
+      {/* ── Header ── */}
+      <div className="flex flex-col gap-6">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Account Management</h1>
+            <p className="text-sm text-muted-foreground">
+              Manage client accounts, billing, access control, and invite links.
+            </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
-            <div className="rounded-xl bg-white/10 border border-white/10 p-3">
-              <p className="text-xs text-slate-200/80">Total Clients</p>
-              <p className="text-2xl font-semibold">{totalClients}</p>
-            </div>
-            <div className="rounded-xl bg-white/10 border border-white/10 p-3">
-              <p className="text-xs text-slate-200/80">Active</p>
-              <p className="text-2xl font-semibold">{activeClients}</p>
-            </div>
-            <div className="rounded-xl bg-white/10 border border-white/10 p-3">
-              <p className="text-xs text-slate-200/80">Invite-ready</p>
-              <p className="text-2xl font-semibold">{inviteReady}</p>
-            </div>
+          <div className="flex items-center gap-2">
+            {selectedClient && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowGrantAccess(true)}
+              >
+                <ShieldCheck className="h-4 w-4 mr-1.5" />
+                Grant Access
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setShowCreateClient(true)}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              New Client
+            </Button>
           </div>
         </div>
-        <Card className="h-full">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Navigation</CardTitle>
-            <CardDescription>Jump between admin surfaces</CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2">
-            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('clients')}>
-              <Building2 className="h-4 w-4 mr-2" />
-              Clients
-            </Button>
-            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('hierarchy')}>
-              <Network className="h-4 w-4 mr-2" />
-              Hierarchy
-            </Button>
-            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('orders')}>
-              <FileText className="h-4 w-4 mr-2" />
-              Requests
-            </Button>
-            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('invoices')}>
-              <CreditCard className="h-4 w-4 mr-2" />
-              Invoices
-            </Button>
-            <Button variant="outline" className="justify-start" onClick={() => setActiveTab('settings')}>
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
-            </Button>
-          </CardContent>
-        </Card>
+
+        {/* ── Stats ── */}
+        <div className="grid grid-cols-3 gap-4">
+          <Card className="shadow-none">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="p-2.5 rounded-xl bg-primary/10">
+                <Building2 className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight">{totalClients}</p>
+                <p className="text-xs text-muted-foreground">Total Clients</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-none">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="p-2.5 rounded-xl bg-emerald-500/10">
+                <CheckCircle className="h-5 w-5 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight">{activeClients}</p>
+                <p className="text-xs text-muted-foreground">Active</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="shadow-none">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="p-2.5 rounded-xl bg-sky-500/10">
+                <Send className="h-5 w-5 text-sky-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight">{inviteReady}</p>
+                <p className="text-xs text-muted-foreground">Invite-ready</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
+      {/* ── Tabs ── */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-5 w-full max-w-3xl">
-          <TabsTrigger value="clients">
-            <Building2 className="h-4 w-4 mr-2" />
+        <TabsList className="h-10 bg-muted/50">
+          <TabsTrigger value="clients" className="gap-1.5 text-xs">
+            <Building2 className="h-3.5 w-3.5" />
             Clients
           </TabsTrigger>
-          <TabsTrigger value="hierarchy">
-            <Network className="h-4 w-4 mr-2" />
+          <TabsTrigger value="hierarchy" className="gap-1.5 text-xs">
+            <Network className="h-3.5 w-3.5" />
             Hierarchy
           </TabsTrigger>
-          <TabsTrigger value="orders">
-            <FileText className="h-4 w-4 mr-2" />
+          <TabsTrigger value="orders" className="gap-1.5 text-xs">
+            <FileText className="h-3.5 w-3.5" />
             Requests
           </TabsTrigger>
-          <TabsTrigger value="invoices">
-            <CreditCard className="h-4 w-4 mr-2" />
+          <TabsTrigger value="invoices" className="gap-1.5 text-xs">
+            <CreditCard className="h-3.5 w-3.5" />
             Invoices
           </TabsTrigger>
-          <TabsTrigger value="settings">
-            <Settings className="h-4 w-4 mr-2" />
+          <TabsTrigger value="settings" className="gap-1.5 text-xs">
+            <Settings className="h-3.5 w-3.5" />
             Settings
           </TabsTrigger>
         </TabsList>

@@ -1,0 +1,104 @@
+:57:02.58
+4729e25c
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 17:57:02.59
+4729e25c
+User
+- Expected: v0=7efe4e3e0d6442bb0...
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 17:57:02.59
+4729e25c
+User
+- Received: v0=7efe4e3e0d6442bb0...
+2025-12-23 17:57:02.59
+4729e25c
+User
+- Timestamp: 1766494622
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_transcription", "event_timestamp": 1766494622, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_9801kd5mgzvbfdsas511y6qx0v4j", "status": "failed", "user_id": null, "branch_id": "agtbrch_9101kctbjtbmertbvztpgn75bn47", "transcript": [], "metadata": {"start_time_unix_secs": 1766494621, "accepted_time_unix_secs": 1766494621, "call_duration_secs": 0, "cost": 3, "deletion_settings": {"deletion_time_unix_secs": null, "deleted_logs_at_time_unix_secs
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Mapped disposition: Completed
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Event type: post_call_transcription, conversation: conv_9801kd5mgzvbfdsas511y6qx0v4j
+2025-12-23 17:57:02.59
+4729e25c
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=4187fb46-c634-42d1-aeb1-d3833f325856, queue=3b02b84e-9be0-4c82-bbdb-f5c4e1a7aedb, phone=447791541402
+2025-12-23 17:57:02.63
+4729e25c
+User
+[ElevenLabs Webhook] Mapped disposition: Completed
+2025-12-23 17:57:02.63
+4729e25c
+User
+[ElevenLabs Webhook] ✅ Found campaign 4187fb46-c634-42d1-aeb1-d3833f325856 from call_sessions
+2025-12-23 17:57:02.63
+4729e25c
+User
+[ElevenLabs Webhook] Contact not found
+2025-12-23 17:57:02.63
+4729e25c
+User
+12:57:02 PM [express] POST /api/webhooks/elevenlabs 200 in 50ms :: {"status":"ok","message":"Contact …
+2025-12-23 17:57:02.72
+4729e25c
+User
+[DB Pool] Client connected | Total: 4, Idle: 1, Waiting: 0
+2025-12-23 17:57:02.84
+4729e25c
+User
+[ElevenLabs Webhook] Created call_session: bd59acdf-e249-4a1f-9c4e-e99badafbfae (AI agent)
+2025-12-23 17:57:02.84
+4729e25c
+User
+[UnifiedDisposition] Applying disposition: Completed for ai agent, session bd59acdf-e249-4a1f-9c4e-e99badafbfae
+2025-12-23 17:57:02.91
+4729e25c
+User
+[UnifiedDisposition] System action: remove_from_campaign_queue
+2025-12-23 17:57:02.98
+4729e25c
+User
+[UnifiedDisposition] Added contact f5a44175-1f5c-4117-81c6-95394f55870d to campaign suppression
+2025-12-23 17:57:03.03
+4729e25c
+User
+[UnifiedDisposition] Queue item marked as done: Completed
+2025-12-23 17:57:03.03
+4729e25c
+User
+[ElevenLabs Webhook] ✅ Disposition applied: Completed, action: remove_from_campaign_queue
+2025-12-23 17:57:03.03
+4729e25c
+User
+12:57:03 PM [express] POST /api/webhooks/elevenlabs 200 in 444ms :: {"status":"ok","conversation_id":…
+2025-12-23 17:57:03.28
+4729e25c
+User
+[AI Orchestrator] Replenish triggered for campaign 4187fb46-c634-42d1-aeb1-d3833f325856
+2025-12-23 17:57:03.28
+4729e25c
+User
+[AI Orchestrator] Replenish triggered for campaign 4187fb46-c634-42d1-aeb1-d3833f325856

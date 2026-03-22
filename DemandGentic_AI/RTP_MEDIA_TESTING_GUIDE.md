@@ -1,0 +1,419 @@
+# RTP Media Handling - Testing & Validation Guide
+
+## Overview
+
+This guide provides step-by-step instructions to test and validate the complete RTP media handling implementation for SIP-to-Gemini Live bridging.
+
+## Pre-Test Checklist
+
+Before running any tests, ensure:
+
+- [ ] Drachtio daemon is installed and running
+- [ ] Node.js and npm are installed
+- [ ] All dependencies installed: `npm install`
+- [ ] Environment variables configured in `.env`
+- [ ] Gemini API key is valid and has sufficient quotas
+- [ ] Public IP is reachable and firewall allows UDP 5060 (SIP) and RTP ports
+- [ ] Git repository is clean (optional but recommended)
+
+## Test Categories
+
+### ⚪ Level 1: Compilation & Type Safety
+
+**Goal:** Verify TypeScript compilation and no import/export errors
+
+**Steps:**
+
+1. Clean build directory:
+```bash
+npm run build
+```
+
+2. Check for TypeScript errors:
+```bash
+npx tsc --noEmit
+```
+
+3. Verify no missing exports:
+```bash
+grep "export.*GeminiLiveSIPProvider" server/services/gemini-live-sip-provider.ts
+grep "export.*getAudioEndpoint" server/services/sip/sdp-parser.ts
+```
+
+**Success Criteria:**
+- ✅ Build completes with exit code 0
+- ✅ No TypeScript errors reported
+- ✅ Both classes exported correctly
+
+---
+
+### 🟡 Level 2: Server Startup & Initialization
+
+**Goal:** Verify server starts and connects to Drachtio daemon
+
+**Prerequisites:**
+- Drachtio daemon running on configured host:port
+- `.env` file with DRACHTIO_HOST, DRACHTIO_PORT, DRACHTIO_SECRET
+
+**Steps:**
+
+1. Start the server with detailed logging:
+```bash
+npm run dev
+```
+
+2. Watch logs for connection messages:
+```
+[Drachtio SIP] Connected and authenticated to Drachtio daemon
+[Drachtio SIP] Drachtio SIP Server initialized successfully
+```
+
+3. Verify server is listening on ports:
+```bash
+# Check SIP port
+netstat -ano | findstr :5060
+
+# Check RTP port range
+netstat -ano | findstr LISTENING | findstr "1000[0-9]"
+```
+
+4. Test SIP OPTIONS keep-alive:
+```bash
+# From another machine or SIP client
+# Send OPTIONS request to your public IP:5060
+nslookup 
+```
+
+**Success Criteria:**
+- ✅ Server starts without errors
+- ✅ Drachtio daemon connection established
+- ✅ Server listening on SIP port
+- ✅ Logs show "initialized successfully"
+
+---
+
+### 🟠 Level 3: SDP Parsing & RTP Port Allocation
+
+**Goal:** Verify SDP parsing works correctly and RTP ports allocate properly
+
+**Setup:**
+
+Create a test script `test-sdp-parser.ts`:
+```typescript
+import { getAudioEndpoint, parseSDP } from './server/services/sip/sdp-parser';
+
+// Test SDP from actual Telnyx call
+const testSDP = `v=0
+o=- 123456789 1 IN IP4 203.0.113.100
+s=TestSession
+c=IN IP4 203.0.113.100
+t=0 0
+m=audio 5000 RTP/AVP 0 8
+a=rtpmap:0 PCMU/8000
+a=rtpmap:8 PCMA/8000`;
+
+console.log('Testing SDP Parser...');
+const endpoint = getAudioEndpoint(testSDP);
+console.log('Parsed endpoint:', endpoint);
+
+if (endpoint?.address === '203.0.113.100' && endpoint?.port === 5000) {
+  console.log('✅ SDP parsing test PASSED');
+} else {
+  console.log('❌ SDP parsing test FAILED');
+  process.exit(1);
+}
+```
+
+**Steps:**
+
+1. Run the test script:
+```bash
+npx ts-node test-sdp-parser.ts
+```
+
+2. Test RTP port manager (manually in server code):
+```typescript
+const manager = new RTPPortManager();
+const port1 = manager.allocate();
+const port2 = manager.allocate();
+console.log(`Allocated ports: ${port1}, ${port2}`);
+manager.release(port1);
+```
+
+**Success Criteria:**
+- ✅ SDP parser correctly extracts endpoint
+- ✅ RTP ports allocated in configured range
+- ✅ No port conflicts on repeated allocation
+- ✅ Released ports can be reallocated
+
+---
+
+### 🟠 Level 4: Media Provider Instantiation
+
+**Goal:** Verify GeminiLiveSIPProvider can be created and basic operations work
+
+**Setup:**
+
+Create test script `test-media-provider.ts`:
+```typescript
+import { GeminiLiveSIPProvider } from './server/services/gemini-live-sip-provider';
+
+const testConfig = {
+  geminiApiKey: process.env.GEMINI_API_KEY || 'test-key',
+  model: 'models/gemini-2.5-flash-native-audio-preview',
+  voiceName: 'Puck',
+  systemPrompt: 'Test prompt'
+};
+
+try {
+  const provider = new GeminiLiveSIPProvider(
+    'test-call-id',
+    10001,
+    '127.0.0.1',
+    5000,
+    testConfig,
+    '+12125551234'
+  );
+  
+  console.log('✅ Provider instantiated successfully');
+} catch (error) {
+  console.error('❌ Provider instantiation failed:', error);
+  process.exit(1);
+}
+```
+
+**Steps:**
+
+1. Run test script:
+```bash
+npx ts-node test-media-provider.ts
+```
+
+2. Monitor logs for provider creation message
+
+**Success Criteria:**
+- ✅ Provider instantiates without errors
+- ✅ Port assignment correct
+- ✅ Log message shows created provider
+
+---
+
+### 🟢 Level 5: Full End-to-End SIP Call
+
+**Goal:** Test complete SIP call flow with media handling
+
+**Prerequisites:**
+- SIP client installed (Zoiper, Jami, or similar)
+- Server running with `npm run dev`
+- Drachtio daemon running
+- Network connectivity to server
+
+**Step-by-Step:**
+
+1. **Start Server:**
+```bash
+npm run dev
+```
+
+2. **Configure SIP Client:**
+   - Set server: your-public-ip:5060
+   - Set username/password: any value
+   - Protocol: UDP (SIP)
+   - Set audio codec: PCMU (G.711 ulaw)
+
+3. **Make Test Call:**
+   - In SIP client, dial: `sip:+19175556789@your-public-ip:5060`
+   - Wait for 180 Ringing
+   - Client should connect
+
+4. **Monitor Server Logs:**
+   ```
+   [Drachtio SIP] INVITE received from...
+   [Drachtio SIP] Setting up media handlers for call
+   [Drachtio SIP] Remote RTP endpoint: X.X.X.X:5000
+   [Gemini Live SIP Provider] Provider created: ... (RTP: 10001, Remote: X.X.X.X:5000)
+   [Gemini Live SIP Provider] Starting media bridge...
+   [Gemini Live SIP Provider] ✓ Gemini Live WebSocket connected
+   [Drachtio SIP] ✓ Media handlers initialized
+   ```
+
+5. **Test Audio:**
+   - Speak into microphone
+   - Should hear Gemini response
+   - Verify bidirectional audio
+
+6. **Monitor Media Stats:**
+   - RTP packets sent/received visible in logs
+   - Latency should be &1 | tee server.log
+```
+
+**Monitor network traffic:**
+```bash
+# SIP traffic
+tcpdump -i any -A 'udp port 5060' | head -100
+
+# RTP traffic
+tcpdump -i any -A 'udp port 10000:20000' | head -100
+
+# All traffic
+tcpdump -i any -A host your-public-ip
+```
+
+### Performance Metrics
+
+**To track during calls:**
+- **RTP packet rate:** ~50 packets/sec per direction
+- **RTT to Gemini:** ~100-200ms
+- **Total latency:** ~200-300ms (should be  Gemini send -> RTP send
+```
+
+---
+
+## Test Report Template
+
+Use this template for documenting test results:
+
+```markdown
+## Test Execution Report
+
+**Date:** YYYY-MM-DD HH:MM
+**Tester:** [Name]
+**Environment:** [Production/Staging/Dev]
+**Build:** [Commit Hash]
+
+### Compilation & Types
+- [ ] TypeScript compilation: PASS/FAIL
+- [ ] No import errors: PASS/FAIL
+- [ ] All exports present: PASS/FAIL
+
+### Server Startup
+- [ ] Server starts without errors: PASS/FAIL
+- [ ] Drachtio connection established: PASS/FAIL
+- [ ] Listening on SIP port: PASS/FAIL
+
+### SDP & RTP
+- [ ] SDP parser extracts endpoints: PASS/FAIL
+- [ ] RTP port allocation works: PASS/FAIL
+- [ ] No port conflicts: PASS/FAIL
+
+### Media Provider
+- [ ] Provider instantiates: PASS/FAIL
+- [ ] RTP socket binds: PASS/FAIL
+- [ ] Gemini WebSocket connects: PASS/FAIL
+
+### End-to-End Call
+- [ ] SIP call connects: PASS/FAIL
+- [ ] Media setup succeeds: PASS/FAIL
+- [ ] Bidirectional audio works: PASS/FAIL
+- [ ] Call completes cleanly: PASS/FAIL
+- [ ] Resources released: PASS/FAIL
+
+### Error Scenarios
+- [ ] Invalid API key handled: PASS/FAIL
+- [ ] Drachtio disconnect handled: PASS/FAIL
+- [ ] Port exhaustion handled: PASS/FAIL
+- [ ] Network failures handled: PASS/FAIL
+
+### Load Testing
+- [ ] 5 concurrent calls stable: PASS/FAIL
+- [ ] No port conflicts under load: PASS/FAIL
+- [ ] Memory usage reasonable: PASS/FAIL
+- [ ] CPU usage acceptable: PASS/FAIL
+
+### Observations & Issues
+- [List any issues found]
+
+### Fixes Needed
+- [ ] Issue 1: [Description] → [Fix]
+- [ ] Issue 2: [Description] → [Fix]
+
+### Sign-Off
+- [ ] All critical tests passed
+- [ ] All blocking issues resolved
+- [ ] Ready for deployment
+```
+
+---
+
+## Automated Testing (Future)
+
+### Jest Unit Tests
+```typescript
+describe('GeminiLiveSIPProvider', () => {
+  it('should instantiate with valid config', () => {
+    const provider = new GeminiLiveSIPProvider(...);
+    expect(provider).toBeDefined();
+  });
+
+  it('should parse RTP packets correctly', () => {
+    const rtpPacket = Buffer.from([...]);
+    const payload = provider.parseRtpPacket(rtpPacket);
+    expect(payload).toBeDefined();
+  });
+
+  it('should transcode G.711 to PCM', () => {
+    const g711Data = Buffer.from([...]);
+    const pcm = provider.transcodeG711ToPcm(g711Data);
+    expect(pcm.length).toBeGreaterThan(0);
+  });
+});
+```
+
+### Integration Tests with Docker
+```dockerfile
+FROM ubuntu:22.04
+
+# Install Drachtio
+RUN apt-get install -y drachtio-server
+
+# Copy app code
+COPY . /app
+
+# Start Drachtio and app
+CMD ["sh", "start-test.sh"]
+```
+
+---
+
+## Known Issues & Workarounds
+
+### Issue: "RTP packets not being received"
+
+**Cause:** Firewall blocking UDP ports
+**Workaround:**
+```bash
+# Windows
+netsh advfirewall firewall add rule name="AllowRTP" dir=in action=allow protocol=UDP localport=10000-20000
+
+# Linux
+ufw allow 10000:20000/udp
+
+# Check with netstat
+netstat -ano | findstr LISTENING
+```
+
+### Issue: "Gemini WebSocket times out"
+
+**Cause:** Network latency or API overload
+**Workaround:**
+- Increase timeout in provider (default 5s)
+- Retry with exponential backoff (already implemented)
+- Check Gemini API status page
+
+### Issue: "G.711 transcoding errors"
+
+**Cause:** Invalid audio format or corrupted packets
+**Workaround:**
+- Validate codec in SDP
+- Add packet loss concealment
+- Log problematic packets for analysis
+
+---
+
+## Next Steps After Testing
+
+1. **Deploy to Staging:** Run full production-like load tests
+2. **Monitor in Production:** Watch logs, metrics, and error rates
+3. **Gather Real-World Data:** Analyze call quality, latency, errors
+4. **Optimize:** Fine-tune configuration based on findings
+5. **Document:** Update this guide with findings

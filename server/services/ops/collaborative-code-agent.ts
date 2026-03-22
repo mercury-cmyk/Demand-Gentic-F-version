@@ -112,7 +112,7 @@ type MultiFileEditPayload = {
 };
 
 const COLLABORATIVE_BASE_PROMPT = [
-  "You are part of AgentX collaborative coding orchestration.",
+  "You are part of AgentC collaborative coding orchestration.",
   "Work from the provided repository context only.",
   "Do not invent files, APIs, validation, runtime behavior, or test results.",
   "Prefer the smallest safe solution that fully satisfies the request.",

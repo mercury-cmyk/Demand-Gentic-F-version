@@ -66,7 +66,7 @@ async function generateGeminiChatResponse(
     console.warn("[AiVoiceAgent] Vertex AI chat failed, falling back to Gemini API:", error);
   }
 
-  const modelName = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash";
   const model = getGemini().getGenerativeModel({
     model: modelName,
     systemInstruction: systemPrompt,
@@ -96,7 +96,7 @@ async function generateGeminiText(prompt: string, maxTokens: number): Promise<st
     console.warn("[AiVoiceAgent] Vertex AI text generation failed, falling back to Gemini API:", error);
   }
 
-  const modelName = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash";
+  const modelName = process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash";
   const model = getGemini().getGenerativeModel({ model: modelName });
   const result = await model.generateContent(prompt);
   return result.response.text();

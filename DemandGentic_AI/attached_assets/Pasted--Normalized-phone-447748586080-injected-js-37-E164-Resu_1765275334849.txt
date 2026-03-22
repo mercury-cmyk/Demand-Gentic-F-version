@@ -1,0 +1,76 @@
+📞 Normalized phone: +447748586080
+injected.js:37 ✅ E164 Result: +447748586080
+injected.js:37 [AUDIO] Audio element cleaned up
+injected.js:37 Making call with params: 
+Object
+injected.js:37 Telnyx notification - Type: callUpdate Call State: new
+injected.js:37 Call object created - ID: 16a0f193-54bd-4ee0-a497-5890342be385 State: new
+injected.js:37 Captured Telnyx Call ID: 16a0f193-54bd-4ee0-a497-5890342be385
+injected.js:37 [2025-12-09T10:15:03.887Z] ICE Gathering State gathering
+injected.js:37 Telnyx notification - Type: callUpdate Call State: requesting
+injected.js:37 Telnyx notification - Type: callUpdate Call State: trying
+@telnyx_webrtc.js?v=0ab4603b:1979 Performance Metrics
+injected.js:37 
+Object
+injected.js:37 [2025-12-09T10:15:06.678Z] ICE Gathering State complete
+injected.js:37 [2025-12-09T10:15:08.811Z] ICE Connection State checking
+injected.js:37 Telnyx notification - Type: callUpdate Call State: early
+injected.js:37 [AUDIO] Early media state - attempting stream attachment
+injected.js:37 [AUDIO] Got remoteStream from call.remoteStream
+injected.js:37 [AUDIO] Remote stream audio tracks: 1
+injected.js:37 [AUDIO] Track 0: enabled=true, muted=false, readyState=live
+injected.js:37 [2025-12-09T10:15:08.826Z] Connection State changed: new -> connecting
+injected.js:37 [AUDIO] ✅ Audio playback started successfully
+injected.js:37 Telnyx notification - Type: callUpdate Call State: active
+injected.js:37 [AUDIO] Call active - attempting to attach remote stream
+injected.js:37 [AUDIO] Got remoteStream from call.remoteStream
+injected.js:37 [AUDIO] Remote stream audio tracks: 1
+injected.js:37 [AUDIO] Track 0: enabled=true, muted=false, readyState=live
+injected.js:37 [CALL-ATTEMPT] Call became active, creating call attempt...
+injected.js:37 [AUDIO] ✅ Audio playback started successfully
+injected.js:37 [2025-12-09T10:15:09.647Z] ICE Connection State connected
+injected.js:37 [CALL-ATTEMPT] Created call attempt: undefined
+injected.js:37 [CALL-ATTEMPT] Call became active, creating call attempt...
+injected.js:37 [CALL-ATTEMPT] Created call attempt: undefined
+injected.js:37 [AUDIO-MONITOR] Element state: 
+Object
+injected.js:37 [AUDIO-MONITOR] AudioContext analyzer created
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+Object
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [AUDIO-MONITOR] Element state: 
+Object
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+Object
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 2025-12-09 10:15:27.690 - No ping/pong received, forcing PING ACK to keep alive
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking

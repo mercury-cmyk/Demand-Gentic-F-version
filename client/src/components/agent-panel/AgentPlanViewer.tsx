@@ -1,21 +1,18 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
-  CheckCircle,
+  CheckCircle2,
   XCircle,
   AlertTriangle,
-  Play,
-  Edit2,
-  Trash2,
   ChevronDown,
-  ChevronUp,
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Zap,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Collapsible,
   CollapsibleContent,
@@ -45,28 +42,29 @@ interface AgentPlanViewerProps {
   onApprove: () => void;
   onReject: () => void;
   onModify?: (modifications: any) => void;
+  isExecuting?: boolean;
 }
 
 const riskConfig = {
   low: {
     icon: ShieldCheck,
-    color: 'text-green-500',
-    bgColor: 'bg-green-500/10',
-    borderColor: 'border-green-500/20',
+    color: 'text-emerald-600 dark:text-emerald-400',
+    bg: 'bg-emerald-500/10',
+    border: 'border-emerald-500/20',
     label: 'Low Risk',
   },
   medium: {
     icon: Shield,
-    color: 'text-amber-500',
-    bgColor: 'bg-amber-500/10',
-    borderColor: 'border-amber-500/20',
+    color: 'text-amber-600 dark:text-amber-400',
+    bg: 'bg-amber-500/10',
+    border: 'border-amber-500/20',
     label: 'Medium Risk',
   },
   high: {
     icon: ShieldAlert,
-    color: 'text-red-500',
-    bgColor: 'bg-red-500/10',
-    borderColor: 'border-red-500/20',
+    color: 'text-red-600 dark:text-red-400',
+    bg: 'bg-red-500/10',
+    border: 'border-red-500/20',
     label: 'High Risk',
   },
 };
@@ -76,8 +74,9 @@ export function AgentPlanViewer({
   onApprove,
   onReject,
   onModify,
+  isExecuting,
 }: AgentPlanViewerProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [selectedSteps, setSelectedSteps] = useState<Set<string>>(
     new Set(plan.steps.map((s) => s.id))
   );
@@ -96,7 +95,6 @@ export function AgentPlanViewer({
   };
 
   const handleApprove = () => {
-    // If any steps were deselected, pass modifications
     const removedSteps = plan.steps
       .filter((s) => !selectedSteps.has(s.id))
       .map((s) => s.id);
@@ -109,177 +107,131 @@ export function AgentPlanViewer({
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="flex gap-3"
     >
-      <Card className={cn('border-2', risk.borderColor)}>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Play className="h-4 w-4 text-primary" />
-              Execution Plan
-            </CardTitle>
-            <Badge
-              variant="outline"
-              className={cn('flex items-center gap-1', risk.color, risk.bgColor)}
-            >
+      {/* Avatar */}
+      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10">
+        <Zap className="h-3.5 w-3.5 text-primary" />
+      </div>
+
+      {/* Plan card */}
+      <div className="flex-1 max-w-[90%] space-y-1.5">
+        <span className="text-[10px] font-medium text-muted-foreground/60 px-0.5">AgentC</span>
+
+        <div className={cn(
+          'rounded-2xl rounded-tl-md border overflow-hidden',
+          risk.border,
+          'bg-card shadow-sm'
+        )}>
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border/30 bg-muted/20">
+            <div className="flex items-center gap-2">
+              <Zap className="h-3.5 w-3.5 text-primary" />
+              <span className="text-sm font-semibold">Execution Plan</span>
+              <span className="text-xs text-muted-foreground">
+                {plan.steps.length} step{plan.steps.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <Badge variant="outline" className={cn('text-[10px] gap-1', risk.color, risk.bg)}>
               <RiskIcon className="h-3 w-3" />
               {risk.label}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Review the {plan.steps.length} steps below before approving.
-          </p>
-        </CardHeader>
 
-        <CardContent className="pb-3">
-          <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-            <CollapsibleTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-between mb-2"
-              >
-                <span className="text-sm font-medium">
-                  {selectedSteps.size} of {plan.steps.length} steps selected
-                </span>
-                {isExpanded ? (
-                  <ChevronUp className="h-4 w-4" />
-                ) : (
-                  <ChevronDown className="h-4 w-4" />
-                )}
-              </Button>
-            </CollapsibleTrigger>
+          {/* Steps summary / expandable */}
+          <div className="px-4 py-3">
+            <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+              <CollapsibleTrigger asChild>
+                <button className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors py-1">
+                  <span className="font-medium">
+                    {isExpanded ? 'Hide' : 'View'} steps ({selectedSteps.size}/{plan.steps.length} selected)
+                  </span>
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-180')} />
+                </button>
+              </CollapsibleTrigger>
 
-            <CollapsibleContent>
-              <div className="space-y-2">
-                {plan.steps.map((step, index) => (
-                  <PlanStepItem
-                    key={step.id}
-                    step={step}
-                    isSelected={selectedSteps.has(step.id)}
-                    onToggle={() => toggleStep(step.id)}
-                    isLast={index === plan.steps.length - 1}
-                  />
-                ))}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </CardContent>
-
-        <CardFooter className="flex justify-between gap-2 pt-3 border-t">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onReject}
-            className="flex-1"
-          >
-            <XCircle className="h-4 w-4 mr-2" />
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleApprove}
-            disabled={selectedSteps.size === 0}
-            className="flex-1"
-          >
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Approve & Execute
-          </Button>
-        </CardFooter>
-      </Card>
-    </motion.div>
-  );
-}
-
-// Individual Step Item
-interface PlanStepItemProps {
-  step: PlanStep;
-  isSelected: boolean;
-  onToggle: () => void;
-  isLast: boolean;
-}
-
-function PlanStepItem({ step, isSelected, onToggle, isLast }: PlanStepItemProps) {
-  const [showArgs, setShowArgs] = useState(false);
-
-  return (
-    <div
-      className={cn(
-        'relative pl-6 pb-3',
-        !isLast && 'border-l-2 border-muted ml-2'
-      )}
-    >
-      {/* Step indicator */}
-      <div
-        className={cn(
-          'absolute left-0 top-0 -translate-x-1/2 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold cursor-pointer transition-colors',
-          isSelected
-            ? step.isDestructive
-              ? 'bg-amber-500 text-white'
-              : 'bg-primary text-primary-foreground'
-            : 'bg-muted text-muted-foreground'
-        )}
-        onClick={onToggle}
-      >
-        {step.stepNumber}
-      </div>
-
-      <div
-        className={cn(
-          'ml-3 p-2 rounded-md transition-colors cursor-pointer',
-          isSelected ? 'bg-muted/50' : 'bg-muted/20 opacity-50'
-        )}
-        onClick={onToggle}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <Badge
-                variant={step.isDestructive ? 'destructive' : 'secondary'}
-                className="text-xs shrink-0"
-              >
-                {step.tool}
-              </Badge>
-              {step.isDestructive && (
-                <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
-              )}
-            </div>
-            <p className="text-sm mt-1">{step.description}</p>
-            {step.estimatedImpact && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Impact: {step.estimatedImpact}
-              </p>
-            )}
+              <CollapsibleContent>
+                <div className="mt-2 space-y-1">
+                  {plan.steps.map((step) => {
+                    const selected = selectedSteps.has(step.id);
+                    return (
+                      <div
+                        key={step.id}
+                        onClick={() => toggleStep(step.id)}
+                        className={cn(
+                          'flex items-start gap-2.5 p-2 rounded-lg cursor-pointer transition-all text-xs',
+                          selected
+                            ? 'bg-muted/50 hover:bg-muted/70'
+                            : 'opacity-40 hover:opacity-60'
+                        )}
+                      >
+                        <div className={cn(
+                          'w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold mt-0.5',
+                          selected
+                            ? step.isDestructive
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground'
+                        )}>
+                          {step.stepNumber}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <Badge
+                              variant={step.isDestructive ? 'destructive' : 'secondary'}
+                              className="text-[10px] px-1.5 py-0 h-4"
+                            >
+                              {step.tool}
+                            </Badge>
+                            {step.isDestructive && (
+                              <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
+                            )}
+                          </div>
+                          <p className="text-muted-foreground leading-relaxed">{step.description}</p>
+                          {step.estimatedImpact && (
+                            <p className="text-[10px] text-muted-foreground/60">Impact: {step.estimatedImpact}</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
 
-          {Object.keys(step.args).length > 0 && (
+          {/* Actions */}
+          <div className="flex items-center gap-2 px-4 py-3 border-t border-border/30 bg-muted/10">
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowArgs(!showArgs);
-              }}
+              variant="outline"
+              size="sm"
+              onClick={onReject}
+              disabled={isExecuting}
+              className="flex-1 h-8 text-xs"
             >
-              {showArgs ? (
-                <ChevronUp className="h-3 w-3" />
-              ) : (
-                <ChevronDown className="h-3 w-3" />
-              )}
+              <XCircle className="h-3.5 w-3.5 mr-1.5" />
+              Cancel
             </Button>
-          )}
-        </div>
-
-        {showArgs && Object.keys(step.args).length > 0 && (
-          <div className="mt-2 p-2 bg-background rounded text-xs font-mono overflow-x-auto">
-            <pre>{JSON.stringify(step.args, null, 2)}</pre>
+            <Button
+              size="sm"
+              onClick={handleApprove}
+              disabled={selectedSteps.size === 0 || isExecuting}
+              className="flex-1 h-8 text-xs"
+            >
+              {isExecuting ? (
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+              )}
+              {isExecuting ? 'Executing...' : 'Approve & Execute'}
+            </Button>
           </div>
-        )}
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -298,52 +250,48 @@ export function AgentStepProgress({
   failedSteps,
 }: AgentStepProgressProps) {
   return (
-    <div className="space-y-2 p-3 bg-muted/30 rounded-lg">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium">Execution Progress</span>
-        <span className="text-xs text-muted-foreground">
-          {completedSteps.length} / {steps.length} complete
-        </span>
-      </div>
+    <div className="space-y-1.5">
+      {steps.map((step, index) => {
+        const isCompleted = completedSteps.includes(step.id);
+        const isFailed = failedSteps.includes(step.id);
+        const isCurrent = index === currentStep;
 
-      <div className="space-y-1">
-        {steps.map((step, index) => {
-          const isCompleted = completedSteps.includes(step.id);
-          const isFailed = failedSteps.includes(step.id);
-          const isCurrent = index === currentStep;
-
-          return (
-            <div
-              key={step.id}
-              className={cn(
-                'flex items-center gap-2 p-2 rounded text-sm',
-                isCurrent && 'bg-primary/10',
-                isCompleted && 'opacity-60'
+        return (
+          <div
+            key={step.id}
+            className={cn(
+              'flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-colors',
+              isCompleted && 'bg-emerald-50/50 dark:bg-emerald-950/20',
+              isFailed && 'bg-red-50/50 dark:bg-red-950/20',
+              isCurrent && 'bg-primary/5'
+            )}
+          >
+            <div className="shrink-0">
+              {isCompleted ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              ) : isFailed ? (
+                <XCircle className="h-4 w-4 text-red-500" />
+              ) : isCurrent ? (
+                <Loader2 className="h-4 w-4 text-primary animate-spin" />
+              ) : (
+                <div className="w-4 h-4 rounded-full border-2 border-muted" />
               )}
-            >
-              <div className="w-5 h-5 flex items-center justify-center">
-                {isCompleted ? (
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                ) : isFailed ? (
-                  <XCircle className="h-4 w-4 text-red-500" />
-                ) : isCurrent ? (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                  >
-                    <Play className="h-4 w-4 text-primary" />
-                  </motion.div>
-                ) : (
-                  <div className="w-2 h-2 rounded-full bg-muted-foreground/30" />
-                )}
-              </div>
-              <span className={cn(isCurrent && 'font-medium')}>
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className={cn(
+                'font-medium',
+                isCompleted && 'text-emerald-700 dark:text-emerald-300',
+                isFailed && 'text-red-700 dark:text-red-300'
+              )}>
                 {step.description}
               </span>
             </div>
-          );
-        })}
-      </div>
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+              {step.tool}
+            </Badge>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -226,7 +226,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
 
   return (
     <Card className={cn('flex flex-col border-slate-200 shadow-xl overflow-hidden bg-slate-50/50', isExpanded ? 'fixed inset-4 z-50 h-auto' : 'h-[650px]', className)}>
-      {/* AgentX Header */}
+      {/* AgentC Header */}
       <CardHeader className="py-3 px-4 border-b bg-white relative z-10 shrink-0">
         <div className="flex flex-col gap-2">
           {/* Top Row: Brand & Controls */}
@@ -237,7 +237,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
               </div>
               <div>
                 <CardTitle className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                  AgentX
+                  AgentC
                   <Badge variant="outline" className="h-5 px-1.5 text-[10px] bg-slate-100 text-slate-500 border-slate-200 font-normal">
                     v2.4
                   </Badge>
@@ -284,7 +284,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
             <div className="h-20 w-20 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center mb-6">
               <Sparkles className="h-10 w-10 text-indigo-500" />
             </div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">AgentX: Agentic Operator</h3>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">AgentC: Agentic Operator</h3>
             <p className="text-sm text-slate-500 max-w-sm mb-8 leading-relaxed">
               Agentic Operator with Agentic CRM Actions, ImageGen, Organization Aware Chat Bot, and Creative Content capabilities.
             </p>
@@ -440,7 +440,7 @@ export function ClientAgentChat({ onNavigate, className }: ClientAgentChatProps)
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type your request to AgentX..."
+            placeholder="Type your request to AgentC..."
             className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-2 h-9 min-h-[36px] text-sm"
             disabled={chatMutation.isPending}
             autoComplete="off"
@@ -490,7 +490,7 @@ export function ClientAgentPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-[400px] sm:w-[500px] p-0 border-l border-slate-200 shadow-2xl">
         <SheetHeader className="sr-only">
-          <SheetTitle>AgentX</SheetTitle>
+          <SheetTitle>AgentC</SheetTitle>
         </SheetHeader>
         <ClientAgentChat onNavigate={onNavigate} className="h-full border-0 rounded-none shadow-none" />
       </SheetContent>
@@ -515,7 +515,7 @@ export function ClientAgentButton({ onNavigate }: { onNavigate?: (section: strin
       </SheetTrigger>
       <SheetContent side="right" className="w-[400px] sm:w-[500px] p-0 border-l border-slate-200 shadow-2xl">
         <SheetHeader className="sr-only">
-          <SheetTitle>AgentX</SheetTitle>
+          <SheetTitle>AgentC</SheetTitle>
         </SheetHeader>
         <ClientAgentChat onNavigate={onNavigate} className="h-full border-0 rounded-none shadow-none" />
       </SheetContent>

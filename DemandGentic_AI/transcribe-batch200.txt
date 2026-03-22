@@ -1,0 +1,1043 @@
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ≡ƒæÑ sync secrets across teammates & machines: https://dotenvx.com/ops
+[DB] Development mode - using DATABASE_URL from environment
+[DB] Database endpoint: ep-mute-sky-ahoyd10z-pooler
+[DB] Using Neon connection pooler: YES (already configured)
+================================================================================
+  Telnyx 3-Day Recording Fetch + Google STT Two-Way Transcription
+================================================================================
+  Date range : 2026-02-09T23:44:39.076Z ΓåÆ now
+  Dry run    : false
+  DB only    : true
+  Limit      : 200
+  Min dur    : >10s
+  Provider   : Google Cloud Speech-to-Text (telephony model)
+  Diarization: 2-speaker (Agent / Prospect)
+================================================================================
+
+[1/5] Skipping Telnyx API (--db-only)
+
+
+[Bonus] Scanning DB for leads/call_sessions from last 3 days missing transcription ΓÇª
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+    Found 2 leads + 4408 call_sessions missing transcripts
+    624 already in GCS, 3786 need download
+
+[3/5] Transcribing 200 of 4410 DB records missing structured transcripts ΓÇª
+
+[DB 1/200] Transcribing call_sessions:424bad27-dfd5-425b-b95c-e45eab370977 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 181 words, 3 turns
+[DB 1/200]   Transcribed: 181 words, 3 turns
+[DB 1/200]   Saved call_sessions:424bad27-dfd5-425b-b95c-e45eab370977
+[DB 2/200] Transcribing call_sessions:65aaaa62-5787-4388-9eb8-bb83919c448f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 2/200]   Transcribed: 44 words, 2 turns
+[DB 2/200]   Saved call_sessions:65aaaa62-5787-4388-9eb8-bb83919c448f
+[DB 3/200] Transcribing call_sessions:b5eac3a8-fbaf-47d1-b6ea-241a80d549b4 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 12 words, 1 turns
+[DB 3/200]   Transcribed: 12 words, 1 turns
+[DB 3/200]   Saved call_sessions:b5eac3a8-fbaf-47d1-b6ea-241a80d549b4
+[DB 4/200] Transcribing call_sessions:a24cad35-233a-404f-a971-52ec138be775 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+node.exe :     No STT results
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    No STT results:String) [], Re 
+   moteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[DB 4/200]   Empty transcription
+[DB 5/200] Transcribing call_sessions:1b472644-f2a4-4de5-968e-dcf403e2f2aa ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 12 words, 1 turns
+[DB 5/200]   Transcribed: 12 words, 1 turns
+[DB 5/200]   Saved call_sessions:1b472644-f2a4-4de5-968e-dcf403e2f2aa
+[DB 6/200] Transcribing call_sessions:1d1aaa5e-a601-4f3b-a837-2165f45b34f6 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 6/200]   Transcribed: 59 words, 3 turns
+[DB 6/200]   Saved call_sessions:1d1aaa5e-a601-4f3b-a837-2165f45b34f6
+[DB 7/200] Transcribing call_sessions:8fc0c291-403e-4254-af84-3f3493b83e98 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 31 words, 2 turns
+[DB 7/200]   Transcribed: 31 words, 2 turns
+[DB 7/200]   Saved call_sessions:8fc0c291-403e-4254-af84-3f3493b83e98
+[DB 8/200] Transcribing call_sessions:7c746543-dc85-444c-a9a7-38b48fbd0aa5 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 31 words, 2 turns
+[DB 8/200]   Transcribed: 31 words, 2 turns
+[DB 8/200]   Saved call_sessions:7c746543-dc85-444c-a9a7-38b48fbd0aa5
+[DB 9/200] Transcribing call_sessions:7c73d5b3-35d7-4499-8f12-c26f95c61493 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 42 words, 2 turns
+[DB 9/200]   Transcribed: 42 words, 2 turns
+[DB 9/200]   Saved call_sessions:7c73d5b3-35d7-4499-8f12-c26f95c61493
+[DB 10/200] Transcribing call_sessions:c9302cc3-707e-46f8-8912-63f5e6210556 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 42 words, 2 turns
+[DB 10/200]   Transcribed: 42 words, 2 turns
+[DB 10/200]   Saved call_sessions:c9302cc3-707e-46f8-8912-63f5e6210556
+[DB 11/200] Transcribing call_sessions:ed59ecd9-0afe-4289-a400-8050a0c49dc6 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 50 words, 1 turns
+[DB 11/200]   Transcribed: 50 words, 1 turns
+[DB 11/200]   Saved call_sessions:ed59ecd9-0afe-4289-a400-8050a0c49dc6
+[DB 12/200] Transcribing call_sessions:80c32fae-17e4-47b1-b23c-b55727be9bd3 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 12/200]   Transcribed: 40 words, 2 turns
+[DB 12/200]   Saved call_sessions:80c32fae-17e4-47b1-b23c-b55727be9bd3
+[DB 13/200] Transcribing call_sessions:e17754d0-0002-42a8-ac21-bbe88bf1c38c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 13/200]   Transcribed: 40 words, 2 turns
+[DB 13/200]   Saved call_sessions:e17754d0-0002-42a8-ac21-bbe88bf1c38c
+[DB 14/200] Transcribing call_sessions:8957f6e6-5baf-4f2d-8dda-f8b3bb2795fd ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 14/200]   Transcribed: 40 words, 2 turns
+[DB 14/200]   Saved call_sessions:8957f6e6-5baf-4f2d-8dda-f8b3bb2795fd
+[DB 15/200] Transcribing call_sessions:787ffce9-9674-44ba-a6e5-23a3d2aef8ce ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 15/200]   Transcribed: 32 words, 2 turns
+[DB 15/200]   Saved call_sessions:787ffce9-9674-44ba-a6e5-23a3d2aef8ce
+[DB 16/200] Transcribing call_sessions:ed79fb41-b7f8-4c8f-9703-9996f8d88e6e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 16/200]   Transcribed: 32 words, 2 turns
+[DB 16/200]   Saved call_sessions:ed79fb41-b7f8-4c8f-9703-9996f8d88e6e
+[DB 17/200] Transcribing call_sessions:2bbe6df2-56d0-40c1-8793-d4145838fe8a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 17/200]   Transcribed: 32 words, 2 turns
+[DB 17/200]   Saved call_sessions:2bbe6df2-56d0-40c1-8793-d4145838fe8a
+[DB 18/200] Transcribing call_sessions:dfe54a7d-d8f4-43c9-a213-a1bc8adf5c7a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 18/200]   Transcribed: 32 words, 2 turns
+[DB 18/200]   Saved call_sessions:dfe54a7d-d8f4-43c9-a213-a1bc8adf5c7a
+[DB 19/200] Transcribing call_sessions:ad0e02bb-b1a9-4e31-a1d1-d82466f49182 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 19/200]   Transcribed: 32 words, 2 turns
+[DB 19/200]   Saved call_sessions:ad0e02bb-b1a9-4e31-a1d1-d82466f49182
+[DB 20/200] Transcribing call_sessions:2c6da370-a710-44df-b96d-982c6be3ab70 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 1 turns
+[DB 20/200]   Transcribed: 27 words, 1 turns
+[DB 20/200]   Saved call_sessions:2c6da370-a710-44df-b96d-982c6be3ab70
+[DB 21/200] Transcribing call_sessions:19ca94c5-2178-4f38-ae63-8715acff2ef9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 1 turns
+[DB 21/200]   Transcribed: 27 words, 1 turns
+[DB 21/200]   Saved call_sessions:19ca94c5-2178-4f38-ae63-8715acff2ef9
+[DB 22/200] Transcribing call_sessions:b9bb9a58-8ecc-431d-a96c-c5d3a1e8984b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 1 turns
+[DB 22/200]   Transcribed: 27 words, 1 turns
+[DB 22/200]   Saved call_sessions:b9bb9a58-8ecc-431d-a96c-c5d3a1e8984b
+[DB 23/200] Transcribing call_sessions:eec5637c-a81f-40e1-8417-1dbbd905e5be ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 1 turns
+[DB 23/200]   Transcribed: 27 words, 1 turns
+[DB 23/200]   Saved call_sessions:eec5637c-a81f-40e1-8417-1dbbd905e5be
+[DB 24/200] Transcribing call_sessions:53e78eaf-5b9e-4606-a5ac-af873fdd824f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 1 turns
+[DB 24/200]   Transcribed: 27 words, 1 turns
+[DB 24/200]   Saved call_sessions:53e78eaf-5b9e-4606-a5ac-af873fdd824f
+[DB 25/200] Transcribing call_sessions:a502eba3-a9e0-4a68-bde2-2de1622d18ff ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 3 turns
+[DB 25/200]   Transcribed: 30 words, 3 turns
+[DB 25/200]   Saved call_sessions:a502eba3-a9e0-4a68-bde2-2de1622d18ff
+[DB 26/200] Transcribing call_sessions:db38ada6-ac8f-49af-99c8-bfdc93e7434e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 3 turns
+[DB 26/200]   Transcribed: 30 words, 3 turns
+[DB 26/200]   Saved call_sessions:db38ada6-ac8f-49af-99c8-bfdc93e7434e
+[DB 27/200] Transcribing call_sessions:b48c3e62-d40d-4620-b716-6c4fc0a47e55 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 3 turns
+[DB 27/200]   Transcribed: 30 words, 3 turns
+[DB 27/200]   Saved call_sessions:b48c3e62-d40d-4620-b716-6c4fc0a47e55
+[DB 28/200] Transcribing call_sessions:86cde9c6-0e96-4bd6-ad36-16f0da399c73 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 3 turns
+[DB 28/200]   Transcribed: 30 words, 3 turns
+[DB 28/200]   Saved call_sessions:86cde9c6-0e96-4bd6-ad36-16f0da399c73
+[DB 29/200] Transcribing call_sessions:622edc6c-915d-4638-be48-dcce0a88d80d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 3 turns
+[DB 29/200]   Transcribed: 30 words, 3 turns
+[DB 29/200]   Saved call_sessions:622edc6c-915d-4638-be48-dcce0a88d80d
+[DB 30/200] Transcribing call_sessions:3e59e858-fea2-4992-8704-286a49216198 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 47 words, 1 turns
+[DB 30/200]   Transcribed: 47 words, 1 turns
+[DB 30/200]   Saved call_sessions:3e59e858-fea2-4992-8704-286a49216198
+[DB 31/200] Transcribing call_sessions:3e70e6cd-7daa-4d37-a91f-62c7881a8b14 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 47 words, 1 turns
+[DB 31/200]   Transcribed: 47 words, 1 turns
+[DB 31/200]   Saved call_sessions:3e70e6cd-7daa-4d37-a91f-62c7881a8b14
+[DB 32/200] Transcribing call_sessions:bea42d9a-08c5-4981-80ff-e7d0ea2dbf7d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 47 words, 1 turns
+[DB 32/200]   Transcribed: 47 words, 1 turns
+[DB 32/200]   Saved call_sessions:bea42d9a-08c5-4981-80ff-e7d0ea2dbf7d
+[DB 33/200] Transcribing call_sessions:9c3f0401-aad0-4579-a9da-bcc9d633ff03 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 47 words, 1 turns
+[DB 33/200]   Transcribed: 47 words, 1 turns
+[DB 33/200]   Saved call_sessions:9c3f0401-aad0-4579-a9da-bcc9d633ff03
+[DB 34/200] Transcribing call_sessions:895c3af3-e276-46cc-bc28-7793a7d3eb5b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 47 words, 1 turns
+[DB 34/200]   Transcribed: 47 words, 1 turns
+[DB 34/200]   Saved call_sessions:895c3af3-e276-46cc-bc28-7793a7d3eb5b
+[DB 35/200] Transcribing call_sessions:b26394e7-6ef2-438c-80f2-7e0ca958c752 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 35/200]   Transcribed: 27 words, 2 turns
+[DB 35/200]   Saved call_sessions:b26394e7-6ef2-438c-80f2-7e0ca958c752
+[DB 36/200] Transcribing call_sessions:382c019e-0146-4776-81cd-bbf475208b31 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 36/200]   Transcribed: 27 words, 2 turns
+[DB 36/200]   Saved call_sessions:382c019e-0146-4776-81cd-bbf475208b31
+[DB 37/200] Transcribing call_sessions:774e1494-e488-432a-bc71-a5b48f71db93 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 37/200]   Transcribed: 27 words, 2 turns
+[DB 37/200]   Saved call_sessions:774e1494-e488-432a-bc71-a5b48f71db93
+[DB 38/200] Transcribing call_sessions:b86c5663-4160-4ac0-b0b5-095703448c85 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 38/200]   Transcribed: 27 words, 2 turns
+[DB 38/200]   Saved call_sessions:b86c5663-4160-4ac0-b0b5-095703448c85
+[DB 39/200] Transcribing call_sessions:4f880bef-b46c-4bf5-b6bb-614fa01ff88f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 39/200]   Transcribed: 27 words, 2 turns
+[DB 39/200]   Saved call_sessions:4f880bef-b46c-4bf5-b6bb-614fa01ff88f
+[DB 40/200] Transcribing call_sessions:0927da5c-2b8e-4549-a3e7-dd684af3fbca ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 40/200]   Transcribed: 25 words, 1 turns
+[DB 40/200]   Saved call_sessions:0927da5c-2b8e-4549-a3e7-dd684af3fbca
+[DB 41/200] Transcribing call_sessions:613d3462-9b63-48b6-8877-88481d0d3945 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 41/200]   Transcribed: 25 words, 1 turns
+[DB 41/200]   Saved call_sessions:613d3462-9b63-48b6-8877-88481d0d3945
+[DB 42/200] Transcribing call_sessions:5868ce49-b4f6-4c82-b520-819c62f31a89 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 42/200]   Transcribed: 25 words, 1 turns
+[DB 42/200]   Saved call_sessions:5868ce49-b4f6-4c82-b520-819c62f31a89
+[DB 43/200] Transcribing call_sessions:6007a254-617e-4159-ab5d-f39d0d3227ae ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 43/200]   Transcribed: 25 words, 1 turns
+[DB 43/200]   Saved call_sessions:6007a254-617e-4159-ab5d-f39d0d3227ae
+[DB 44/200] Transcribing call_sessions:d08ea55c-5cf6-4895-8f15-5d5688b9f603 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 44/200]   Transcribed: 25 words, 1 turns
+[DB 44/200]   Saved call_sessions:d08ea55c-5cf6-4895-8f15-5d5688b9f603
+[DB 45/200] Transcribing call_sessions:552a2a32-d79d-4e0a-9967-ff02240f9457 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 48 words, 2 turns
+[DB 45/200]   Transcribed: 48 words, 2 turns
+[DB 45/200]   Saved call_sessions:552a2a32-d79d-4e0a-9967-ff02240f9457
+[DB 46/200] Transcribing call_sessions:ebdb149c-333f-4b90-ab35-a2ad6014236f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 48 words, 2 turns
+[DB 46/200]   Transcribed: 48 words, 2 turns
+[DB 46/200]   Saved call_sessions:ebdb149c-333f-4b90-ab35-a2ad6014236f
+[DB 47/200] Transcribing call_sessions:324763ef-d069-434f-83f8-5dbae741977c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 48 words, 2 turns
+[DB 47/200]   Transcribed: 48 words, 2 turns
+[DB 47/200]   Saved call_sessions:324763ef-d069-434f-83f8-5dbae741977c
+[DB 48/200] Transcribing call_sessions:d9a4345d-4510-472e-b885-921d094b9352 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 48 words, 2 turns
+[DB 48/200]   Transcribed: 48 words, 2 turns
+[DB 48/200]   Saved call_sessions:d9a4345d-4510-472e-b885-921d094b9352
+[DB 49/200] Transcribing call_sessions:eb6e4bc0-0c38-4dbf-8e41-0a8f3c13fe3e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 48 words, 2 turns
+[DB 49/200]   Transcribed: 48 words, 2 turns
+[DB 49/200]   Saved call_sessions:eb6e4bc0-0c38-4dbf-8e41-0a8f3c13fe3e
+[DB 50/200] Transcribing call_sessions:d8207ad9-6664-4946-ae7d-0cce4abb0f10 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 50/200]   Transcribed: 40 words, 2 turns
+[DB 50/200]   Saved call_sessions:d8207ad9-6664-4946-ae7d-0cce4abb0f10
+[DB 51/200] Transcribing call_sessions:7d4b7aba-1931-417a-85a5-a097670726db ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 51/200]   Transcribed: 40 words, 2 turns
+[DB 51/200]   Saved call_sessions:7d4b7aba-1931-417a-85a5-a097670726db
+[DB 52/200] Transcribing call_sessions:e5f72e3d-90e7-4490-bec2-bf873ab5d9cb ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 52/200]   Transcribed: 40 words, 2 turns
+[DB 52/200]   Saved call_sessions:e5f72e3d-90e7-4490-bec2-bf873ab5d9cb
+[DB 53/200] Transcribing call_sessions:9840ab88-b44c-4e3a-81ab-d4035a15016e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 53/200]   Transcribed: 40 words, 2 turns
+[DB 53/200]   Saved call_sessions:9840ab88-b44c-4e3a-81ab-d4035a15016e
+[DB 54/200] Transcribing call_sessions:38211f0d-4687-4e72-91e4-5c81c75de613 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 54/200]   Transcribed: 40 words, 2 turns
+[DB 54/200]   Saved call_sessions:38211f0d-4687-4e72-91e4-5c81c75de613
+[DB 55/200] Transcribing call_sessions:648771bb-c5ab-400a-82d0-73f9a0c757ac ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 1 turns
+[DB 55/200]   Transcribed: 44 words, 1 turns
+[DB 55/200]   Saved call_sessions:648771bb-c5ab-400a-82d0-73f9a0c757ac
+[DB 56/200] Transcribing call_sessions:3bc2a6a8-5fde-40f3-b4cc-3b922ff493c1 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 124 words, 2 turns
+[DB 56/200]   Transcribed: 124 words, 2 turns
+[DB 56/200]   Saved call_sessions:3bc2a6a8-5fde-40f3-b4cc-3b922ff493c1
+[DB 57/200] Transcribing call_sessions:024a2b9f-bca9-418a-a58c-44176c5587f5 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 57/200]   Transcribed: 40 words, 2 turns
+[DB 57/200]   Saved call_sessions:024a2b9f-bca9-418a-a58c-44176c5587f5
+[DB 58/200] Transcribing call_sessions:c10fff48-3077-4f77-89dd-8bdfa043d0a9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 58/200]   Transcribed: 40 words, 2 turns
+[DB 58/200]   Saved call_sessions:c10fff48-3077-4f77-89dd-8bdfa043d0a9
+[DB 59/200] Transcribing call_sessions:9e4c2fb6-88df-4e46-8cb6-ed3046cd7c1e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 59/200]   Transcribed: 40 words, 2 turns
+[DB 59/200]   Saved call_sessions:9e4c2fb6-88df-4e46-8cb6-ed3046cd7c1e
+[DB 60/200] Transcribing call_sessions:23b684e2-ee5b-4c5f-8846-87d589f26890 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 28 words, 2 turns
+[DB 60/200]   Transcribed: 28 words, 2 turns
+[DB 60/200]   Saved call_sessions:23b684e2-ee5b-4c5f-8846-87d589f26890
+[DB 61/200] Transcribing call_sessions:9ee750e3-3a5f-4b76-8223-bd96cbb3ea38 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 28 words, 2 turns
+[DB 61/200]   Transcribed: 28 words, 2 turns
+[DB 61/200]   Saved call_sessions:9ee750e3-3a5f-4b76-8223-bd96cbb3ea38
+[DB 62/200] Transcribing call_sessions:a5e28992-cb06-4ae2-af51-0f260562bdad ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 28 words, 2 turns
+[DB 62/200]   Transcribed: 28 words, 2 turns
+[DB 62/200]   Saved call_sessions:a5e28992-cb06-4ae2-af51-0f260562bdad
+[DB 63/200] Transcribing call_sessions:2e4f93f0-1112-4809-8547-e9bf3e8644ea ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 31 words, 1 turns
+[DB 63/200]   Transcribed: 31 words, 1 turns
+[DB 63/200]   Saved call_sessions:2e4f93f0-1112-4809-8547-e9bf3e8644ea
+[DB 64/200] Transcribing call_sessions:fb16536d-1397-4647-9053-889a2571f236 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 31 words, 1 turns
+[DB 64/200]   Transcribed: 31 words, 1 turns
+[DB 64/200]   Saved call_sessions:fb16536d-1397-4647-9053-889a2571f236
+[DB 65/200] Transcribing call_sessions:18109b63-1279-45b1-b155-9bafb3bda86c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 31 words, 1 turns
+[DB 65/200]   Transcribed: 31 words, 1 turns
+[DB 65/200]   Saved call_sessions:18109b63-1279-45b1-b155-9bafb3bda86c
+[DB 66/200] Transcribing call_sessions:7bf6261f-f0ec-4b03-b679-8449d6a985f7 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 123 words, 9 turns
+[DB 66/200]   Transcribed: 123 words, 9 turns
+[DB 66/200]   Saved call_sessions:7bf6261f-f0ec-4b03-b679-8449d6a985f7
+[DB 67/200] Transcribing call_sessions:7f4ad291-02f3-4eab-a0d6-cb8924d523ea ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 123 words, 9 turns
+[DB 67/200]   Transcribed: 123 words, 9 turns
+[DB 67/200]   Saved call_sessions:7f4ad291-02f3-4eab-a0d6-cb8924d523ea
+[DB 68/200] Transcribing call_sessions:6a4ced2d-e510-404f-88a5-17f169ce0b4a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 123 words, 9 turns
+[DB 68/200]   Transcribed: 123 words, 9 turns
+[DB 68/200]   Saved call_sessions:6a4ced2d-e510-404f-88a5-17f169ce0b4a
+[DB 69/200] Transcribing call_sessions:73cf3ba7-8ca1-4af2-a6dd-b2b6955e6f7c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 35 words, 1 turns
+[DB 69/200]   Transcribed: 35 words, 1 turns
+[DB 69/200]   Saved call_sessions:73cf3ba7-8ca1-4af2-a6dd-b2b6955e6f7c
+[DB 70/200] Transcribing call_sessions:f7d3c0e1-87e7-4165-a81d-f72ff16dfce1 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 35 words, 1 turns
+[DB 70/200]   Transcribed: 35 words, 1 turns
+[DB 70/200]   Saved call_sessions:f7d3c0e1-87e7-4165-a81d-f72ff16dfce1
+[DB 71/200] Transcribing call_sessions:ad179c38-c29e-4bb3-85e3-64bdf2df0c25 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 35 words, 1 turns
+[DB 71/200]   Transcribed: 35 words, 1 turns
+[DB 71/200]   Saved call_sessions:ad179c38-c29e-4bb3-85e3-64bdf2df0c25
+[DB 72/200] Transcribing call_sessions:b295f4a5-718f-4761-bbff-3ef7510326a2 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 105 words, 3 turns
+[DB 72/200]   Transcribed: 105 words, 3 turns
+[DB 72/200]   Saved call_sessions:b295f4a5-718f-4761-bbff-3ef7510326a2
+[DB 73/200] Transcribing call_sessions:b51f165a-8cdd-418e-bda2-58bd29c2c477 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 73/200]   Transcribed: 25 words, 1 turns
+[DB 73/200]   Saved call_sessions:b51f165a-8cdd-418e-bda2-58bd29c2c477
+[DB 74/200] Transcribing call_sessions:f6d78825-9cc8-4c13-a173-7189a0f2c3f9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 34 words, 1 turns
+[DB 74/200]   Transcribed: 34 words, 1 turns
+[DB 74/200]   Saved call_sessions:f6d78825-9cc8-4c13-a173-7189a0f2c3f9
+[DB 75/200] Transcribing call_sessions:cad471ae-eb07-4753-8cfa-d008122f3cbd ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 58 words, 2 turns
+[DB 75/200]   Transcribed: 58 words, 2 turns
+[DB 75/200]   Saved call_sessions:cad471ae-eb07-4753-8cfa-d008122f3cbd
+[DB 76/200] Transcribing call_sessions:9d2fbe6e-27d2-45d9-a0ad-837265bef75d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 76/200]   Transcribed: 41 words, 2 turns
+[DB 76/200]   Saved call_sessions:9d2fbe6e-27d2-45d9-a0ad-837265bef75d
+[DB 77/200] Transcribing call_sessions:67487d2c-a5b1-4184-9961-e576ee6b1948 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 8 words, 1 turns
+[DB 77/200]   Transcribed: 8 words, 1 turns
+[DB 77/200]   Saved call_sessions:67487d2c-a5b1-4184-9961-e576ee6b1948
+[DB 78/200] Transcribing call_sessions:fa65ca02-47c8-423d-b936-1561471e0b4e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 356 words, 1 turns
+[DB 78/200]   Transcribed: 356 words, 1 turns
+[DB 78/200]   Saved call_sessions:fa65ca02-47c8-423d-b936-1561471e0b4e
+[DB 79/200] Transcribing call_sessions:94a8eb55-6002-489a-bc7d-c77901a7bb35 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 1 turns
+[DB 79/200]   Transcribed: 25 words, 1 turns
+[DB 79/200]   Saved call_sessions:94a8eb55-6002-489a-bc7d-c77901a7bb35
+[DB 80/200] Transcribing call_sessions:f02f3e4f-8b9e-4213-919f-94a2f0e3b053 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 80/200]   Transcribed: 59 words, 3 turns
+[DB 80/200]   Saved call_sessions:f02f3e4f-8b9e-4213-919f-94a2f0e3b053
+[DB 81/200] Transcribing call_sessions:394a37a9-7f00-4fd1-8206-e2637bfc8791 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 113 words, 5 turns
+[DB 81/200]   Transcribed: 113 words, 5 turns
+[DB 81/200]   Saved call_sessions:394a37a9-7f00-4fd1-8206-e2637bfc8791
+[DB 82/200] Transcribing call_sessions:15dccb88-bd3d-499d-bfa6-2468176cf2ad ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 63 words, 3 turns
+[DB 82/200]   Transcribed: 63 words, 3 turns
+[DB 82/200]   Saved call_sessions:15dccb88-bd3d-499d-bfa6-2468176cf2ad
+[DB 83/200] Transcribing call_sessions:72d9c01d-8658-4511-9128-0b38e624b2e1 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 153 words, 8 turns
+[DB 83/200]   Transcribed: 153 words, 8 turns
+[DB 83/200]   Saved call_sessions:72d9c01d-8658-4511-9128-0b38e624b2e1
+[DB 84/200] Transcribing call_sessions:7f8d4158-0571-4d39-bb48-8d51bad443ef ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 84/200]   Transcribed: 27 words, 2 turns
+[DB 84/200]   Saved call_sessions:7f8d4158-0571-4d39-bb48-8d51bad443ef
+[DB 85/200] Transcribing call_sessions:29022263-4840-472d-bf0e-b5fc8016055a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 46 words, 2 turns
+[DB 85/200]   Transcribed: 46 words, 2 turns
+[DB 85/200]   Saved call_sessions:29022263-4840-472d-bf0e-b5fc8016055a
+[DB 86/200] Transcribing call_sessions:f36b9b70-8d47-4112-8d9d-fe42d59fd29d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 3 turns
+[DB 86/200]   Transcribed: 40 words, 3 turns
+[DB 86/200]   Saved call_sessions:f36b9b70-8d47-4112-8d9d-fe42d59fd29d
+[DB 87/200] Transcribing call_sessions:69db79f6-6de9-4f1a-a7dd-7e2b360ea9d7 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 2 turns
+[DB 87/200]   Transcribed: 59 words, 2 turns
+[DB 87/200]   Saved call_sessions:69db79f6-6de9-4f1a-a7dd-7e2b360ea9d7
+[DB 88/200] Transcribing call_sessions:994d49a0-09b4-421b-aaeb-99f254695b2b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 39 words, 1 turns
+[DB 88/200]   Transcribed: 39 words, 1 turns
+[DB 88/200]   Saved call_sessions:994d49a0-09b4-421b-aaeb-99f254695b2b
+[DB 89/200] Transcribing call_sessions:9575a500-0493-493d-adbe-3e8c434c25a8 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 127 words, 8 turns
+[DB 89/200]   Transcribed: 127 words, 8 turns
+[DB 89/200]   Saved call_sessions:9575a500-0493-493d-adbe-3e8c434c25a8
+[DB 90/200] Transcribing call_sessions:bd4df57d-d82a-4f3d-8243-672e2564fdbb ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 51 words, 2 turns
+[DB 90/200]   Transcribed: 51 words, 2 turns
+[DB 90/200]   Saved call_sessions:bd4df57d-d82a-4f3d-8243-672e2564fdbb
+[DB 91/200] Transcribing call_sessions:0210c5b2-a2c4-4dad-bda7-0cb64b34fdab ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 37 words, 2 turns
+[DB 91/200]   Transcribed: 37 words, 2 turns
+[DB 91/200]   Saved call_sessions:0210c5b2-a2c4-4dad-bda7-0cb64b34fdab
+[DB 92/200] Transcribing call_sessions:94caffb5-b9f1-431d-82bd-6f6794f18979 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 1 turns
+[DB 92/200]   Transcribed: 32 words, 1 turns
+[DB 92/200]   Saved call_sessions:94caffb5-b9f1-431d-82bd-6f6794f18979
+[DB 93/200] Transcribing call_sessions:428c22e1-7882-40af-9248-791109a540b9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 34 words, 3 turns
+[DB 93/200]   Transcribed: 34 words, 3 turns
+[DB 93/200]   Saved call_sessions:428c22e1-7882-40af-9248-791109a540b9
+[DB 94/200] Transcribing call_sessions:cd9aacd9-55e2-4543-97c9-5f72ba7fd1e7 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 118 words, 2 turns
+[DB 94/200]   Transcribed: 118 words, 2 turns
+[DB 94/200]   Saved call_sessions:cd9aacd9-55e2-4543-97c9-5f72ba7fd1e7
+[DB 95/200] Transcribing call_sessions:11ce6c42-9f90-47b4-86a2-bcea8ef79c4d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 99 words, 2 turns
+[DB 95/200]   Transcribed: 99 words, 2 turns
+[DB 95/200]   Saved call_sessions:11ce6c42-9f90-47b4-86a2-bcea8ef79c4d
+[DB 96/200] Transcribing call_sessions:6593c8af-f857-4155-b598-eca643c9140a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 96/200]   Transcribed: 32 words, 2 turns
+[DB 96/200]   Saved call_sessions:6593c8af-f857-4155-b598-eca643c9140a
+[DB 97/200] Transcribing call_sessions:a6ea9fa2-0aff-4ef6-ac95-495dd3da6e46 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 50 words, 1 turns
+[DB 97/200]   Transcribed: 50 words, 1 turns
+[DB 97/200]   Saved call_sessions:a6ea9fa2-0aff-4ef6-ac95-495dd3da6e46
+[DB 98/200] Transcribing call_sessions:0d7efe9c-03a7-4332-8cf7-3d4127905688 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 46 words, 3 turns
+[DB 98/200]   Transcribed: 46 words, 3 turns
+[DB 98/200]   Saved call_sessions:0d7efe9c-03a7-4332-8cf7-3d4127905688
+[DB 99/200] Transcribing call_sessions:3bb74a20-9b5d-4c7c-b825-96f32de9ffb9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 32 words, 2 turns
+[DB 99/200]   Transcribed: 32 words, 2 turns
+[DB 99/200]   Saved call_sessions:3bb74a20-9b5d-4c7c-b825-96f32de9ffb9
+[DB 100/200] Transcribing call_sessions:674487a8-23f9-4ade-b17e-cd8dd4459108 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 3 turns
+[DB 100/200]   Transcribed: 41 words, 3 turns
+[DB 100/200]   Saved call_sessions:674487a8-23f9-4ade-b17e-cd8dd4459108
+[DB 101/200] Transcribing call_sessions:e574241a-be77-4b35-91d7-ad1f15558a0a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 8 words, 2 turns
+[DB 101/200]   Transcribed: 8 words, 2 turns
+[DB 101/200]   Saved call_sessions:e574241a-be77-4b35-91d7-ad1f15558a0a
+[DB 102/200] Transcribing call_sessions:a27fd3c2-b36c-44b9-848b-29d88868d264 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 216 words, 1 turns
+[DB 102/200]   Transcribed: 216 words, 1 turns
+[DB 102/200]   Saved call_sessions:a27fd3c2-b36c-44b9-848b-29d88868d264
+[DB 103/200] Transcribing call_sessions:492f36c4-bf12-4ef8-adfc-7bc1ba2c9df2 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 208 words, 2 turns
+[DB 103/200]   Transcribed: 208 words, 2 turns
+[DB 103/200]   Saved call_sessions:492f36c4-bf12-4ef8-adfc-7bc1ba2c9df2
+[DB 104/200] Transcribing call_sessions:ba67f905-3794-4698-90ea-3a5a07b34c94 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 4 turns
+[DB 104/200]   Transcribed: 30 words, 4 turns
+[DB 104/200]   Saved call_sessions:ba67f905-3794-4698-90ea-3a5a07b34c94
+[DB 105/200] Transcribing call_sessions:40228194-7df5-46a5-b8bc-36c062ce690c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 2 turns
+[DB 105/200]   Transcribed: 25 words, 2 turns
+[DB 105/200]   Saved call_sessions:40228194-7df5-46a5-b8bc-36c062ce690c
+[DB 106/200] Transcribing call_sessions:1bac6640-d906-4025-a7f5-a6a994c1bfbd ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 46 words, 2 turns
+[DB 106/200]   Transcribed: 46 words, 2 turns
+[DB 106/200]   Saved call_sessions:1bac6640-d906-4025-a7f5-a6a994c1bfbd
+[DB 107/200] Transcribing call_sessions:2f37c802-6299-4622-97b7-09411bbbc8f2 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 39 words, 2 turns
+[DB 107/200]   Transcribed: 39 words, 2 turns
+[DB 107/200]   Saved call_sessions:2f37c802-6299-4622-97b7-09411bbbc8f2
+[DB 108/200] Transcribing call_sessions:ca456562-cbd6-41ca-aa34-9515c2f9b56f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 108/200]   Transcribed: 41 words, 2 turns
+[DB 108/200]   Saved call_sessions:ca456562-cbd6-41ca-aa34-9515c2f9b56f
+[DB 109/200] Transcribing call_sessions:5a787606-f151-4f7c-9e3c-a037338be699 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 37 words, 2 turns
+[DB 109/200]   Transcribed: 37 words, 2 turns
+[DB 109/200]   Saved call_sessions:5a787606-f151-4f7c-9e3c-a037338be699
+[DB 110/200] Transcribing call_sessions:ddeaaab5-14e0-4e79-99ab-d68968053192 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 46 words, 2 turns
+[DB 110/200]   Transcribed: 46 words, 2 turns
+[DB 110/200]   Saved call_sessions:ddeaaab5-14e0-4e79-99ab-d68968053192
+[DB 111/200] Transcribing call_sessions:b51abf60-7c03-49c5-8927-ab68559287c9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 111/200]   Transcribed: 40 words, 2 turns
+[DB 111/200]   Saved call_sessions:b51abf60-7c03-49c5-8927-ab68559287c9
+[DB 112/200] Transcribing call_sessions:adfc54dd-640e-4ae1-bba3-f06a0c370e4c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 2 turns
+[DB 112/200]   Transcribed: 25 words, 2 turns
+[DB 112/200]   Saved call_sessions:adfc54dd-640e-4ae1-bba3-f06a0c370e4c
+[DB 113/200] Transcribing call_sessions:a1850250-4f97-4594-b995-20a5e635b41f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 37 words, 2 turns
+[DB 113/200]   Transcribed: 37 words, 2 turns
+[DB 113/200]   Saved call_sessions:a1850250-4f97-4594-b995-20a5e635b41f
+[DB 114/200] Transcribing call_sessions:b88a8807-f3ef-43c3-8e6c-c9a468c778a6 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 2 turns
+[DB 114/200]   Transcribed: 30 words, 2 turns
+[DB 114/200]   Saved call_sessions:b88a8807-f3ef-43c3-8e6c-c9a468c778a6
+[DB 115/200] Transcribing call_sessions:d62645f5-4c86-4112-9f38-aa407af1fcf6 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 71 words, 2 turns
+[DB 115/200]   Transcribed: 71 words, 2 turns
+[DB 115/200]   Saved call_sessions:d62645f5-4c86-4112-9f38-aa407af1fcf6
+[DB 116/200] Transcribing call_sessions:b1a6272e-9388-49dd-9020-42c779c8797a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 49 words, 3 turns
+[DB 116/200]   Transcribed: 49 words, 3 turns
+[DB 116/200]   Saved call_sessions:b1a6272e-9388-49dd-9020-42c779c8797a
+[DB 117/200] Transcribing call_sessions:3b1ff92d-22c7-4335-aeeb-ffd3bdc9615d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 26 words, 2 turns
+[DB 117/200]   Transcribed: 26 words, 2 turns
+[DB 117/200]   Saved call_sessions:3b1ff92d-22c7-4335-aeeb-ffd3bdc9615d
+[DB 118/200] Transcribing call_sessions:75724ce0-4418-4680-ab91-d1b3e3609fd9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 84 words, 7 turns
+[DB 118/200]   Transcribed: 84 words, 7 turns
+[DB 118/200]   Saved call_sessions:75724ce0-4418-4680-ab91-d1b3e3609fd9
+[DB 119/200] Transcribing call_sessions:ccd53587-d877-4804-b783-6d3ff38f622b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 119/200]   Transcribed: 40 words, 2 turns
+[DB 119/200]   Saved call_sessions:ccd53587-d877-4804-b783-6d3ff38f622b
+[DB 120/200] Transcribing call_sessions:eee78d02-d8bf-4dde-b1d8-54ef0b7bfda5 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 57 words, 3 turns
+[DB 120/200]   Transcribed: 57 words, 3 turns
+[DB 120/200]   Saved call_sessions:eee78d02-d8bf-4dde-b1d8-54ef0b7bfda5
+[DB 121/200] Transcribing call_sessions:e13d3bbb-9def-481a-9e3f-83155b8f11e9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 30 words, 1 turns
+[DB 121/200]   Transcribed: 30 words, 1 turns
+[DB 121/200]   Saved call_sessions:e13d3bbb-9def-481a-9e3f-83155b8f11e9
+[DB 122/200] Transcribing call_sessions:625e701e-86e2-465c-82ec-509cbdf5126f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 122/200]   Transcribed: 40 words, 2 turns
+[DB 122/200]   Saved call_sessions:625e701e-86e2-465c-82ec-509cbdf5126f
+[DB 123/200] Transcribing call_sessions:4199a544-77ce-414a-8b06-25d195f807f7 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 123/200]   Transcribed: 41 words, 2 turns
+[DB 123/200]   Saved call_sessions:4199a544-77ce-414a-8b06-25d195f807f7
+[DB 124/200] Transcribing call_sessions:7852de81-67d2-4435-b6dc-7b36a6a6cf10 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 9 words, 2 turns
+[DB 124/200]   Transcribed: 9 words, 2 turns
+[DB 124/200]   Saved call_sessions:7852de81-67d2-4435-b6dc-7b36a6a6cf10
+[DB 125/200] Transcribing call_sessions:90f7d3f6-014f-4dfb-936c-30ee2184d25d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 23 words, 2 turns
+[DB 125/200]   Transcribed: 23 words, 2 turns
+[DB 125/200]   Saved call_sessions:90f7d3f6-014f-4dfb-936c-30ee2184d25d
+[DB 126/200] Transcribing call_sessions:8780c74d-191f-4225-a348-f663e939d396 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 1 words, 0 turns
+[DB 127/200] Transcribing call_sessions:e70b8777-9ade-477a-acc5-d8cfa02f8e1f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+[DB 126/200]   Empty transcription
+    STT complete: 40 words, 2 turns
+[DB 127/200]   Transcribed: 40 words, 2 turns
+[DB 127/200]   Saved call_sessions:e70b8777-9ade-477a-acc5-d8cfa02f8e1f
+[DB 128/200] Transcribing call_sessions:eefad004-71da-411b-9a03-2227be1beed8 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 76 words, 2 turns
+[DB 128/200]   Transcribed: 76 words, 2 turns
+[DB 128/200]   Saved call_sessions:eefad004-71da-411b-9a03-2227be1beed8
+[DB 129/200] Transcribing call_sessions:49e25f44-a9ba-44b7-b7c1-631b6c015755 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 22 words, 3 turns
+[DB 129/200]   Transcribed: 22 words, 3 turns
+[DB 129/200]   Saved call_sessions:49e25f44-a9ba-44b7-b7c1-631b6c015755
+[DB 130/200] Transcribing call_sessions:0dd6a53b-04c4-4080-8d9a-7d156e85abcd ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 1 turns
+[DB 130/200]   Transcribed: 41 words, 1 turns
+[DB 130/200]   Saved call_sessions:0dd6a53b-04c4-4080-8d9a-7d156e85abcd
+[DB 131/200] Transcribing call_sessions:e0956a3e-ba30-4a2b-a3e5-af07d420a728 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 56 words, 6 turns
+[DB 131/200]   Transcribed: 56 words, 6 turns
+[DB 131/200]   Saved call_sessions:e0956a3e-ba30-4a2b-a3e5-af07d420a728
+[DB 132/200] Transcribing call_sessions:e189f521-5eee-4754-9bc4-c29c41ebbc1f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 34 words, 3 turns
+[DB 132/200]   Transcribed: 34 words, 3 turns
+[DB 132/200]   Saved call_sessions:e189f521-5eee-4754-9bc4-c29c41ebbc1f
+[DB 133/200] Transcribing call_sessions:0984d6d2-d28a-41c8-8ddf-c52adb7f3e76 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 56 words, 2 turns
+[DB 133/200]   Transcribed: 56 words, 2 turns
+[DB 133/200]   Saved call_sessions:0984d6d2-d28a-41c8-8ddf-c52adb7f3e76
+[DB 134/200] Transcribing call_sessions:4abf9a20-4779-45d0-bd8d-24cb8e0764d4 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 134/200]   Transcribed: 40 words, 2 turns
+[DB 134/200]   Saved call_sessions:4abf9a20-4779-45d0-bd8d-24cb8e0764d4
+[DB 135/200] Transcribing call_sessions:c374fe4e-c671-4ed8-a850-2d230fb53c0c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 45 words, 2 turns
+[DB 135/200]   Transcribed: 45 words, 2 turns
+[DB 135/200]   Saved call_sessions:c374fe4e-c671-4ed8-a850-2d230fb53c0c
+[DB 136/200] Transcribing call_sessions:f78bea48-67b0-4c8f-9f7f-c8aeeb8884fe ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 9 words, 1 turns
+[DB 136/200]   Transcribed: 9 words, 1 turns
+[DB 136/200]   Saved call_sessions:f78bea48-67b0-4c8f-9f7f-c8aeeb8884fe
+[DB 137/200] Transcribing call_sessions:639ae29a-9b2f-45e4-9b02-dfdbf364b575 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 25 words, 2 turns
+[DB 137/200]   Transcribed: 25 words, 2 turns
+[DB 137/200]   Saved call_sessions:639ae29a-9b2f-45e4-9b02-dfdbf364b575
+[DB 138/200] Transcribing call_sessions:d406e58f-c7e6-463a-b81d-7cd9d6014bea ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 22 words, 2 turns
+[DB 138/200]   Transcribed: 22 words, 2 turns
+[DB 138/200]   Saved call_sessions:d406e58f-c7e6-463a-b81d-7cd9d6014bea
+[DB 139/200] Transcribing call_sessions:d7bf643a-3204-4ea1-a61a-88f3d5e85750 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 139/200]   Transcribed: 40 words, 2 turns
+[DB 139/200]   Saved call_sessions:d7bf643a-3204-4ea1-a61a-88f3d5e85750
+[DB 140/200] Transcribing call_sessions:2e6a5bf7-0330-44cc-afcc-a353ce563fed ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 39 words, 2 turns
+[DB 140/200]   Transcribed: 39 words, 2 turns
+[DB 140/200]   Saved call_sessions:2e6a5bf7-0330-44cc-afcc-a353ce563fed
+[DB 141/200] Transcribing call_sessions:a1c2c018-5c12-477e-8cb8-f1ffe4d5f81a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 141/200]   Transcribed: 41 words, 2 turns
+[DB 141/200]   Saved call_sessions:a1c2c018-5c12-477e-8cb8-f1ffe4d5f81a
+[DB 142/200] Transcribing call_sessions:2542f1ed-5bcd-4065-98fd-7cd9f01d4218 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 46 words, 2 turns
+[DB 142/200]   Transcribed: 46 words, 2 turns
+[DB 142/200]   Saved call_sessions:2542f1ed-5bcd-4065-98fd-7cd9f01d4218
+[DB 143/200] Transcribing call_sessions:cdc078de-a511-495a-ba94-56daf7df4a67 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 46 words, 2 turns
+[DB 143/200]   Transcribed: 46 words, 2 turns
+[DB 143/200]   Saved call_sessions:cdc078de-a511-495a-ba94-56daf7df4a67
+[DB 144/200] Transcribing call_sessions:c07e0bfe-dfa4-454d-a495-328a49bf040a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 43 words, 2 turns
+[DB 144/200]   Transcribed: 43 words, 2 turns
+[DB 144/200]   Saved call_sessions:c07e0bfe-dfa4-454d-a495-328a49bf040a
+[DB 145/200] Transcribing call_sessions:272e0d8d-9819-472a-94f0-255cd95b12ce ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 31 words, 2 turns
+[DB 145/200]   Transcribed: 31 words, 2 turns
+[DB 145/200]   Saved call_sessions:272e0d8d-9819-472a-94f0-255cd95b12ce
+[DB 146/200] Transcribing call_sessions:3874d478-dbe4-4cec-873b-0298b475ad6b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 146/200]   Transcribed: 40 words, 2 turns
+[DB 146/200]   Saved call_sessions:3874d478-dbe4-4cec-873b-0298b475ad6b
+[DB 147/200] Transcribing call_sessions:b6935420-a59a-4d3c-9523-13b7097bf02e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 27 words, 2 turns
+[DB 147/200]   Transcribed: 27 words, 2 turns
+[DB 147/200]   Saved call_sessions:b6935420-a59a-4d3c-9523-13b7097bf02e
+[DB 148/200] Transcribing call_sessions:c8ce6d9d-4ef6-4154-b6c6-32c7251a4a0f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 1 words, 0 turns
+[DB 148/200]   Empty transcription
+[DB 149/200] Transcribing call_sessions:65184fc9-a6f7-47fa-9544-9b415fddd939 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 1 words, 0 turns
+[DB 150/200] Transcribing call_sessions:0462a284-18ab-421b-9224-7c13073adf99 ΓÇª
+[DB 149/200]   Empty transcription
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 150/200]   Transcribed: 41 words, 2 turns
+[DB 150/200]   Saved call_sessions:0462a284-18ab-421b-9224-7c13073adf99
+[DB 151/200] Transcribing call_sessions:902ad6a7-b6e5-45ed-9424-ecf39942c163 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 151/200]   Transcribed: 41 words, 2 turns
+[DB 151/200]   Saved call_sessions:902ad6a7-b6e5-45ed-9424-ecf39942c163
+[DB 152/200] Transcribing call_sessions:98ad26a3-b226-4bdd-a0a5-ca5998c8912f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 152/200]   Transcribed: 40 words, 2 turns
+[DB 152/200]   Saved call_sessions:98ad26a3-b226-4bdd-a0a5-ca5998c8912f
+[DB 153/200] Transcribing call_sessions:8f3d604b-04e9-42d3-a295-a0b5d797569a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 153/200]   Transcribed: 40 words, 2 turns
+[DB 153/200]   Saved call_sessions:8f3d604b-04e9-42d3-a295-a0b5d797569a
+[DB 154/200] Transcribing call_sessions:f5f1a8f1-4a81-4cee-b09f-6466cd1f48d4 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 154/200]   Transcribed: 40 words, 2 turns
+[DB 154/200]   Saved call_sessions:f5f1a8f1-4a81-4cee-b09f-6466cd1f48d4
+[DB 155/200] Transcribing call_sessions:c2914ea9-ad35-4343-b0d8-0929c1fb8666 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 155/200]   Transcribed: 41 words, 2 turns
+[DB 155/200]   Saved call_sessions:c2914ea9-ad35-4343-b0d8-0929c1fb8666
+[DB 156/200] Transcribing call_sessions:9fc1c92b-082b-4457-8b95-945a477c8645 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 156/200]   Transcribed: 41 words, 2 turns
+[DB 156/200]   Saved call_sessions:9fc1c92b-082b-4457-8b95-945a477c8645
+[DB 157/200] Transcribing call_sessions:32a7f791-6b46-4e56-9634-cf3e1f726dc9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 157/200]   Transcribed: 41 words, 2 turns
+[DB 157/200]   Saved call_sessions:32a7f791-6b46-4e56-9634-cf3e1f726dc9
+[DB 158/200] Transcribing call_sessions:2bd0eca1-3c47-4f45-88d7-cb5e657d623f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 158/200]   Transcribed: 40 words, 2 turns
+[DB 158/200]   Saved call_sessions:2bd0eca1-3c47-4f45-88d7-cb5e657d623f
+[DB 159/200] Transcribing call_sessions:761e7d30-c7ab-4a3e-ac28-efed4f5627d3 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 159/200]   Transcribed: 40 words, 2 turns
+[DB 159/200]   Saved call_sessions:761e7d30-c7ab-4a3e-ac28-efed4f5627d3
+[DB 160/200] Transcribing call_sessions:56053a38-f56b-4143-beb0-cd53429f11bc ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 160/200]   Transcribed: 40 words, 2 turns
+[DB 160/200]   Saved call_sessions:56053a38-f56b-4143-beb0-cd53429f11bc
+[DB 161/200] Transcribing call_sessions:4ec47c57-d428-4e23-af10-ec39ab1bc501 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 161/200]   Transcribed: 40 words, 2 turns
+[DB 161/200]   Saved call_sessions:4ec47c57-d428-4e23-af10-ec39ab1bc501
+[DB 162/200] Transcribing call_sessions:03836e51-d849-47e8-80e0-e53044e00963 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 162/200]   Transcribed: 40 words, 2 turns
+[DB 162/200]   Saved call_sessions:03836e51-d849-47e8-80e0-e53044e00963
+[DB 163/200] Transcribing call_sessions:e126c5dc-4a15-4de6-9bb8-d380b8c32cbb ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 163/200]   Transcribed: 40 words, 2 turns
+[DB 163/200]   Saved call_sessions:e126c5dc-4a15-4de6-9bb8-d380b8c32cbb
+[DB 164/200] Transcribing call_sessions:98ae098c-f9e6-4553-bdc6-dab414af9e4b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 164/200]   Transcribed: 59 words, 3 turns
+[DB 164/200]   Saved call_sessions:98ae098c-f9e6-4553-bdc6-dab414af9e4b
+[DB 165/200] Transcribing call_sessions:a2972031-b43a-436c-9134-8227949a092b ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 165/200]   Transcribed: 59 words, 3 turns
+[DB 165/200]   Saved call_sessions:a2972031-b43a-436c-9134-8227949a092b
+[DB 166/200] Transcribing call_sessions:3660eb26-058c-4569-87f5-140ebc6fc1e0 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 166/200]   Transcribed: 59 words, 3 turns
+[DB 166/200]   Saved call_sessions:3660eb26-058c-4569-87f5-140ebc6fc1e0
+[DB 167/200] Transcribing call_sessions:ad4340f0-6aa9-4b60-9a89-6b21b949fc7f ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 167/200]   Transcribed: 59 words, 3 turns
+[DB 167/200]   Saved call_sessions:ad4340f0-6aa9-4b60-9a89-6b21b949fc7f
+[DB 168/200] Transcribing call_sessions:42a2dde6-5584-468c-b39b-9f1430229745 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 168/200]   Transcribed: 59 words, 3 turns
+[DB 168/200]   Saved call_sessions:42a2dde6-5584-468c-b39b-9f1430229745
+[DB 169/200] Transcribing call_sessions:c52001e8-bf8f-454f-8ae3-c24b03192c8a ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 59 words, 3 turns
+[DB 169/200]   Transcribed: 59 words, 3 turns
+[DB 169/200]   Saved call_sessions:c52001e8-bf8f-454f-8ae3-c24b03192c8a
+[DB 170/200] Transcribing call_sessions:cf6a92fb-82c2-4595-a5cd-202550eee485 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 170/200]   Transcribed: 44 words, 2 turns
+[DB 170/200]   Saved call_sessions:cf6a92fb-82c2-4595-a5cd-202550eee485
+[DB 171/200] Transcribing call_sessions:e3c4f142-44ca-4465-b30b-f97924553e89 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 171/200]   Transcribed: 44 words, 2 turns
+[DB 171/200]   Saved call_sessions:e3c4f142-44ca-4465-b30b-f97924553e89
+[DB 172/200] Transcribing call_sessions:56228100-8b05-47d1-ab51-8bcc09c7bf1e ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 172/200]   Transcribed: 44 words, 2 turns
+[DB 172/200]   Saved call_sessions:56228100-8b05-47d1-ab51-8bcc09c7bf1e
+[DB 173/200] Transcribing call_sessions:76c29b63-e214-4de8-a2db-9606f1a1f601 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 173/200]   Transcribed: 44 words, 2 turns
+[DB 173/200]   Saved call_sessions:76c29b63-e214-4de8-a2db-9606f1a1f601
+[DB 174/200] Transcribing call_sessions:23bd8705-1fd7-4a59-94a8-487d8bfc4580 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 174/200]   Transcribed: 44 words, 2 turns
+[DB 174/200]   Saved call_sessions:23bd8705-1fd7-4a59-94a8-487d8bfc4580
+[DB 175/200] Transcribing call_sessions:77b88bec-e0e2-4201-bc9d-ea6aaa999570 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 175/200]   Transcribed: 44 words, 2 turns
+[DB 175/200]   Saved call_sessions:77b88bec-e0e2-4201-bc9d-ea6aaa999570
+[DB 176/200] Transcribing call_sessions:9985104b-1768-42e3-802a-d755fd1d343d ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 44 words, 2 turns
+[DB 176/200]   Transcribed: 44 words, 2 turns
+[DB 176/200]   Saved call_sessions:9985104b-1768-42e3-802a-d755fd1d343d
+[DB 177/200] Transcribing call_sessions:2dd49d9f-1dbb-43c4-ae87-1358bd742967 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 177/200]   Transcribed: 40 words, 2 turns
+[DB 177/200]   Saved call_sessions:2dd49d9f-1dbb-43c4-ae87-1358bd742967
+[DB 178/200] Transcribing call_sessions:c63a964d-0485-4b6e-995b-8e58bd51b221 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 178/200]   Transcribed: 40 words, 2 turns
+[DB 178/200]   Saved call_sessions:c63a964d-0485-4b6e-995b-8e58bd51b221
+[DB 179/200] Transcribing call_sessions:ef40347f-7e5a-41ab-b88a-ad43b93a80c3 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 179/200]   Transcribed: 40 words, 2 turns
+[DB 179/200]   Saved call_sessions:ef40347f-7e5a-41ab-b88a-ad43b93a80c3
+[DB 180/200] Transcribing call_sessions:b560eded-f4a2-44be-baa0-acd9d43e92e8 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 180/200]   Transcribed: 40 words, 2 turns
+[DB 180/200]   Saved call_sessions:b560eded-f4a2-44be-baa0-acd9d43e92e8
+[DB 181/200] Transcribing call_sessions:9d430b7d-2f21-435b-abf6-c0cf364b78ca ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 181/200]   Transcribed: 40 words, 2 turns
+[DB 181/200]   Saved call_sessions:9d430b7d-2f21-435b-abf6-c0cf364b78ca
+[DB 182/200] Transcribing call_sessions:ec24a853-72c9-40da-9769-c6e672227b23 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 182/200]   Transcribed: 40 words, 2 turns
+[DB 182/200]   Saved call_sessions:ec24a853-72c9-40da-9769-c6e672227b23
+[DB 183/200] Transcribing call_sessions:9921fd7b-3c49-4632-8bea-095c88acb4be ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 183/200]   Transcribed: 40 words, 2 turns
+[DB 183/200]   Saved call_sessions:9921fd7b-3c49-4632-8bea-095c88acb4be
+[DB 184/200] Transcribing call_sessions:cc09543e-eed4-468c-8e38-b157d67cea35 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 40 words, 2 turns
+[DB 184/200]   Transcribed: 40 words, 2 turns
+[DB 184/200]   Saved call_sessions:cc09543e-eed4-468c-8e38-b157d67cea35
+[DB 185/200] Transcribing call_sessions:51df87c7-0632-4944-92cb-7bef4ebf8ca9 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 185/200]   Transcribed: 38 words, 2 turns
+[DB 185/200]   Saved call_sessions:51df87c7-0632-4944-92cb-7bef4ebf8ca9
+[DB 186/200] Transcribing call_sessions:d9487829-f099-4f36-8208-21e8a3675015 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 186/200]   Transcribed: 38 words, 2 turns
+[DB 186/200]   Saved call_sessions:d9487829-f099-4f36-8208-21e8a3675015
+[DB 187/200] Transcribing call_sessions:cdc13f44-51b7-4b12-9629-10cbd65dc648 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 187/200]   Transcribed: 38 words, 2 turns
+[DB 187/200]   Saved call_sessions:cdc13f44-51b7-4b12-9629-10cbd65dc648
+[DB 188/200] Transcribing call_sessions:bfffad52-ae64-44ae-8d0c-6a44daa528ef ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 188/200]   Transcribed: 38 words, 2 turns
+[DB 188/200]   Saved call_sessions:bfffad52-ae64-44ae-8d0c-6a44daa528ef
+[DB 189/200] Transcribing call_sessions:85bbf077-c922-42c2-9e3d-03073768c761 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 189/200]   Transcribed: 38 words, 2 turns
+[DB 189/200]   Saved call_sessions:85bbf077-c922-42c2-9e3d-03073768c761
+[DB 190/200] Transcribing call_sessions:bdc28af2-671b-4c8a-8efe-7594c9eab3ad ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 190/200]   Transcribed: 38 words, 2 turns
+[DB 190/200]   Saved call_sessions:bdc28af2-671b-4c8a-8efe-7594c9eab3ad
+[DB 191/200] Transcribing call_sessions:0fce619b-506c-4f00-bb30-9d3124f26e80 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 191/200]   Transcribed: 38 words, 2 turns
+[DB 191/200]   Saved call_sessions:0fce619b-506c-4f00-bb30-9d3124f26e80
+[DB 192/200] Transcribing call_sessions:f9a631cf-c9b0-425e-b885-97e9eae94661 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 38 words, 2 turns
+[DB 192/200]   Transcribed: 38 words, 2 turns
+[DB 192/200]   Saved call_sessions:f9a631cf-c9b0-425e-b885-97e9eae94661
+[DB 193/200] Transcribing call_sessions:5df9161e-973f-4df7-bf2f-9beefb0dc79c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 193/200]   Transcribed: 41 words, 2 turns
+[DB 193/200]   Saved call_sessions:5df9161e-973f-4df7-bf2f-9beefb0dc79c
+[DB 194/200] Transcribing call_sessions:5a50a984-1470-4574-ae92-1f4219c91a72 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 194/200]   Transcribed: 41 words, 2 turns
+[DB 194/200]   Saved call_sessions:5a50a984-1470-4574-ae92-1f4219c91a72
+[DB 195/200] Transcribing call_sessions:7b4ae76b-a655-40df-b597-0f1f7e0d5e02 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 195/200]   Transcribed: 41 words, 2 turns
+[DB 195/200]   Saved call_sessions:7b4ae76b-a655-40df-b597-0f1f7e0d5e02
+[DB 196/200] Transcribing call_sessions:03de6a8b-2fe3-41af-8437-45e75af7b794 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 196/200]   Transcribed: 41 words, 2 turns
+[DB 196/200]   Saved call_sessions:03de6a8b-2fe3-41af-8437-45e75af7b794
+[DB 197/200] Transcribing call_sessions:678a245e-5f16-4bc1-a57a-e3e7f853241c ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 197/200]   Transcribed: 41 words, 2 turns
+[DB 197/200]   Saved call_sessions:678a245e-5f16-4bc1-a57a-e3e7f853241c
+[DB 198/200] Transcribing call_sessions:421cb674-0d5c-4da7-8961-7c15fe765c66 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 198/200]   Transcribed: 41 words, 2 turns
+[DB 198/200]   Saved call_sessions:421cb674-0d5c-4da7-8961-7c15fe765c66
+[DB 199/200] Transcribing call_sessions:9fc9caf5-154e-4979-bfed-382b15ddd5d2 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 199/200]   Transcribed: 41 words, 2 turns
+[DB 199/200]   Saved call_sessions:9fc9caf5-154e-4979-bfed-382b15ddd5d2
+[DB 200/200] Transcribing call_sessions:6a382e40-a203-4ca7-b148-e73a599e6952 ΓÇª
+    Sending to Google STT (GCS URI) ΓÇª
+    STT complete: 41 words, 2 turns
+[DB 200/200]   Transcribed: 41 words, 2 turns
+[DB 200/200]   Saved call_sessions:6a382e40-a203-4ca7-b148-e73a599e6952
+
+================================================================================
+  SUMMARY
+================================================================================
+  Telnyx recordings found    : 0
+  Linked to DB records       : 0
+  Already transcribed (skip) : 0
+  No DB link (skip)          : 0
+  Downloaded & uploaded      : 0
+  Successfully transcribed   : 196
+  Failed                     : 4
+================================================================================
+
+Done.

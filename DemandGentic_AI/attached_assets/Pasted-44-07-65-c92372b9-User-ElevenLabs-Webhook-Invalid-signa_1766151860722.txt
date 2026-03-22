@@ -1,0 +1,80 @@
+44:07.65
+c92372b9
+User
+[ElevenLabs Webhook] Invalid signature
+2025-12-19 18:44:07.65
+c92372b9
+User
+- Expected: 11e5d9839963064cf2b7...
+2025-12-19 18:44:07.65
+c92372b9
+User
+[ElevenLabs Webhook] Signature length mismatch
+2025-12-19 18:44:07.65
+c92372b9
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 18:44:07.65
+c92372b9
+User
+[ElevenLabs Webhook] Received event: {"type":"post_call_transcription","event_timestamp":1766151847,"data":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","conversation_id":"conv_2001kcvdkv14ea7vjvkk3wac874k","status":"done","user_id":null,"branch_id":"agtbrch_9101kctbjtbmertbvztpgn75bn47","transcript":[{"role":"agent","agent_metadata":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","branch_id":"agtbrch_9101kctbjtbmertbvztpgn75bn47","workflow_node_id":"node_01kctd99szfk2ss7srygkz3zvh"},"message":"Hello. I'm looking to speak with
+2025-12-19 18:44:07.65
+c92372b9
+User
+- Received: t=1766151847,v0=b38d...
+2025-12-19 18:44:07.65
+c92372b9
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 18:44:07.65
+c92372b9
+User
+1:44:07 PM [express] POST /api/webhooks/elevenlabs 401 in 1ms :: {"error":"Invalid signature"}
+2025-12-19 18:44:07.78
+c92372b9
+User
+[ElevenLabs Webhook] Invalid signature
+2025-12-19 18:44:07.78
+c92372b9
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-19 18:44:07.78
+c92372b9
+User
+- Expected: 4aa62b47883ffbb9ab45...
+2025-12-19 18:44:07.78
+c92372b9
+User
+[ElevenLabs Webhook] Received event: {"type":"post_call_audio","event_timestamp":1766151847,"data":{"agent_id":"agent_4701kctbjseeeefakcshzhks3whw","user_id":null,"conversation_id":"conv_2001kcvdkv14ea7vjvkk3wac874k","full_audio":"SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAAAFRjvRlT2AAsVt+crOQAAAAwU+SsG2AbgHYKsf6mFsAhgZwwx6ydmmaZpmmBwGgiCQJAkCQJBMEsSxLMzMzMzMzMDAwMDA8WLFh+vXr169evXrFixYsWLFixevXr169evfWLFixY5SlL3ve973vSlKUpM9MzMzM/SlKUpSlF68PDw8MAAAAAA8PDw8MAAAAAA8PDw8MAAAAAA8PDw8MAAAAAA8PDw8MAAAAAA8PDx+gAAEe
+2025-12-19 18:44:07.78
+c92372b9
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-19 18:44:07.78
+c92372b9
+User
+- Received: t=1766151847,v0=0ed6...
+2025-12-19 18:44:07.78
+c92372b9
+User
+[ElevenLabs Webhook] Signature length mismatch
+2025-12-19 18:44:07.78
+c92372b9
+User
+1:44:07 PM [express] POST /api/webhooks/elevenlabs 401 in 4ms :: {"error":"Invalid signature"}
+2025-12-19 18:44:10.75
+c92372b9
+User
+[AUTH] requireAuth called for: POST /api/call-attempts/start
+2025-12-19 18:44:10.75
+c92372b9
+User
+[AUTH] Authentication successful for user: 8aa5fd23-2d04-4260-8afc-6a2a7efd950c
+2025-12-19 18:44:10.75
+c92372b9
+User
+[AUTH] Authorization header present: true
+2025-12-19 18:44:10.79
+c92372b9
+User
+[CALL-ATTEMPT] Created call attempt: a05a8088-510a-4222-9e71-4b28198f3efe

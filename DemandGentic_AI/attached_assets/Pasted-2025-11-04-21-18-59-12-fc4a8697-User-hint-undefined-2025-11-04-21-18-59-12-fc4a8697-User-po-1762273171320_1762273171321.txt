@@ -1,0 +1,140 @@
+2025-11-04 21:18:59.12
+fc4a8697
+User
+hint: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+position: '17',
+2025-11-04 21:18:59.12
+fc4a8697
+User
+internalPosition: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+internalQuery: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+where: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+schema: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+table: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+dataType: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+constraint: undefined,
+2025-11-04 21:18:59.12
+fc4a8697
+User
+file: 'parse_relation.c',
+2025-11-04 21:18:59.12
+fc4a8697
+User
+routine: 'errorMissingColumn'
+2025-11-04 21:18:59.12
+fc4a8697
+User
+}
+2025-11-04 21:18:59.12
+fc4a8697
+User
+at async batchCheckAccountCaps (file:///home/runner/workspace/dist/index.js:14943:27)
+2025-11-04 21:18:59.12
+fc4a8697
+User
+at async file:///home/runner/workspace/dist/index.js:31559:34 {
+2025-11-04 21:19:02.71
+fc4a8697
+User
+4:19:02 PM [express] GET /api/dashboard/stats 304 in 1ms :: {"totalAccounts":46957,"totalContacts":6…
+2025-11-04 21:19:03.05
+fc4a8697
+User
+4:19:03 PM [express] GET /api/filters/fields/entity/contact 304 in 33ms :: {"fields":[],"grouped":{}…
+2025-11-04 21:19:03.11
+fc4a8697
+User
+4:19:03 PM [express] GET /api/leads 200 in 67ms :: [{"id":"02e620bf-cbf2-4878-8485-9595850ce895","co…
+2025-11-04 21:19:10.22
+fc4a8697
+User
+[Telnyx-Sync] Manual recording sync requested for lead 02e620bf-cbf2-4878-8485-9595850ce895 by zahidmohammadi
+2025-11-04 21:19:10.25
+fc4a8697
+User
+[Telnyx-Sync] Trying Strategy 1b: Fetch by call_control_id (from lead) for lead 02e620bf-cbf2-4878-8485-9595850ce895
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx] Call not found or expired (422): a0e18ac8-6722-4046-ae88-66d7a6454d51
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] Strategy 1b failed: No recording found by call_control_id
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] ========================================
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] ❌ NO RECORDING FOUND FOR LEAD: 02e620bf-cbf2-4878-8485-9595850ce895
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] Diagnosis:
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Has call attempt: NO
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Has Telnyx call ID (attempt): NO
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Has Telnyx call ID (lead): YES
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Has dialed number (lead): NO
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Has dialed number (contact): NO
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Contact phones: Direct=none, Mobile=none
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] - Lead created: 2025-11-04T16:18:58.784Z
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] This lead may have been manually submitted without an actual phone call.
+2025-11-04 21:19:10.37
+fc4a8697
+User
+[Telnyx-Sync] ========================================
+2025-11-04 21:19:10.37
+fc4a8697
+User
+4:19:10 PM [express] POST /api/leads/02e620bf-cbf2-4878-8485-9595850ce895/sync-recording 200 in 151m…
+2025-11-04 21:19:10.78
+fc4a8697
+User
+4:19:10 PM [express] GET /api/leads 304 in 64ms :: [{"id":"02e620bf-cbf2-4878-8485-9595850ce895","co…

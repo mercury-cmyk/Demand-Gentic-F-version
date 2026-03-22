@@ -1,0 +1,148 @@
+25-12-23 17:42:33.49
+04af29ca
+User
+"contact_email": "",
+2025-12-23 17:42:33.49
+04af29ca
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-23 17:42:33.49
+04af29ca
+User
+}
+2025-12-23 17:42:33.49
+04af29ca
+User
+[AI Orchestrator] After compliance: 1 eligible, 0 removed
+2025-12-23 17:42:33.49
+04af29ca
+User
+"contact_firstName": "there",
+2025-12-23 17:42:33.49
+04af29ca
+User
+[AI Orchestrator] Europe/London: 3/3 callable
+2025-12-23 17:42:33.49
+04af29ca
+User
+[AI Orchestrator] Phone filtering: 3 with valid phones, 0 skipped (no phone)
+2025-12-23 17:42:33.49
+04af29ca
+User
+"contact_title": "Decision Maker",
+2025-12-23 17:42:33.49
+04af29ca
+User
+- To (raw): +447973173020
+2025-12-23 17:42:33.49
+04af29ca
+User
+"contact_lastName": "",
+2025-12-23 17:42:33.49
+04af29ca
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-23 17:42:33.49
+04af29ca
+User
+"campaign_id": "4187fb46-c634-42d1-aeb1-d3833f325856",
+2025-12-23 17:42:33.49
+04af29ca
+User
+- To (E.164): +447973173020
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=undefined, queue=null, phone=undefined
+2025-12-23 17:42:40.84
+04af29ca
+User
+- Expected: v0=14c4e8b4c9227f6f7...
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 17:42:40.84
+04af29ca
+User
+- Timestamp: 1766493760
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Looking up from call_sessions for conversation: conv_7101kd5kpjxmfjx9s2dredwdw30p
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766493760, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_7101kd5kpjxmfjx9s2dredwdw30p", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447973173020", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
+2025-12-23 17:42:40.84
+04af29ca
+User
+- Received: v0=14c4e8b4c9227f6f7...
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 17:42:40.84
+04af29ca
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_7101kd5kpjxmfjx9s2dredwdw30p
+2025-12-23 17:42:40.87
+04af29ca
+User
+[ElevenLabs Webhook] Looking up campaign from queue for conversation: conv_7101kd5kpjxmfjx9s2dredwdw30p
+2025-12-23 17:42:40.90
+04af29ca
+User
+[ElevenLabs Webhook] No campaign_id found - skipping
+2025-12-23 17:42:40.90
+04af29ca
+User
+12:42:40 PM [express] POST /api/webhooks/elevenlabs 200 in 64ms :: {"status":"ok","message":"No campa…
+2025-12-23 17:42:42.59
+04af29ca
+User
+[EmailSequenceProcessor] Found 0 emails ready to send
+2025-12-23 17:42:54.26
+04af29ca
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 17:42:54.26
+04af29ca
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 17:42:54.26
+04af29ca
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 17:42:54.26
+04af29ca
+User
+- Expected: v0=aabed929df6b09710...
+2025-12-23 17:42:54.26
+04af29ca
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766493774, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_0701kd5kq5y9e7grepzrwfmtrcsn", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447973173020", "sip_status_code": 404, "error_reason": "INVITE failed: sip status: 404: Not Found (SIP 404)", "call_sid": "", "twirp_code": "invalid_argument", "sip_status": "Not Found"}}}}
+2025-12-23 17:42:54.26
+04af29ca
+User
+- Timestamp: 1766493774
+2025-12-23 17:42:54.26
+04af29ca
+User
+- Received: v0=aabed929df6b09710...
+2025-12-23 17:42:54.26
+04af29ca
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 17:42:54.26
+04af29ca
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_0701kd5kq5y9e7grepzrwfmtrcsn

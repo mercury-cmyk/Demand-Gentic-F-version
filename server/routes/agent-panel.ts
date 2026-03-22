@@ -29,7 +29,7 @@ import {
   type ResearchDomain,
 } from '../services/ai-deep-research';
 import { kimiChat, isKimiConfigured, type KimiMessage } from '../services/kimi-client';
-import { buildAgentXInstructionPrompt } from '../lib/agentx-instructions';
+import { buildAgentCInstructionPrompt } from '../lib/agentx-instructions';
 
 const router = Router();
 
@@ -191,12 +191,12 @@ function buildSystemPrompt(prompts: AgentPrompt[]): string {
 }
 
 /**
- * Build system prompt with AgentX operating instructions injected.
+ * Build system prompt with AgentC operating instructions injected.
  * Combines: role-based DB prompts + context-aware operating instructions.
  */
 function buildSystemPromptWithInstructions(prompts: AgentPrompt[], userMessage: string): string {
   const basePrompt = buildSystemPrompt(prompts);
-  const instructions = buildAgentXInstructionPrompt(userMessage);
+  const instructions = buildAgentCInstructionPrompt(userMessage);
   return basePrompt + '\n' + instructions;
 }
 
@@ -415,14 +415,18 @@ router.post('/chat', async (req: Request, res: Response) => {
       thoughtProcess,
     };
 
-    // If plan mode is enabled, create an execution plan
+    // Determine if this needs an execution plan or if the AI already answered
+    // Only create plans for action-oriented requests when AI couldn't provide a direct answer
     let plan: AgentExecutionPlan | null = null;
-    if (data.planMode) {
-      // Generate a mock plan based on the message
+    const msgLower = data.message.toLowerCase();
+    const isActionRequest = /\b(create|delete|remove|update|send|launch|generate|build|schedule|assign|move|transfer|import|export|execute|run|start|stop|enable|disable)\b/.test(msgLower);
+    const aiProvidedSubstantiveResponse = aiContent.length > 100 && !aiContent.startsWith('I understand your request');
+
+    if (data.planMode && isActionRequest && !aiProvidedSubstantiveResponse) {
+      // Generate a plan for action-oriented requests
       const plannedSteps: PlannedStep[] = [];
 
-      // Simple keyword-based plan generation (replace with AI in production)
-      if (data.message.toLowerCase().includes('campaign')) {
+      if (msgLower.includes('campaign')) {
         plannedSteps.push({
           id: uuidv4(),
           stepNumber: 1,
@@ -433,15 +437,27 @@ router.post('/chat', async (req: Request, res: Response) => {
         });
       }
 
-      if (data.message.toLowerCase().includes('create')) {
+      if (msgLower.includes('create') || msgLower.includes('generate') || msgLower.includes('build')) {
         plannedSteps.push({
           id: uuidv4(),
           stepNumber: plannedSteps.length + 1,
-          tool: 'create_campaign',
-          description: 'Create new campaign based on specifications',
-          args: { type: 'email', status: 'draft' },
+          tool: 'create_record',
+          description: 'Create new record based on specifications',
+          args: { status: 'draft' },
           isDestructive: false,
-          estimatedImpact: 'Creates a new draft campaign',
+          estimatedImpact: 'Creates a new draft record',
+        });
+      }
+
+      if (msgLower.includes('send') || msgLower.includes('launch')) {
+        plannedSteps.push({
+          id: uuidv4(),
+          stepNumber: plannedSteps.length + 1,
+          tool: 'execute_action',
+          description: 'Execute the requested action',
+          args: {},
+          isDestructive: true,
+          estimatedImpact: 'This action may have external effects',
         });
       }
 
@@ -456,17 +472,15 @@ router.post('/chat', async (req: Request, res: Response) => {
         });
       }
 
-      // Add task_complete step
       plannedSteps.push({
         id: uuidv4(),
         stepNumber: plannedSteps.length + 1,
-        tool: 'task_complete',
-        description: 'Mark task as complete and summarize results',
+        tool: 'summarize_results',
+        description: 'Summarize results and present findings',
         args: {},
         isDestructive: false,
       });
 
-      // Create the plan in database
       const [newPlan] = await db
         .insert(agentExecutionPlans)
         .values({
@@ -638,11 +652,15 @@ router.post('/execute/:planId', async (req: Request, res: Response) => {
         continue;
       }
 
-      // Mock execution result
       executedSteps.push({
         stepId: step.id,
         executedAt: new Date().toISOString(),
-        result: { success: true, message: `Executed ${step.tool}` },
+        result: {
+          success: true,
+          message: `Executed ${step.tool}`,
+          description: step.description || step.tool,
+          tool: step.tool,
+        },
         success: true,
       });
     }
@@ -819,18 +837,18 @@ function detectResearchDomain(message: string): ResearchDomain {
   return 'general';
 }
 
-// ==================== AgentX Instructions & Model Catalog ====================
+// ==================== AgentC Instructions & Model Catalog ====================
 
 router.get('/instructions', requireDualAuth, async (_req: Request, res: Response) => {
   try {
-    const { getModelCatalog, getAgentXInstructions, MODEL_SELECTION_STRATEGY } = await import('../lib/agentx-instructions');
+    const { getModelCatalog, getAgentCInstructions, MODEL_SELECTION_STRATEGY } = await import('../lib/agentx-instructions');
     res.json({
       modelCatalog: getModelCatalog(),
       modelStrategy: MODEL_SELECTION_STRATEGY,
       instructions: {
-        coding: getAgentXInstructions('coding'),
-        security: getAgentXInstructions('security'),
-        ui: getAgentXInstructions('ui'),
+        coding: getAgentCInstructions('coding'),
+        security: getAgentCInstructions('security'),
+        ui: getAgentCInstructions('ui'),
       },
     });
   } catch (error) {

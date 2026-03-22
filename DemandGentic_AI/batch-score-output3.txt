@@ -1,0 +1,218 @@
+[dotenv@17.2.3] injecting env (76) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+[DB] Development mode - using DATABASE_URL from environment
+[DB] Database endpoint: ep-mute-sky-ahoyd10z-pooler
+[DB] Using Neon connection pooler: YES (already configured)
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+======================================================================
+CONCURRENT BATCH SCORING: 138 unscored leads (5 workers)
+======================================================================
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[3/138] Noel Hamill | Appointment Setting Request - Campaign -> Overall:35 ConvQ:29 below 70
+[1/138] Stef Lim | Appointment Setting Request - Campaign -> Overall:5 ConvQ:3 below 70
+[5/138] Topper Power | Appointment Setting Request - Campaign -> Overall:35 ConvQ:19 below 70
+[4/138] Ritesh Chakraborty | Appointment Setting Request - Campaign -> Overall:62 ConvQ:47 below 70
+[2/138] Simon Smith | Appointment Setting Request - Campaign -> Overall:100 ConvQ:44 below 70
+[7/138] Alessandra Mengoni | Appointment Setting Request - Campaign -> Overall:95 ConvQ:95 Γ£ô QUALIFIES
+[9/138] Corey Monk | Appointment Setting Request - Campaign -> Overall:65 ConvQ:54 below 70
+[6/138] Xabier Eguskizaga | Appointment Setting Request - Campaign -> Overall:15 ConvQ:9 below 70
+[8/138] Mano Cherian | Appointment Setting Request - Campaign -> Overall:35 ConvQ:28 below 70
+[10/138] Maud Rocher | Appointment Setting Request - Campaign -> Overall:15 ConvQ:13 below 70
+[14/138] Gary Tuohy | Appointment Setting Request - Campaign -> Overall:65 ConvQ:47 below 70
+[12/138] Kon Maragelis | Appointment Setting Request - Campaign -> Overall:10 ConvQ:2 below 70
+[11/138] Diana Minglis | Appointment Setting Request - Campaign -> Overall:35 ConvQ:23 below 70
+[13/138] Michele Dunn | Appointment Setting Request - Campaign -> Overall:15 ConvQ:16 below 70
+[15/138] Jerome Preese | Appointment Setting Request - Campaign -> Overall:35 ConvQ:27 below 70
+[16/138] Pratik Rohra | Appointment Setting Request - Campaign -> Overall:88 ConvQ:64 below 70
+[20/138] Lucas Thomas | Appointment Setting Request - Campaign -> Overall:100 ConvQ:25 below 70
+[18/138] Arun Shenoy | Appointment Setting Request - Campaign -> Overall:90 ConvQ:37 below 70
+[17/138] Raimund Martin | Appointment Setting Request - Campaign -> Overall:15 ConvQ:13 below 70
+[19/138] Brian Eastwood | Appointment Setting Request - Campaign -> Overall:25 ConvQ:21 below 70
+[21/138] Mei Low | Appointment Setting Request - Campaign -> Overall:0 ConvQ:25 below 70
+[24/138] Meg Wiseman | Appointment Setting Request - Campaign -> Overall:95 ConvQ:86 Γ£ô QUALIFIES
+[23/138] Suzanne Maybury | Appointment Setting Request - Campaign -> Overall:85 ConvQ:33 below 70
+[22/138] Lizzie Babarczy | Appointment Setting Request - Campaign -> Overall:35 ConvQ:22 below 70
+[25/138] Kim Chang | Appointment Setting Request - Campaign -> Overall:35 ConvQ:22 below 70
+[26/138] Kenny T | Appointment Setting Request - Campaign -> Overall:0 ConvQ:0 below 70
+[28/138] Andrea Story | Appointment Setting Request - Campaign -> Overall:25 ConvQ:20 below 70
+[27/138] Rie Kubo | Appointment Setting Request - Campaign -> Overall:15 ConvQ:13 below 70
+[30/138] Adina Muguti | Appointment Setting Request - Campaign -> Overall:15 ConvQ:12 below 70
+[29/138] Sue Baker | Appointment Setting Request - Campaign -> Overall:10 ConvQ:9 below 70
+node.exe : [VertexAI] Rate limited (attempt 1/4), retrying in 1305ms...
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([VertexAI] Rate...ng in 1305ms... 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[32/138] Numaan Riaz | Appointment Setting Request - Campaign -> Overall:5 ConvQ:13 below 70
+[33/138] Amit Kumar | Appointment Setting Request - Campaign -> Overall:15 ConvQ:13 below 70
+[31/138] Sebastian Geldner | Appointment Setting Request - Campaign -> Overall:35 ConvQ:19 below 70
+[34/138] Ragunathan A | Appointment Setting Request - Campaign -> Overall:10 ConvQ:7 below 70
+[35/138] Siddhesh Sawant | Appointment Setting Request - Campaign -> Overall:5 ConvQ:9 below 70
+[37/138] Dario Venturini | Appointment Setting Request - Campaign -> Overall:10 ConvQ:12 below 70
+[36/138] Shivam Mishra | Appointment Setting Request - Campaign -> Overall:15 ConvQ:18 below 70
+[38/138] Lee Davis | Appointment Setting Request - Campaign -> Overall:10 ConvQ:7 below 70
+[39/138] James Harvey-Fiander | Appointment Setting Request - Campaign -> Overall:15 ConvQ:13 below 70
+[41/138] Ryan Thompson | Appointment Setting Request - Campaign -> Overall:15 ConvQ:9 below 70
+[40/138] Masafumi Usuda | Appointment Setting Request - Campaign -> Overall:35 ConvQ:24 below 70
+[42/138] Alex Grant | Appointment Setting Request - Campaign -> Overall:95 ConvQ:65 below 70
+[44/138] Sheryl Woo | Appointment Setting Request - Campaign -> Overall:35 ConvQ:19 below 70
+[43/138] Takayuki Murakami | Appointment Setting Request - Campaign -> Overall:5 ConvQ:3 below 70
+[46/138] Aritro Chatterjee | Appointment Setting Request - Campaign -> Overall:65 ConvQ:64 below 70
+[47/138] Ani Casillas | Harver Appoitnment Gen -> Overall:35 ConvQ:26 below 70
+[45/138] Amit Mathad | Appointment Setting Request - Campaign -> Overall:35 ConvQ:35 below 70
+[49/138] Ann Moore | Harver Appoitnment Gen -> Overall:95 ConvQ:55 below 70
+[48/138] Stephanie Pohlman | Harver Appoitnment Gen -> Overall:90 ConvQ:87 Γ£ô QUALIFIES
+[50/138] Renata Seixas | Harver Appoitnment Gen -> Overall:25 ConvQ:12 below 70
+[52/138] Jacques Fegghali | Harver Appoitnment Gen -> Overall:15 ConvQ:9 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1100ms...
+[51/138] Balasujai Raja | Harver Appoitnment Gen -> Overall:20 ConvQ:12 below 70
+[53/138] Joanne Morris | Harver Appoitnment Gen -> Overall:32 ConvQ:27 below 70
+[54/138] Allen Hitchen | Harver Appoitnment Gen -> Overall:15 ConvQ:13 below 70
+[55/138] Kolawole Akeredolu | RingCentral_AppointmentGen -> Overall:42 ConvQ:30 below 70
+[56/138] Sonnet Sunil | RingCentral_AppointmentGen -> Overall:95 ConvQ:70 Γ£ô QUALIFIES
+[57/138] Brano Lukic | RingCentral_AppointmentGen -> Overall:45 ConvQ:55 below 70
+[59/138] Jalen Davidson | RingCentral_AppointmentGen -> Overall:100 ConvQ:99 Γ£ô QUALIFIES
+[VertexAI] Rate limited (attempt 1/4), retrying in 1182ms...
+[58/138] Jackie Chen | RingCentral_AppointmentGen -> Overall:96 ConvQ:98 Γ£ô QUALIFIES
+[60/138] Ellen Wright | RingCentral_AppointmentGen -> Overall:45 ConvQ:24 below 70
+[62/138] Sarah Walder-Davis | RingCentral_AppointmentGen -> Overall:95 ConvQ:62 below 70
+[63/138] Max Gispert | RingCentral_AppointmentGen -> Overall:92 ConvQ:82 Γ£ô QUALIFIES
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 25,
+  "summary": "The interaction suffered from severe logic loops and repetition, 
+with the agent repeating the greeting and value proposition multiple times 
+despite the contact's 
+[VertexAI] Initialized client for project: pivotalb2b-2026, location: us-central1
+[64/138] Fouad Sindi | RingCentral_AppointmentGen -> Overall:35 ConvQ:39 below 70
+[61/138] Andy Green | RingCentral_AppointmentGen -> Overall:30 ConvQ:38 below 70
+[65/138] Tariq Ahmed | RingCentral_AppointmentGen -> Overall:15 ConvQ:13 below 70
+[66/138] Monica Chopra | RingCentral_AppointmentGen -> Overall:45 ConvQ:50 below 70
+[68/138] Philip Kilian | RingCentral_AppointmentGen -> Overall:15 ConvQ:12 below 70
+[69/138] Richard Francisco | RingCentral_AppointmentGen -> Overall:65 ConvQ:57 below 70
+[67/138] Syed Hassan | RingCentral_AppointmentGen -> Overall:35 ConvQ:24 below 70
+[72/138] Herb Kaaihue | RingCentral_AppointmentGen -> Overall:100 ConvQ:96 Γ£ô QUALIFIES
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 15,
+  "summary": "The interaction suffered from a severe technical breakdown 
+characterized by a repetitive loop of the greeting and introduction sequence. 
+Despite the contact confi
+[VertexAI] Rate limited (attempt 1/4), retrying in 1440ms...
+[70/138] David Adewumi | RingCentral_AppointmentGen -> Overall:15 ConvQ:12 below 70
+[73/138] Manny Castaneda | RingCentral_AppointmentGen -> Overall:10 ConvQ:7 below 70
+[71/138] Cory White | RingCentral_AppointmentGen -> Overall:50 ConvQ:39 below 70
+[74/138] Mike Province | RingCentral_AppointmentGen -> Overall:78 ConvQ:82 Γ£ô QUALIFIES
+[76/138] Antony Lyons | RingCentral_AppointmentGen -> Overall:5 ConvQ:6 below 70
+[75/138] Rohit Khullar | RingCentral_AppointmentGen -> Overall:28 ConvQ:17 below 70
+[79/138] Chris Brodka | RingCentral_AppointmentGen -> Overall:10 ConvQ:20 below 70
+[78/138] Nikolin Petro | RingCentral_AppointmentGen -> Overall:88 ConvQ:64 below 70
+[77/138] Bob Crook | RingCentral_AppointmentGen -> Overall:35 ConvQ:23 below 70
+[81/138] Denton Lawson | RingCentral_AppointmentGen -> Overall:65 ConvQ:59 below 70
+[80/138] Sean Henderson | RingCentral_AppointmentGen -> Overall:45 ConvQ:39 below 70
+[82/138] Tyrone Powell | RingCentral_AppointmentGen -> Overall:95 ConvQ:93 Γ£ô QUALIFIES
+[83/138] William Darby | RingCentral_AppointmentGen -> Overall:45 ConvQ:41 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1122ms...
+[84/138] Rakesh Patel | RingCentral_AppointmentGen -> Overall:65 ConvQ:66 below 70
+[86/138] Remco Reints | RingCentral_AppointmentGen -> Overall:10 ConvQ:15 below 70
+[85/138] William Keane | RingCentral_AppointmentGen -> Overall:35 ConvQ:39 below 70
+[87/138] Alessandro Grassetti | RingCentral_AppointmentGen -> Overall:25 ConvQ:18 below 70
+[91/138] Vishnu Sankar | RingCentral_AppointmentGen -> Overall:95 ConvQ:78 Γ£ô QUALIFIES
+[92/138] Katy Williams | RingCentral_AppointmentGen -> Overall:72 ConvQ:62 below 70
+[89/138] Faris Khayyat | RingCentral_AppointmentGen -> Overall:15 ConvQ:8 below 70
+[90/138] Safa AlMadhoob | RingCentral_AppointmentGen -> Overall:15 ConvQ:7 below 70
+[88/138] Akhilesh Ram | RingCentral_AppointmentGen -> Overall:15 ConvQ:17 below 70
+[94/138] Neeru Arora | RingCentral_AppointmentGen -> Overall:10 ConvQ:3 below 70
+[95/138] Waqar Ahmad | RingCentral_AppointmentGen -> Overall:35 ConvQ:23 below 70
+[93/138] Barnali Chatterjee | RingCentral_AppointmentGen -> Overall:15 ConvQ:10 below 70
+[96/138] Chris Daubercies | RingCentral_AppointmentGen -> Overall:35 ConvQ:34 below 70
+[97/138] Scott Shultis | RingCentral_AppointmentGen -> Overall:10 ConvQ:9 below 70
+[98/138] David Hamilton | RingCentral_AppointmentGen -> Overall:10 ConvQ:13 below 70
+[99/138] Stephen Butters | RingCentral_AppointmentGen -> Overall:100 ConvQ:0 below 70
+[100/138] Jacob Cunningham | RingCentral_AppointmentGen -> Overall:78 ConvQ:38 below 70
+[102/138] Hansel Doan | RingCentral_AppointmentGen -> Overall:15 ConvQ:5 below 70
+[101/138] Stephanie McCulla | RingCentral_AppointmentGen -> Overall:25 ConvQ:14 below 70
+[103/138] Andrew Stempel | RingCentral_AppointmentGen -> Overall:100 ConvQ:25 below 70
+[104/138] Brian Martinez | RingCentral_AppointmentGen -> Overall:25 ConvQ:19 below 70
+[107/138] Todd Clark | RingCentral_AppointmentGen -> Overall:65 ConvQ:71 Γ£ô QUALIFIES
+[105/138] Russell Newberg | RingCentral_AppointmentGen -> Overall:10 ConvQ:25 below 70
+[108/138] Connie Moniz | RingCentral_AppointmentGen -> Overall:15 ConvQ:21 below 70
+[109/138] Ryan McCloskey | RingCentral_AppointmentGen -> Overall:32 ConvQ:20 below 70
+[110/138] Andrew Duca | RingCentral_AppointmentGen -> Overall:10 ConvQ:9 below 70
+[106/138] Dale Carls | RingCentral_AppointmentGen -> Overall:25 ConvQ:20 below 70
+[111/138] Kevin Garcia | RingCentral_AppointmentGen -> Overall:35 ConvQ:19 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1419ms...
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 35,
+  "summary": "The agent correctly verified the contact's identity but 
+immediately suffered a critical hallucination, pitching a 'white paper on 
+export finance' and 'government 
+[112/138] Nasim Raeesi | RingCentral_AppointmentGen -> Overall:50 ConvQ:45 below 70
+[113/138] Willie Taylor | RingCentral_AppointmentGen -> Overall:88 ConvQ:63 below 70
+[114/138] Alan Hobgood | RingCentral_AppointmentGen -> Overall:35 ConvQ:19 below 70
+[116/138] Nick Redmond | RingCentral_AppointmentGen -> Overall:15 ConvQ:5 below 70
+[118/138] Greer Hamilton | RingCentral_AppointmentGen -> Overall:10 ConvQ:10 below 70
+[117/138] Helmar Bruwer | RingCentral_AppointmentGen -> Overall:10 ConvQ:9 below 70
+[119/138] Jonathon Brooks | RingCentral_AppointmentGen -> Overall:45 ConvQ:45 below 70
+[115/138] Ralph Pascuzzo | RingCentral_AppointmentGen -> Overall:10 ConvQ:7 below 70
+[120/138] Jason Vaught | RingCentral_AppointmentGen -> Overall:15 ConvQ:7 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1145ms...
+[VertexAI] Rate limited (attempt 2/4), retrying in 2018ms...
+[121/138] Raul Correa | RingCentral_AppointmentGen -> Overall:95 ConvQ:56 below 70
+[122/138] Somphone Sayalit | RingCentral_AppointmentGen -> Overall:15 ConvQ:10 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1061ms...
+[124/138] Lynn Hamilton | RingCentral_AppointmentGen -> Overall:5 ConvQ:15 below 70
+[125/138] Bemnet Mehret | RingCentral_AppointmentGen -> Overall:35 ConvQ:22 below 70
+[127/138] Erin Koues | RingCentral_AppointmentGen -> Overall:15 ConvQ:13 below 70
+[123/138] Mark Chitty | RingCentral_AppointmentGen -> Overall:92 ConvQ:68 below 70
+[128/138] Sharon Harper | RingCentral_AppointmentGen -> Overall:92 ConvQ:80 Γ£ô QUALIFIES
+[129/138] Olivia Davis | RingCentral_AppointmentGen -> Overall:10 ConvQ:8 below 70
+[126/138] Traci MacKenzie | RingCentral_AppointmentGen -> Overall:25 ConvQ:19 below 70
+[131/138] Jake Bonenfant | RingCentral_AppointmentGen -> Overall:100 ConvQ:0 below 70
+[130/138] Amber Bays | RingCentral_AppointmentGen -> Overall:35 ConvQ:16 below 70
+[134/138] Daniel Cranmer | UK Export Finance_Q4 2025. -> Overall:35 ConvQ:31 below 70
+[136/138] Heidi Scott | UK Export Finance_Q4 2025. -> Overall:15 ConvQ:12 below 70
+[133/138] Peter Kirby | UK Export Finance_Q4 2025. -> Overall:35 ConvQ:28 below 70
+[132/138] Ian Slater | UK Export Finance_Q4 2025. -> Overall:0 ConvQ:0 below 70
+[135/138] Mark Eynon | UK Export Finance_Q4 2025. -> Overall:42 ConvQ:38 below 70
+[137/138] Andrew Jones | UK Export Finance_Q4 2025. -> Overall:55 ConvQ:44 below 70
+[138/138] Martin Mulligan | UK Export Finance_Q4 2025. -> Overall:78 ConvQ:51 below 70
+
+======================================================================
+RESULTS (999.1s elapsed)
+======================================================================
+Total scored: 138
+Qualifying (ConvQ >= 70): 13
+Non-qualifying: 125
+Errors: 0
+
+--- QUALIFYING LEADS ---
+  ConvQ:99 Overall:100 | Jalen Davidson | RingCentral_AppointmentGen
+  ConvQ:98 Overall:96 | Jackie Chen | RingCentral_AppointmentGen
+  ConvQ:96 Overall:100 | Herb Kaaihue | RingCentral_AppointmentGen
+  ConvQ:95 Overall:95 | Alessandra Mengoni | Appointment Setting Request - Campaign
+  ConvQ:93 Overall:95 | Tyrone Powell | RingCentral_AppointmentGen
+  ConvQ:87 Overall:90 | Stephanie Pohlman | Harver Appoitnment Gen
+  ConvQ:86 Overall:95 | Meg Wiseman | Appointment Setting Request - Campaign
+  ConvQ:82 Overall:92 | Max Gispert | RingCentral_AppointmentGen
+  ConvQ:82 Overall:78 | Mike Province | RingCentral_AppointmentGen
+  ConvQ:80 Overall:92 | Sharon Harper | RingCentral_AppointmentGen
+  ConvQ:78 Overall:95 | Vishnu Sankar | RingCentral_AppointmentGen
+  ConvQ:71 Overall:65 | Todd Clark | RingCentral_AppointmentGen
+  ConvQ:70 Overall:95 | Sonnet Sunil | RingCentral_AppointmentGen
+
+--- BY CAMPAIGN ---
+  Appointment Setting Request - Campaign: 2/46 qualify
+  Harver Appoitnment Gen: 1/8 qualify
+  RingCentral_AppointmentGen: 10/77 qualify
+  UK Export Finance_Q4 2025.: 0/7 qualify
+[DB Pool] Client removed | Total: 4, Idle: 4, Waiting: 0
+[DB Pool] Client removed | Total: 3, Idle: 3, Waiting: 0
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+
+Done.

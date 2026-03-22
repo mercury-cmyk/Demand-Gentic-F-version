@@ -1,0 +1,124 @@
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+[Tier3Search] Starting enhanced search for "Presidential Flight" in United Arab Emirates
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+[CompanyEnrichment] Stage 2: Trying web search fallback
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at async /home/runner/workspace/node_modules/bullmq/dist/cjs/classes/worker.js:528:32
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+[WebSearch] Searching: ""Presidential Flight" United Arab Emirates office address phone contact"
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at async CompanyEnrichmentService.extractCompanyDataWithAI (file:///home/runner/workspace/dist/index.js:13143:28)
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at CompanyEnrichmentService.tryAIInternalKnowledge (file:///home/runner/workspace/dist/index.js:13238:31)
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+[Tier3Search] Primary query: "Presidential Flight" United Arab Emirates office address phone contact
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at async CompanyEnrichmentService.enrichCompanyData (file:///home/runner/workspace/dist/index.js:13119:34)
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at JSON.parse ()
+2025-11-15 22:45:38.16
+10f5ac8d
+User
+at async Worker.processEnrichmentJob [as processFn] (file:///home/runner/workspace/dist/index.js:19491:26)
+2025-11-15 22:45:38.80
+10f5ac8d
+User
+[EnrichmentQueue] Failed to enrich contact 4e26d4f5-e435-4b72-aab4-1a5f1c78989f: No search results
+2025-11-15 22:45:38.80
+10f5ac8d
+User
+[WebSearch] Found 0 results
+2025-11-15 22:45:38.80
+10f5ac8d
+User
+[Tier3Search] Primary query returned no data - early exit
+2025-11-15 22:45:38.80
+10f5ac8d
+User
+[CompanyEnrichment] Final result - address: false, phone: false
+2025-11-15 22:45:38.86
+10f5ac8d
+User
+[EnrichmentQueue] Account b65756b7-3caa-4320-bd78-52caeed73419 already enriched - propagating to contact c921e54b-d3f7-484a-bbce-2938530f1c79
+2025-11-15 22:45:38.92
+10f5ac8d
+User
+[CompanyEnrichment] Propagated enrichment data to contact c921e54b-d3f7-484a-bbce-2938530f1c79
+2025-11-15 22:45:39.09
+10f5ac8d
+User
+[EnrichmentQueue] Account 41617a55-df80-467b-886c-20362a3a645c already enriched - propagating to contact d61f5371-141c-46aa-b715-af85ec2d332e
+2025-11-15 22:45:39.16
+10f5ac8d
+User
+[CompanyEnrichment] Propagated enrichment data to contact d61f5371-141c-46aa-b715-af85ec2d332e
+2025-11-15 22:45:39.32
+10f5ac8d
+User
+[EnrichmentQueue] Account 418d829e-a07d-4f57-a4dd-122d24fb4de6 already enriched - propagating to contact 49f98fd4-3268-4bb8-a744-da5653770c76
+2025-11-15 22:45:39.39
+10f5ac8d
+User
+[CompanyEnrichment] Propagated enrichment data to contact 49f98fd4-3268-4bb8-a744-da5653770c76
+2025-11-15 22:45:39.52
+10f5ac8d
+User
+[EnrichmentQueue] Account 4226e7a8-8a6e-4d94-91ab-b8a7ff08c6d5 already enriched - propagating to contact c6073e9d-4800-4602-a94f-67d675c4c091
+2025-11-15 22:45:39.58
+10f5ac8d
+User
+[CompanyEnrichment] Propagated enrichment data to contact c6073e9d-4800-4602-a94f-67d675c4c091
+2025-11-15 22:45:39.75
+10f5ac8d
+User
+[EnrichmentQueue] Account 43876e1b-e6fd-41c0-b5fa-6b38e79aec5a already enriched - propagating to contact 61addcb3-89b4-44ea-bbf4-bce2b9064fb5
+2025-11-15 22:45:39.81
+10f5ac8d
+User
+[CompanyEnrichment] Propagated enrichment data to contact 61addcb3-89b4-44ea-bbf4-bce2b9064fb5
+2025-11-15 22:45:40.04
+10f5ac8d
+User
+[PhoneDedup] Scanning company contacts for reusable phone (country: India)
+2025-11-15 22:45:40.08
+10f5ac8d
+User
+[PhoneDedup] No valid phone candidates found in same country
+2025-11-15 22:45:40.08
+10f5ac8d
+User
+[PhoneDedup] Found 4 contacts in company
+2025-11-15 22:45:40.08
+10f5ac8d
+User
+[EnrichmentQueue] No phone deduplication match - proceeding with AI enrichment
+2025-11-15 22:45:41.58
+10f5ac8d
+User
+[CompanyEnrichment] Stage 1: Trying AI internal knowledge for "Rfly Innovations" in India
+2025-11-15 22:45:41.58
+10f5ac8d
+User
+[EnrichmentQueue] Enriching account 4a689287-2d99-4876-be4b-c9a015c81129 (Rfly

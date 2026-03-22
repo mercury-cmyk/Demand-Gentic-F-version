@@ -7,6 +7,9 @@
 
 import { Router, Request, Response } from "express";
 import { requireAuth } from "../auth";
+import { db } from "../db";
+import { campaignOrganizations, clientAccounts } from "@shared/schema";
+import { eq } from "drizzle-orm";
 import {
   createUnifiedPipeline,
   getUnifiedPipeline,
@@ -40,10 +43,24 @@ const router = Router();
  */
 router.post("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    const { organizationId, clientAccountId, name, description, objective } = req.body;
+    let { organizationId, clientAccountId, name, description, objective } = req.body;
 
-    if (!organizationId || !clientAccountId || !name) {
-      return res.status(400).json({ error: "organizationId, clientAccountId, and name are required" });
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+
+    // Auto-resolve organizationId and clientAccountId for admin users
+    if (!organizationId) {
+      const [firstOrg] = await db.select({ id: campaignOrganizations.id }).from(campaignOrganizations).limit(1);
+      if (firstOrg) organizationId = firstOrg.id;
+    }
+    if (!clientAccountId) {
+      const [firstClient] = await db.select({ id: clientAccounts.id }).from(clientAccounts).limit(1);
+      if (firstClient) clientAccountId = firstClient.id;
+    }
+
+    if (!organizationId || !clientAccountId) {
+      return res.status(400).json({ error: "Could not resolve organizationId or clientAccountId. Create an organization and client account first." });
     }
 
     const result = await createUnifiedPipeline({

@@ -1280,7 +1280,7 @@ const AI_SERVICE_PROMPTS: PromptDefinition[] = [
     department: 'sales',
     promptFunction: 'call_script',
     purpose: 'orchestration',
-    aiModel: 'gemini-2.0-flash',
+    aiModel: 'gemini-2.5-flash',
     status: 'live',
     sourceFile: 'server/services/voice-providers/gemini-live-provider.ts',
     sourceExport: 'setupSession',

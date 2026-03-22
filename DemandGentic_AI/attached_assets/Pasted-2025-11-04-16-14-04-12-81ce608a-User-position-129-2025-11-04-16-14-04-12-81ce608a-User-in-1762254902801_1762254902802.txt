@@ -1,0 +1,140 @@
+2025-11-04 16:14:04.12
+81ce608a
+User
+position: '129',
+2025-11-04 16:14:04.12
+81ce608a
+User
+internalPosition: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+internalQuery: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+where: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+schema: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+table: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+column: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+constraint: undefined,
+2025-11-04 16:14:04.12
+81ce608a
+User
+file: 'parse_relation.c',
+2025-11-04 16:14:04.12
+81ce608a
+User
+line: '3716',
+2025-11-04 16:14:04.12
+81ce608a
+User
+routine: 'errorMissingColumn'
+2025-11-04 16:14:04.12
+81ce608a
+User
+}
+2025-11-04 16:14:17.00
+daad13b8
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-04 16:14:17.00
+daad13b8
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 16:14:17.00
+daad13b8
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-04 16:14:17.00
+daad13b8
+User
+at async processPendingTranscriptions (file:///home/runner/workspace/dist/index.js:16979:26)
+2025-11-04 16:14:17.00
+daad13b8
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:18517:9) {
+2025-11-04 16:14:17.00
+daad13b8
+User
+length: 114,
+2025-11-04 16:14:17.00
+daad13b8
+User
+severity: 'ERROR',
+2025-11-04 16:14:17.00
+daad13b8
+User
+detail: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+hint: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+position: '129',
+2025-11-04 16:14:17.00
+daad13b8
+User
+internalPosition: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+internalQuery: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+where: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+schema: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+column: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+dataType: undefined,
+2025-11-04 16:14:17.00
+daad13b8
+User
+line: '3716',
+2025-11-04 16:14:17.00
+daad13b8
+User
+routine: 'errorMissingColumn'
+2025-11-04 16:14:17.40
+daad13b8
+User
+[AI-QA] Error processing unanalyzed leads: error: column "dialed_number" does not exist
+2025-11-04 16:14:17.40
+daad13b8
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-04 16:14:17.40
+daad13b8
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 16:14:17.40
+daad13b8
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-04 16:14:17.40
+daad13b8
+User
+at async processUnanalyzedLeads (file:///home/runner/workspace/dist/index.js:17578:29)

@@ -1,0 +1,29 @@
+}
+[ASSIGN AGENTS] Error stack: error: duplicate key value violates unique constraint "agent_queue_agent_campaign_contact_uniq"
+    at bn.parseErrorMessage (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:955:41)
+    at bn.handlePacket (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:923:75)
+    at bn.parse (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:911:36)
+    at S. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:962:16)
+    at S.emit (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:317:79)
+    at WebSocket. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:403:19)
+    at callListener (/home/runner/workspace/node_modules/ws/lib/event-target.js:290:14)
+    at WebSocket.onMessage (/home/runner/workspace/node_modules/ws/lib/event-target.js:209:9)
+    at WebSocket.emit (node:events:524:28)
+    at Receiver.receiverOnMessage (/home/runner/workspace/node_modules/ws/lib/websocket.js:1220:20)
+    at Receiver.emit (node:events:524:28)
+    at Receiver.dataMessage (/home/runner/workspace/node_modules/ws/lib/receiver.js:569:14)
+    at Receiver.getData (/home/runner/workspace/node_modules/ws/lib/receiver.js:496:10)
+    at Receiver.startLoop (/home/runner/workspace/node_modules/ws/lib/receiver.js:167:16)
+    at Receiver._write (/home/runner/workspace/node_modules/ws/lib/receiver.js:94:10)
+    at writeOrBuffer (node:internal/streams/writable:572:12)
+    at _write (node:internal/streams/writable:501:10)
+    at Writable.write (node:internal/streams/writable:510:10)
+    at TLSSocket.socketOnData (/home/runner/workspace/node_modules/ws/lib/websocket.js:1355:35)
+    at TLSSocket.emit (node:events:524:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+    at TLSWrap.onStreamRead (node:internal/stream_base_commons:191:23)
+4:47:07 PM [express] POST /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/agents 400 in 2972ms :…
+4:47:13 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/suppressions/stats 200 …
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0

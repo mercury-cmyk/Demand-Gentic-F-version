@@ -1,0 +1,90 @@
+Dual-Industry Field Strategy for Accounts
+18.1 Purpose
+
+Maintain data integrity and transparency while leveraging AI enrichment by storing two parallel industry fields per Account: one human-verified and one AI-suggested. This ensures campaign segmentation and reporting rely on trusted classifications, while enrichment and AI recommendations remain auditable and reversible.
+
+18.2 Field Definitions
+Field Name	Type	Source	Description
+industry_standardized	string (enum / FK → Industry Reference Table)	Manual / Import / Human-verified	The active, trusted primary industry used for targeting, segmentation, and analytics.
+industry_secondary[]	TEXT[] (enum values)	Manual / Import	Optional additional verified industries when a company spans multiple sectors. Used in filters and ABM logic.
+industry_code	string	Derived	LinkedIn/NAICS code mapped from standardized name.
+industry_raw	string	Import	Original unstandardized value for traceability.
+industry_ai_suggested	string	AI Model	Suggested primary normalized industry (e.g., “Computer Software”).
+industry_ai_candidates	JSONB (array of {name, score})	AI Model	Top‑K suggested industries with confidence scores (multi‑label).
+industry_ai_topk[]	TEXT[]	AI Model	Convenience array of suggested industry names (sorted by score).
+industry_ai_confidence	float (0-1)	AI Model	Confidence score of primary suggestion.
+industry_ai_source	string	System	Model name + version (e.g., AccountClassifier_v3.2.1).
+industry_ai_suggested_at	datetime	System	Timestamp when suggestion generated.
+industry_ai_reviewed_by	FK → users	Manual	User who approved or rejected suggestion(s).
+industry_ai_status	enum (accepted, rejected, partial, pending)	Manual	Review state of suggestion set (supports multi‑select acceptance).
+18.3 Workflow Logic
+
+1. On Import or Manual Entry
+
+System standardizes provided value into industry_standardized.
+
+AI engine concurrently generates industry_ai_suggested + Top‑K in industry_ai_candidates.
+
+2. Auto-Decision Rules
+
+Condition	Action
+industry_standardized is NULL and primary confidence ≥ 0.8	Auto-fill industry_standardized = industry_ai_suggested; do not auto‑set secondary.
+Existing primary differs but confidence ≥ 0.8	Keep verified primary; mark AI set as pending for review.
+Confidence < 0.5	Discard suggestion set.
+
+3. Human Review Panel
+Account detail → AI Enrichment Tab shows multi‑select of AI candidates with scores. Reviewer can:
+
+Accept as Primary (replaces industry_standardized)
+
+Add as Secondary (appends to industry_secondary[])
+
+Reject individual candidates
+
+Accept Multiple → one as Primary, others into Secondary
+
+4. System Behavior
+
+Segmentation defaults to industry_standardized but filters can match any of industry_standardized or industry_secondary[].
+
+AI fields are read-only; history preserved.
+
+Accepting multiple candidates sets industry_ai_status = partial until reviewer finalizes primary.
+
+18.4 Benefits
+
+Prevents overwriting curated or client-provided data.
+
+Supports multi‑industry companies (conglomerates, diversified software + services).
+
+Enables explainable, confidence‑scored AI with human governance.
+
+Improves targeting flexibility (primary vs. additional industries).
+
+18.5 Suggested UI Integration
+
+Account Details Page
+
+Overview Tab: shows industry_standardized and badges for industry_secondary[].
+
+AI Enrichment Tab: list of candidates with confidence %, actions: Set Primary, Add as Secondary, Reject; view explanation; audit trail.
+
+18.6 Multi‑Industry (Multi‑Label) Support — Data & API
+
+Storage:
+
+Verified multi‑industry: industry_standardized (primary) + industry_secondary[] (TEXT[]).
+
+AI suggestions: industry_ai_candidates JSONB [ { "name": "Computer Software", "score": 0.91 }, ... ] and industry_ai_topk[].
+
+APIs:
+
+PATCH /accounts/:id/industry accepts { primary, secondary: [] }.
+
+POST /accounts/:id/industry/ai-review accepts { accept_primary: "…", add_secondary: ["…"], reject: ["…"] }.
+
+Filters: expose operators industry_any_in (…) matching across primary or secondary; and industry_primary = … for strict use‑cases.
+
+Outcome
+
+Every Account maintains both a stable, verified primary industry and optional secondary industries, alongside an auditable AI Top‑K suggestion set. This enables accurate targeting for multi‑sector companies while preserving governance and explainability.

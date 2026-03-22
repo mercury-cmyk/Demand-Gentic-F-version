@@ -113,7 +113,6 @@ import secretsRouter from './routes/secrets';
 import agentPromptsRouter from './routes/agent-prompts';
 import agentPanelRouter from './routes/agent-panel';
 import agentPanelOrdersRouter from './routes/agent-panel-orders'; // Register the missing orders router
-import agentDefaultsRouter from './routes/agent-defaults';
 import aiGovernanceRouter from './routes/ai-governance';
 import unifiedPromptRouter from './routes/unified-prompt-routes';
 import adminEmailCampaignTemplateRouter from './routes/admin-email-campaign-template-routes';
@@ -11252,13 +11251,18 @@ export function registerRoutes(app: Express) {
         return res.status(404).json({ message: "Lead not found" });
       }
 
-      // STRICT ENFORCEMENT: Check quality requirements before publishing
+      // Quality check — admin can bypass with ?force=true for manually verified leads
+      const forcePublish = req.query.force === 'true' || req.body.force === true;
       const qualityCheck = validateLeadQuality(existingLead);
-      if (!qualityCheck.valid) {
-        return res.status(400).json({ 
-          message: "Cannot publish lead: Quality requirements not met", 
-          errors: qualityCheck.errors 
+      if (!qualityCheck.valid && !forcePublish) {
+        return res.status(400).json({
+          message: "Cannot publish lead: Quality requirements not met",
+          errors: qualityCheck.errors,
+          hint: "Add force=true to bypass for manually verified leads",
         });
+      }
+      if (!qualityCheck.valid && forcePublish) {
+        console.warn(`[LEAD-PUBLISH] Quality bypass by user ${publishedById} for lead ${leadId}. Errors: ${qualityCheck.errors.join(', ')}`);
       }
 
       // Only approved or pending_pm_review leads can be published
@@ -16093,7 +16097,6 @@ Provide JSON response with:
   app.use("/api/agent-panel", agentPanelRouter);
   app.use("/api/agent-panel/orders", agentPanelOrdersRouter); // Mount order flow routes
   app.use("/api/deep-research", deepResearchRouter);
-  app.use("/api/agent-defaults", agentDefaultsRouter);
   app.use("/api/ai-governance", aiGovernanceRouter);
   app.use("/api/voice-engine", voiceEngineRouter);
   app.use("/api/telephony", unifiedTelephonyRouter);

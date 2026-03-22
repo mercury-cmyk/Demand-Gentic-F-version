@@ -1,0 +1,140 @@
+2025-12-23 19:39:18.90
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 19:39:18.90
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 19:39:18.90
+6d8c03b7
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 19:39:18.90
+6d8c03b7
+User
+- Timestamp: 1766500758
+2025-12-23 19:39:18.90
+6d8c03b7
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_9501kd5tcv17ezztmqxdtcgcf2q9
+2025-12-23 19:39:18.90
+6d8c03b7
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766500758, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_9501kd5tcv17ezztmqxdtcgcf2q9", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447981162160", "sip_status_code": 403, "error_reason": "unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447981162160 exceeded D66 (SIP 403)", "call_
+2025-12-23 19:39:18.97
+6d8c03b7
+User
+[ElevenLabs Webhook] Found pending call session 5395cccd-399b-4cee-9a7d-613d7d4a994d by phone +447981162160
+2025-12-23 19:39:19.42
+6d8c03b7
+User
+[ElevenLabs Webhook] Mapped disposition: Voicemail
+2025-12-23 19:39:19.42
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 19:39:19.42
+6d8c03b7
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 19:39:19.42
+6d8c03b7
+User
+- Received: v0=a80ed428b616ea064...
+2025-12-23 19:39:19.42
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 19:39:19.49
+6d8c03b7
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_audio", "event_timestamp": 1766500759, "data": {"agent_id": "agent_3501kd5rn3h7f6nbhevxbp64c5vy", "user_id": null, "conversation_id": "conv_4801kd5tbr3qerfrssrfz3q9we8m", "full_audio": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAADinyDGmMw0JKXmWHNnDKbAABLkJ6CBE6eF6WmYq73tbYeZrgEFA/bkrg3HdowPOpj3Z5PYT1sezCBALTgghJNNiZMPicprfKQQ68Tvh/8HwfB9H+UBAEAQDAPg+D4PgQEAQdeBJByY/viwWBRg9BB4SgZg5yWrMk+isR93UlVK6DKlgHZWDe4wxghYyGzMgABitIoClQMgAygw7QGqyWMv7H+NJlSazoLmZ
+2025-12-23 19:39:19.49
+6d8c03b7
+User
+[ElevenLabs Webhook] post_call_audio missing audio data
+2025-12-23 19:39:19.49
+6d8c03b7
+User
+[ElevenLabs Webhook] Event type: post_call_audio, conversation: conv_4801kd5tbr3qerfrssrfz3q9we8m
+2025-12-23 19:39:19.51
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 19:39:19.51
+6d8c03b7
+User
+- Expected: v0=20a6826652873675b...
+2025-12-23 19:39:19.51
+6d8c03b7
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Dynamic variables: campaign=ae5b353d-64a9-44d8-92cf-69d4726ca121, queue=e5650547-e51a-4041-8703-0c0d36a920f7, phone=+447860655878
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verified
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+- Received: v0=9e6f5d2915e001c70...
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Event type: post_call_transcription, conversation: conv_3501kd5tbr3ge529vm4ta37xyabx
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_transcription", "event_timestamp": 1766500762, "data": {"agent_id": "agent_3501kd5rn3h7f6nbhevxbp64c5vy", "conversation_id": "conv_3501kd5tbr3ge529vm4ta37xyabx", "status": "done", "user_id": null, "branch_id": "agtbrch_1401kd5rn4veempbrc19wktpjbbr", "transcript": [{"role": "agent", "agent_metadata": {"agent_id": "agent_3501kd5rn3h7f6nbhevxbp64c5vy", "branch_id": "agtbrch_1401kd5rn4veempbrc19wktpjbbr", "workflow_node_id": "node_01kctd99szfk2ss7srygkz3zvh"}, "message": "Good Da
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Contact not found
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+- Timestamp: 1766500762
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Mapped disposition: Qualified Lead
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+[ElevenLabs Webhook] Positive intent detected - creating Qualified Lead
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+- Expected: v0=9e6f5d2915e001c70...
+2025-12-23 19:39:23.15
+6d8c03b7
+User
+2:39:23 PM [express] POST /api/webhooks/elevenlabs 200 in 2ms :: {"status":"ok","message":"Contact n…
+2025-12-23 19:39:23.23
+6d8c03b7
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 19:39:23.23
+6d8c03b7
+User
+[ElevenLabs Webhook] Received event: {"type": "post_call_audio", "event_timestamp": 1766500763, "data": {"agent_id": "agent_3501kd5rn3h7f6nbhevxbp64c5vy", "user_id": null, "conversation_id": "conv_3501kd5tbr3ge529vm4ta37xyabx", "full_audio": "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjYwLjE2LjEwMAAAAAAAAAAAAAAA//uQxAADlJzU9gwwc4o+mWENl7DrO0hIptmNLWEdlFd3nUYAiYgAgVrap32VI/FaUrnWO676QyqcKzyp3aL2AkDweBEPCuJYlrgaGhwYEg8L4EwraEgEwDoKxyh2JZbc1ehDonXCQefy99sz8rjucACAcBADhoOY/nD7Z2Zn9lkQtK8JwM8Ad////IHh4eHhgAAAAAHh4eHhgAAAAAHh4eHpAAAABAeHh4ekAAAAEB
+2025-12-23 19:39:23.23
+6d8c03b7
+User
+[ElevenLabs Webhook] Signature verified

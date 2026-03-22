@@ -1,6 +1,6 @@
 /**
  * Order Agent Types
- * TypeScript interfaces for the AgentX order creation feature
+ * TypeScript interfaces for the AgentC order creation feature
  */
 
 export interface UploadedFile {

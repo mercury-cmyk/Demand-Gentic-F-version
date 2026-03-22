@@ -1,0 +1,38 @@
+[AUTH] requireAuth called for: GET /api/leads/cae50621-7458-4032-9957-c04410e83696/recording-url
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[Recording URL] Serving from S3: recordings/cae50621-7458-4032-9957-c04410e83696.wav
+1:03:44 PM [express] GET /api/leads/cae50621-7458-4032-9957-c04410e83696/recording-url 200 in 779ms …
+[AUTH] requireAuth called for: POST /api/leads/cae50621-7458-4032-9957-c04410e83696/validate-email
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[EMAIL-VALIDATION] Manual trigger for lead cae50621-7458-4032-9957-c04410e83696, contact 0c8ed68f-cc00-4c97-9c10-2874e7272752, email: conor@espi.net, Kickbox: enabled
+[EmailValidation] Running 3-layer validation for conor@espi.net
+[EmailValidation] Running Layer 2 (Kickbox) for conor@espi.net
+[Kickbox] Verifying email: conor@espi.net (attempt 1/3)
+[Kickbox] Verification result for conor@espi.net: unknown (reason: timeout, sendex: 0.6)
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+[EMAIL-VALIDATION] Error: error: invalid input syntax for type integer: "0.6"
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async validateAndStore3Layer (/home/runner/workspace/server/lib/email-validation-engine.ts:1184:3)
+    at async  (/home/runner/workspace/server/routes.ts:7303:26) {
+  length: 147,
+  severity: 'ERROR',
+  code: '22P02',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: "unnamed portal parameter $15 = '...'",
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'numutils.c',
+  line: '616',
+  routine: 'pg_strtoint32_safe'
+}
+1:03:52 PM [express] POST /api/leads/cae50621-7458-4032-9957-c04410e83696/validate-email 500 in 6479…

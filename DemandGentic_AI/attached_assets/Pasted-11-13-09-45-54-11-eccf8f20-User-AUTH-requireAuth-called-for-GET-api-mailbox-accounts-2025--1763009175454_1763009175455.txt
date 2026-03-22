@@ -1,0 +1,105 @@
+11-13 09:45:54.11
+eccf8f20
+User
+[AUTH] requireAuth called for: GET /api/mailbox-accounts
+
+2025-11-13 09:45:54.11
+eccf8f20
+User
+[AUTH] Authorization header present: true
+2025-11-13 09:45:54.11
+eccf8f20
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 09:45:54.15
+eccf8f20
+User
+4:45:54 AM [express] GET /api/mailbox-accounts 200 in 34ms :: [{"id":"84533a86-b170-4982-bf19-c7cc56…
+2025-11-13 09:45:54.44
+eccf8f20
+User
+[AUTH] requireAuth called for: GET /api/m365-activities/84533a86-b170-4982-bf19-c7cc56279be3
+2025-11-13 09:45:54.44
+eccf8f20
+User
+[AUTH] Authorization header present: true
+2025-11-13 09:45:54.44
+eccf8f20
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 09:45:54.47
+eccf8f20
+User
+4:45:54 AM [express] GET /api/m365-activities/84533a86-b170-4982-bf19-c7cc56279be3 200 in 34ms :: []
+2025-11-13 09:45:56.43
+eccf8f20
+User
+[DB Pool] Client removed | Total: 3, Idle: 3, Waiting: 0
+2025-11-13 09:45:56.43
+eccf8f20
+User
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+2025-11-13 09:45:56.62
+eccf8f20
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-13 09:45:56.64
+eccf8f20
+User
+[AUTH] requireAuth called for: POST /api/m365-sync
+2025-11-13 09:45:56.64
+eccf8f20
+User
+[AUTH] Authorization header present: true
+2025-11-13 09:45:56.64
+eccf8f20
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 09:45:58.27
+e5de94d9
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-13 09:45:58.49
+eccf8f20
+User
+[AUTH] requireAuth called for: POST /api/m365-sync
+2025-11-13 09:45:58.49
+eccf8f20
+User
+[AUTH] Authorization header present: true
+2025-11-13 09:45:58.49
+eccf8f20
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-11-13 09:45:58.57
+e5de94d9
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 09:45:58.81
+eccf8f20
+User
+Failed to sync emails: Error: Graph API request failed: 503 - {"error":{"code":"ErrorInternalServerTransientError","message":"An internal server error occurred. Try again later., Cannot query rows in a table."}}
+2025-11-13 09:45:58.81
+eccf8f20
+User
+at M365SyncService.fetchEmailsFromGraph (file:///home/runner/workspace/dist/index.js:18782:17)
+2025-11-13 09:45:58.81
+eccf8f20
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 09:45:58.81
+eccf8f20
+User
+at async M365SyncService.syncEmails (file:///home/runner/workspace/dist/index.js:18798:28)
+2025-11-13 09:45:58.81
+eccf8f20
+User
+at async file:///home/runner/workspace/dist/index.js:36799:22
+2025-11-13 09:45:58.81
+eccf8f20
+User
+4:45:58 AM [express] POST /api/m365-sync 500 in 325ms :: {"message":"Failed to sync emails","error":…
+2025-11-13 09:45:59.09
+e5de94d9
+System
+system: received signal terminated

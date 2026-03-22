@@ -1,0 +1,66 @@
+# Pivotal B2B - DemandGentic.ai robots.txt
+# Agentic Demand Generation & Account-Based Marketing Platform
+
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /resources-centre
+Allow: /contact
+Allow: /book/
+Allow: /proposal-request
+Allow: /privacy
+Allow: /terms
+Allow: /gdpr
+
+# Block internal application routes
+Disallow: /admin/
+Disallow: /dashboard/
+Disallow: /settings/
+Disallow: /campaigns/
+Disallow: /api/
+Disallow: /ai-studio/
+Disallow: /pipeline/
+Disallow: /accounts/
+Disallow: /contacts/
+Disallow: /segments/
+Disallow: /leads/
+Disallow: /inbox/
+Disallow: /agent-console/
+Disallow: /iam/
+Disallow: /client-portal/
+Disallow: /email-sequences/
+Disallow: /data-management/
+Disallow: /qa-review-center/
+Disallow: /disposition-intelligence/
+Disallow: /engagement-analytics/
+Disallow: /call-reports/
+Disallow: /cloud-logs/
+Disallow: /generative-studio/
+Disallow: /preview-studio/
+Disallow: /voice-agent-training/
+Disallow: /content-promotion/
+Disallow: /email-builder/
+Disallow: /number-pool/
+Disallow: /organization-manager/
+Disallow: /client-portal-admin/
+
+# Allow Google AI/Gemini to index public content
+User-agent: Google-Extended
+Allow: /
+
+# Allow Bing AI/Copilot
+User-agent: bingbot
+Allow: /
+
+# Allow social media crawlers
+User-agent: facebookexternalhit
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: LinkedInBot
+Allow: /
+
+# Sitemap location
+Sitemap: https://demandgentic.ai/sitemap.xml

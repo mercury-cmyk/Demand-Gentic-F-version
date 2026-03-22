@@ -1,6 +1,6 @@
 /**
  * Agent Panel Order Routes
- * API endpoints for AgentX order creation feature
+ * API endpoints for AgentC order creation feature
  */
 
 import { Router, Request, Response, NextFunction } from "express";

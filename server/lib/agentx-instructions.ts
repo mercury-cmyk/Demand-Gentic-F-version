@@ -1,8 +1,8 @@
 /**
- * AgentX Instruction Documents
+ * AgentC Instruction Documents
  * 
- * Centralized instruction system for the AgentX coding and CRM agent.
- * These instructions are loaded at runtime and injected into AgentX's
+ * Centralized instruction system for the AgentC coding and CRM agent.
+ * These instructions are loaded at runtime and injected into AgentC's
  * system prompt alongside the core identity from org-intelligence-helper.ts
  * and role-based prompts from the agentPrompts DB table.
  * 
@@ -185,10 +185,10 @@ export const MODEL_SELECTION_STRATEGY: Record<TaskType, { primary: string; fallb
   voice_realtime:       { primary: 'gemini-2.5-flash-preview-native-audio-dialog', fallback: 'gemini-2.5-flash' },
 };
 
-// ─── AgentX Operating Instructions ───────────────────────────────────────
+// ─── AgentC Operating Instructions ───────────────────────────────────────
 
 export const AGENTX_CODING_INSTRUCTIONS = `
-## AgentX Coding Standards
+## AgentC Coding Standards
 
 ### Architecture Rules
 - Schema changes start in shared/schema.ts (Drizzle ORM), then propagate to server routes/services, then client
@@ -214,7 +214,7 @@ export const AGENTX_CODING_INSTRUCTIONS = `
 `;
 
 export const AGENTX_SECURITY_INSTRUCTIONS = `
-## AgentX Security Standards (OWASP Top 10)
+## AgentC Security Standards (OWASP Top 10)
 
 ### Authentication & Authorization
 - Admin routes: verify authToken via middleware
@@ -243,7 +243,7 @@ export const AGENTX_SECURITY_INSTRUCTIONS = `
 `;
 
 export const AGENTX_UI_INSTRUCTIONS = `
-## AgentX UI Design Standards  
+## AgentC UI Design Standards  
 
 ### VS Code-Inspired Interface
 Every interface should feel like a professional development tool:
@@ -285,10 +285,10 @@ Every interface should feel like a professional development tool:
 export type InstructionScope = 'coding' | 'security' | 'ui' | 'all';
 
 /**
- * Get AgentX operating instructions by scope.
+ * Get AgentC operating instructions by scope.
  * These supplement the core identity (org-intelligence-helper) and role prompts (DB).
  */
-export function getAgentXInstructions(scope: InstructionScope = 'all'): string {
+export function getAgentCInstructions(scope: InstructionScope = 'all'): string {
   switch (scope) {
     case 'coding':
       return AGENTX_CODING_INSTRUCTIONS;
@@ -329,16 +329,16 @@ export function getModelCatalog(): ModelProvider[] {
 }
 
 /**
- * Build the complete AgentX instruction prompt for injection into the system prompt.
+ * Build the complete AgentC instruction prompt for injection into the system prompt.
  * Determines scope based on the user's intent.
  */
-export function buildAgentXInstructionPrompt(userMessage: string): string {
+export function buildAgentCInstructionPrompt(userMessage: string): string {
   const msgLower = userMessage.toLowerCase();
 
-  // Determine which instructions are relevant
+  // Determine which instructions are relevant based on user intent
   const scopes: InstructionScope[] = [];
 
-  if (/\b(code|debug|refactor|implement|function|class|api|endpoint|fix|build|create|write)\b/.test(msgLower)) {
+  if (/\b(code|debug|refactor|implement|function|class|api|endpoint|fix bug|write a function|write code)\b/.test(msgLower)) {
     scopes.push('coding');
   }
   if (/\b(security|auth|token|password|vulnerability|injection|xss|csrf|owasp|encrypt)\b/.test(msgLower)) {
@@ -348,12 +348,12 @@ export function buildAgentXInstructionPrompt(userMessage: string): string {
     scopes.push('ui');
   }
 
-  // Default: include coding instructions at minimum
+  // If no specific scope matched, skip injecting instructions — the AI can handle general queries without coding rules
   if (scopes.length === 0) {
-    scopes.push('coding');
+    return '';
   }
 
-  const instructions = scopes.map(s => getAgentXInstructions(s)).join('\n');
+  const instructions = scopes.map(s => getAgentCInstructions(s)).join('\n');
 
-  return `\n## AgentX Operating Instructions\n${instructions}`;
+  return `\n## AgentC Operating Instructions\n${instructions}`;
 }

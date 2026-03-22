@@ -1,0 +1,112 @@
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Object.onceWrapper (node:events:638:28)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket.emit (node:events:524:28)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket._onTimeout (node:net:595:8)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at listOnTimeout (node:internal/timers:581:17)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at process.processTimers (node:internal/timers:519:7) {
+2025-11-05 23:38:08.85
+ae82ed70
+User
+errorno: 'ETIMEDOUT',
+2025-11-05 23:38:08.85
+ae82ed70
+User
+code: 'ETIMEDOUT',
+2025-11-05 23:38:08.85
+ae82ed70
+User
+syscall: 'connect'
+2025-11-05 23:38:08.85
+ae82ed70
+User
+}
+2025-11-05 23:38:08.85
+ae82ed70
+User
+Error: connect ETIMEDOUT
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket. (/home/runner/workspace/node_modules/ioredis/built/Redis.js:171:41)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Object.onceWrapper (node:events:638:28)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket.emit (node:events:524:28)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket._onTimeout (node:net:595:8)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at listOnTimeout (node:internal/timers:581:17)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at process.processTimers (node:internal/timers:519:7) {
+2025-11-05 23:38:08.85
+ae82ed70
+User
+errorno: 'ETIMEDOUT',
+2025-11-05 23:38:08.85
+ae82ed70
+User
+code: 'ETIMEDOUT',
+2025-11-05 23:38:08.85
+ae82ed70
+User
+syscall: 'connect'
+2025-11-05 23:38:08.85
+ae82ed70
+User
+}
+2025-11-05 23:38:08.85
+ae82ed70
+User
+Error: connect ETIMEDOUT
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket. (/home/runner/workspace/node_modules/ioredis/built/Redis.js:171:41)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Object.onceWrapper (node:events:638:28)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket.emit (node:events:524:28)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+at Socket._onTimeout (node:net:595:8)
+2025-11-05 23:38:08.85
+ae82ed70
+User
+code: 'ETIMEDOUT',
+2025-11-05 23:38:08.85
+ae82ed70
+User
+syscall: 'connect'
+2025-11-05 23:38:08.85
+ae82ed70
+User
+}

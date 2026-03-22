@@ -1,0 +1,139 @@
+2025-11-05 10:53:31.83
+f862ac4a
+User
+at process.processTimers (node:internal/timers:519:7)
+2025-11-05 10:53:31.83
+f862ac4a
+User
+at async DatabaseStorage.getAllAutoDialerQueues (file:///home/runner/workspace/dist/index.js:8208:18)
+2025-11-05 10:53:31.83
+f862ac4a
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:16012:11) {
+2025-11-05 10:53:31.83
+f862ac4a
+User
+_eventsCount: 4,
+2025-11-05 10:53:31.83
+f862ac4a
+User
+_binaryType: 'arraybuffer',
+2025-11-05 10:53:31.83
+f862ac4a
+User
+_sender: null,
+2025-11-05 10:53:31.83
+f862ac4a
+User
+_bufferedAmount: 0,
+2025-11-05 10:53:31.83
+f862ac4a
+User
+[Symbol(kCapture)]: false
+2025-11-05 10:53:31.83
+f862ac4a
+User
+},
+2025-11-05 10:53:37.49
+1eeda792
+User
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+2025-11-05 10:53:37.63
+1eeda792
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-05 10:53:43.03
+f862ac4a
+User
+[AutoDialer] Error processing queues: Error: Connection terminated due to connection timeout
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at runNextTicks (node:internal/process/task_queues:64:3)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at listOnTimeout (node:internal/timers:545:9)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at process.processTimers (node:internal/timers:519:7)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at async DatabaseStorage.getAllAutoDialerQueues (file:///home/runner/workspace/dist/index.js:8208:18)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at async PowerDialerEngine.processActiveQueues (file:///home/runner/workspace/dist/index.js:16035:26)
+2025-11-05 10:53:43.03
+f862ac4a
+User
+at async Timeout._onTimeout (file:///home/runner/workspace/dist/index.js:16012:11) {
+2025-11-05 10:53:43.03
+f862ac4a
+User
+[cause]: ErrorEvent {
+2025-11-05 10:53:43.03
+f862ac4a
+User
+[Symbol(kTarget)]: WebSocket {
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_events: [Object: null prototype],
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_eventsCount: 4,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_maxListeners: undefined,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_binaryType: 'arraybuffer',
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_closeCode: 1006,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_closeFrameReceived: false,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_closeFrameSent: false,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_closeMessage: ,
+
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_closeTimer: null,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_errorEmitted: true,
+2025-11-05 10:53:43.03
+f862ac4a
+User
+_extensions: {},
+2025-11-05 10:53:43.03
+f862ac4a

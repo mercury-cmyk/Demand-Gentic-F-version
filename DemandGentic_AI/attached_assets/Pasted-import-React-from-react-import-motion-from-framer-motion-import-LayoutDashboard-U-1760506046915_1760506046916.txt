@@ -1,0 +1,608 @@
+import React from "react";
+import { motion } from "framer-motion";
+import { 
+  LayoutDashboard, Users, Building2, Rocket, Settings, Globe, Phone, Mail, Filter, X, CheckCircle2, AlertCircle, Play, Pause, FileText, BarChart3, PhoneCall, Linkedin, Search, Sun, Clock3, Layers, CalendarClock, Server, Network, SlidersHorizontal
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+
+// ---------------------------------------------
+// THEME TOKENS (align with Pivotal B2B branding)
+// ---------------------------------------------
+const brand = {
+  primary: "#0D6EFD",
+  secondary: "#00BFA5",
+  slate900: "#0F172A",
+  slate800: "#1E293B",
+  slate600: "#475569",
+  slate500: "#64748B",
+  bg: "#F8FAFC",
+};
+
+// ---------------------------------------------
+// UTIL COMPONENTS
+// ---------------------------------------------
+const Stat = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
+  
+    
+      {label}
+      
+        {value}
+        {sub && {sub}}
+      
+    
+  
+);
+
+const StatusPill = ({ status }: { status: "Draft" | "Running" | "Paused" | "Completed" }) => {
+  const map: Record = {
+    Draft: "bg-slate-100 text-slate-700",
+    Running: "bg-blue-100 text-blue-700",
+    Paused: "bg-amber-100 text-amber-700",
+    Completed: "bg-green-100 text-green-700",
+  };
+  return {status};
+};
+
+const Chip = ({ children, onClear }: { children: React.ReactNode; onClear?: () => void }) => (
+  
+     {children}
+    {onClear && (
+      
+        
+      
+    )}
+  
+);
+
+const IconLink = ({ href, label, icon: Icon }: { href: string; label: string; icon: any }) => (
+  
+    
+      
+        
+          
+        
+      
+      {label}
+    
+  
+);
+
+// ---------------------------------------------
+// FILTER BAR
+// ---------------------------------------------
+const FilterBar = () => {
+  return (
+    
+      
+        
+          
+          
+        
+        
+          
+            
+              Equals
+              Not equal
+              Contains
+              Does not contain
+            
+          
+        
+        
+          
+            
+              Begins with
+              Ends with
+              Has value
+              Is empty
+            
+          
+        
+        
+          Advanced
+          Apply Filters
+          Clear All
+        
+      
+      
+        Job Title contains "Manager"
+        Domain ends with ".co.uk"
+        Status ≠ "Inactive"
+      
+    
+  );
+};
+
+// ---------------------------------------------
+// HEADER & SIDEBAR
+// ---------------------------------------------
+const AppHeader = () => (
+  
+    
+      
+      
+        Pivotal CRM
+        ABM • Data • Demand Generation
+      
+    
+    
+      Light
+      New Campaign
+    
+  
+);
+
+const Sidebar = ({ current, onNav }: { current: string; onNav: (k: string) => void }) => {
+  const groups = [
+    {
+      title: "Main",
+      items: [
+        { k: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      ],
+    },
+    {
+      title: "CRM",
+      items: [
+        { k: "accounts", label: "Accounts", icon: Building2 },
+        { k: "contacts", label: "Contacts", icon: Users },
+        { k: "campaigns", label: "Campaigns", icon: BarChart3 },
+        { k: "agent", label: "Agent Console", icon: PhoneCall },
+      ],
+    },
+    {
+      title: "Content & Assets",
+      items: [
+        { k: "studio", label: "Content Studio", icon: FileText },
+        { k: "resources", label: "Resources Centre", icon: Layers },
+      ],
+    },
+    {
+      title: "Operations",
+      items: [
+        { k: "emailinfra", label: "Email Infrastructure", icon: Server },
+        { k: "qa", label: "QA & Leads Delivery", icon: CheckCircle2 },
+        { k: "reports", label: "Reports", icon: BarChart3 },
+        { k: "projects", label: "Projects Management", icon: Network },
+      ],
+    },
+    {
+      title: "Administration",
+      items: [
+        { k: "orgsettings", label: "Organization Settings", icon: Settings },
+      ],
+    },
+  ];
+
+  return (
+    
+      {groups.map((group) => (
+        
+          {group.title}
+          
+            {group.items.map(({ k, label, icon: Icon }) => (
+               onNav(k)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition ${
+                  current === k ? "bg-blue-50 text-blue-700" : "hover:bg-slate-50 text-slate-700"
+                }`}
+              >
+                
+                {label}
+              
+            ))}
+          
+        
+      ))}
+    
+  );
+};
+
+// ---------------------------------------------
+// PAGES
+// ---------------------------------------------
+const DashboardPage = () => (
+  
+    
+    
+      
+      
+      
+      
+    
+
+    
+      
+        
+           Campaign Performance
+        
+        
+          Chart area
+          
+            Export
+            View Report
+          
+        
+      
+
+      
+        
+           Calling Queue
+        
+        
+          {["Emily Carter — CTO, JRI Ltd", "Michael Shaw — VP IT, Acme Med", "Sara Lee — CIO, Northex"].map((r, i) => (
+            
+              
+                {r}
+                Last activity: 2h ago • Disposition required
+              
+              
+                Call
+                Hold
+              
+            
+          ))}
+        
+      
+    
+  
+);
+
+const AccountsPage = () => (
+  
+    
+    
+      {[1,2,3,4,5,6].map((i) => (
+        
+          
+            
+              
+                
+                
+                  JRI Ltd
+                  Medical Devices • 250–500
+                
+              
+              
+                
+                
+                
+                
+              
+            
+            
+              ICP: SDM
+              UK
+              High Intent
+            
+            Last touch: 3d ago • Owner: Zahid • Notes: Interested in webinar co-promo
+          
+        
+      ))}
+    
+  
+);
+
+const ContactsPage = () => (
+  
+    
+    
+      
+        
+          Name & Title
+          Company
+          Email
+          Actions
+        
+        {[1,2,3,4,5].map((i) => (
+          
+            
+              Emily Carter
+              CTO
+            
+            JRI Ltd
+            emily.carter@jri-ltd.co.uk
+            
+              
+              
+              
+            
+          
+        ))}
+      
+    
+  
+);
+
+const CampaignsPage = () => (
+  
+    
+    
+      {[{name:"Q4 UK MedTech Webinar", status:"Running"},{name:"ABM Email + Call Pilot", status:"Draft"},{name:"Syndication: HR eBook", status:"Completed"}].map((c, i) => (
+        
+          
+            
+              
+                {c.name}
+                Target: SDM • GEO: UK/DE/US
+              
+              {/* @ts-ignore */}
+              
+            
+            
+              
+                Delivered
+                24,120
+              
+              
+                Responses
+                612
+              
+              
+                CPL
+                $41
+              
+            
+            
+              Summary
+              Open
+            
+          
+        
+      ))}
+    
+  
+);
+
+const EmailInfrastructurePage = () => (
+  
+    
+      
+         Email Infrastructure
+      
+      
+        
+          
+            Email Setup
+            Domain Verification
+            Dedicated IP
+            Send-Time Optimization
+          
+
+          
+            
+              
+                SMTP / OAuth
+                
+                  
+                  
+                  
+                  
+                
+                
+                   Enable open/click tracking
+                
+                
+                  Test Connection
+                  Save
+                
+              
+              
+                 Compliance
+                GDPR/CCPA ready. Configure suppression lists and unsubscribe handling.
+                Manage Suppression
+              
+            
+          
+
+          
+            
+               Domain Verification
+              Add the following DNS records to verify your sending domain.
+              
+                SPFv=spf1 include:mail.pivotal-b2b.com ~all
+                DKIMk=rsa; p=MIIBIjANBgkqh…
+                DMARCv=DMARC1; p=quarantine; rua=mailto:dmarc@pivotal…
+              
+              
+                Check Status
+                Verified
+              
+            
+          
+
+          
+            
+               Dedicated IP Configuration
+              Warm up your IP with automated ramp-up plans to protect deliverability.
+              
+                IP203.0.113.24
+                StatusPending Warm-up
+                ReputationGood
+              
+              
+                Start Warm-up
+                Save
+              
+            
+          
+
+          
+            
+               Send-Time Optimization
+              Batch sending with time gaps to maximize deliverability. Configure windows per region.
+              
+                Batch Size2,000 emails / 15 min
+                Quiet Hours22:00–06:00 (recipient local)
+                Region WindowsUK: 09–12, US: 10–13, DE: 09–11
+              
+              
+                Simulate
+                Save
+              
+            
+          
+        
+      
+    
+  
+);
+
+const AgentConsolePage = () => (
+  
+    
+      
+         Agent Console
+      
+      
+        
+          Device TestSpeaker / Mic / Network
+          Dialer ControlsHang up • Mute • Hold
+          Mandatory DispositionBefore next call
+        
+      
+    
+  
+);
+
+const ContentStudioPage = () => (
+  
+    
+      
+         Content Studio
+      
+      
+        
+          AssetsLanding pages, PDFs
+          TemplatesEmail • Forms • Ads
+          Push to ResourcesOne click publish
+        
+      
+    
+  
+);
+
+const ResourcesCentrePage = () => (
+  
+    
+      
+         Resources Centre
+      
+      
+        
+          EventsWebinar • Dinner • Forum
+          ResourceseBook • Guide • Whitepaper
+          NewsPress & Announcements
+        
+      
+    
+  
+);
+
+const QALeadsPage = () => (
+  
+    
+      
+         QA & Leads Delivery
+      
+      
+        
+          Triple VerificationEmail • Phone • Firmographic
+          Exclusions & DNCList management • GDPR
+          DeliveryCSV • Webhook • CRM Sync
+        
+      
+    
+  
+);
+
+const ReportsPage = () => (
+  
+    
+      
+         Reports
+      
+      
+        
+          Campaign PerformanceCTR • CPL • SQL
+          DeliverabilityBounce • Spam • Inbox
+          RevenueCost • ROI • Pipeline
+        
+      
+    
+  
+);
+
+const ProjectsManagementPage = () => (
+  
+    
+      
+         Projects Management
+      
+      
+        
+          KanbanBacklog • In Progress • Done
+          MilestonesDates • Owners • Risks
+          DocsSOW • Briefs • Assets
+        
+      
+    
+  
+);
+
+const OrgSettingsPage = () => (
+  
+    
+      
+         Organization Settings
+      
+      
+        
+          Users & RolesRBAC • MFA
+          BillingInvoices • Plans
+          IntegrationsM365 • Slack • Webhooks
+        
+      
+    
+  
+);
+
+// ---------------------------------------------
+// ROOT COMPONENT
+// ---------------------------------------------
+export default function PivotalB2BUIConcept() {
+  const [tab, setTab] = React.useState("dashboard");
+
+  return (
+    
+      
+        
+        
+          
+            
+          
+          
+            
+              {tab === "dashboard" && }
+              {tab === "accounts" && }
+              {tab === "contacts" && }
+              {tab === "campaigns" && }
+              {tab === "agent" && }
+              {tab === "studio" && }
+              {tab === "resources" && }
+              {tab === "emailinfra" && }
+              {tab === "qa" && }
+              {tab === "reports" && }
+              {tab === "projects" && }
+              {tab === "orgsettings" && }
+            
+          
+        
+      
+    
+  );
+}

@@ -1,0 +1,236 @@
+Replit Prompt: Fix Suppression Logic in Verification Campaigns System
+# PROMPT: Fix Over-Aggressive Suppression Logic in Verification Campaigns
+
+Your task is to update the suppression logic in our existing B2B CRM Verification Campaigns module.
+
+## Objective:
+Currently, contacts are suppressed incorrectly when only first name, last name, or company name matches.
+You must correct this so that **suppression happens ONLY** when one of these exact, verified conditions match:
+
+1. Email matches (exact, case-insensitive)
+2. CAV ID matches
+3. CAV User ID matches
+4. Full Name + Company BOTH match (together)
+   - i.e. (Full_Name AND Company_Name) must both match after normalization
+
+No other conditions (like first-name-only, last-name-only, or company-only) should ever suppress a contact.
+
+---
+
+## STEP 1 — DATABASE MIGRATION (PostgreSQL)
+
+Add normalized columns and create indexes if they don’t exist:
+
+```sql
+ALTER TABLE contacts
+  ADD COLUMN IF NOT EXISTS email_norm text,
+  ADD COLUMN IF NOT EXISTS full_name_norm text,
+  ADD COLUMN IF NOT EXISTS company_norm text,
+  ADD COLUMN IF NOT EXISTS name_company_hash bytea,
+  ADD COLUMN IF NOT EXISTS cav_id text,
+  ADD COLUMN IF NOT EXISTS cav_user_id text;
+
+ALTER TABLE suppression_list
+  ADD COLUMN IF NOT EXISTS email_norm text,
+  ADD COLUMN IF NOT EXISTS full_name_norm text,
+  ADD COLUMN IF NOT EXISTS company_norm text,
+  ADD COLUMN IF NOT EXISTS name_company_hash bytea,
+  ADD COLUMN IF NOT EXISTS cav_id text,
+  ADD COLUMN IF NOT EXISTS cav_user_id text;
+
+Backfill normalized data:
+UPDATE contacts
+SET
+  email_norm = lower(trim(email)),
+  full_name_norm = lower(trim(regexp_replace(coalesce(first_name,'')||' '||coalesce(last_name,''), '\s+', ' ', 'g'))),
+  company_norm = lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g'))),
+  name_company_hash = digest(
+    lower(trim(regexp_replace(coalesce(first_name,'')||' '||coalesce(last_name,''), '\s+', ' ', 'g'))) || '|' ||
+    lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g')))
+  , 'sha256');
+
+UPDATE suppression_list
+SET
+  email_norm = lower(trim(email)),
+  full_name_norm = lower(trim(regexp_replace(coalesce(full_name,''), '\s+', ' ', 'g'))),
+  company_norm = lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g'))),
+  name_company_hash = digest(
+    lower(trim(regexp_replace(coalesce(full_name,''), '\s+', ' ', 'g'))) || '|' ||
+    lower(trim(regexp_replace(coalesce(company_name,''), '\s+', ' ', 'g')))
+  , 'sha256');
+
+Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_supp_email_norm ON suppression_list (email_norm);
+CREATE INDEX IF NOT EXISTS idx_supp_cav_id ON suppression_list (cav_id);
+CREATE INDEX IF NOT EXISTS idx_supp_cav_user_id ON suppression_list (cav_user_id);
+CREATE INDEX IF NOT EXISTS idx_supp_name_company_hash ON suppression_list (name_company_hash);
+
+STEP 2 — CANONICAL SUPPRESSION QUERY (SAFE VERSION)
+
+This query defines the only valid suppression logic:
+
+SELECT c.id,
+  CASE
+    WHEN EXISTS (SELECT 1 FROM suppression_list s WHERE s.email_norm = c.email_norm AND c.email_norm <> '') THEN 'email'
+    WHEN EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_id = c.cav_id AND c.cav_id <> '') THEN 'cav_id'
+    WHEN EXISTS (SELECT 1 FROM suppression_list s WHERE s.cav_user_id = c.cav_user_id AND c.cav_user_id <> '') THEN 'cav_user_id'
+    WHEN (
+      c.full_name_norm <> '' AND c.company_norm <> '' AND EXISTS (
+        SELECT 1 FROM suppression_list s
+        WHERE (s.full_name_norm = c.full_name_norm AND s.company_norm = c.company_norm)
+           OR (s.name_company_hash = c.name_company_hash)
+      )
+    ) THEN 'full_name+company'
+    ELSE NULL
+  END AS suppression_reason
+FROM contacts c;
+
+
+✅ Ensures both name and company match together
+🚫 Blocks company-only or partial name matches
+
+STEP 3 — DRIZZLE / TYPESCRIPT LOGIC
+
+Add normalization + suppression checking logic in your backend (suppression.service.ts):
+
+import crypto from "crypto";
+import { sql, eq } from "drizzle-orm";
+import { contacts, suppressionList } from "@/db/schema";
+
+function normalize(str?: string) {
+  return str ? str.trim().replace(/\s+/g, " ").toLowerCase() : null;
+}
+
+function computeHash(fullNameNorm?: string | null, companyNorm?: string | null) {
+  if (!fullNameNorm || !companyNorm) return null;
+  return crypto.createHash("sha256").update(`${fullNameNorm}|${companyNorm}`).digest("hex");
+}
+
+export async function getSuppressionReason(db, contactId: string) {
+  const [c] = await db.select({
+    id: contacts.id,
+    emailNorm: contacts.emailNorm,
+    cavId: contacts.cavId,
+    cavUserId: contacts.cavUserId,
+    fullNameNorm: contacts.fullNameNorm,
+    companyNorm: contacts.companyNorm,
+    nameCompanyHash: contacts.nameCompanyHash
+  })
+  .from(contacts)
+  .where(eq(contacts.id, contactId))
+  .limit(1);
+
+  if (!c) return null;
+
+  if (c.emailNorm) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(SELECT 1 FROM suppression_list WHERE email_norm = ${c.emailNorm}) AS exists
+    `);
+    if (exists) return 'email';
+  }
+
+  if (c.cavId) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(SELECT 1 FROM suppression_list WHERE cav_id = ${c.cavId}) AS exists
+    `);
+    if (exists) return 'cav_id';
+  }
+
+  if (c.cavUserId) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(SELECT 1 FROM suppression_list WHERE cav_user_id = ${c.cavUserId}) AS exists
+    `);
+    if (exists) return 'cav_user_id';
+  }
+
+  if (c.fullNameNorm && c.companyNorm) {
+    const [{ exists }] = await db.execute(sql`
+      SELECT EXISTS(
+        SELECT 1 FROM suppression_list
+        WHERE (full_name_norm = ${c.fullNameNorm} AND company_norm = ${c.companyNorm})
+           OR (name_company_hash = ${c.nameCompanyHash})
+      ) AS exists
+    `);
+    if (exists) return 'full_name+company';
+  }
+
+  return null;
+}
+
+
+✅ Enforces priority:
+email > cav_id > cav_user_id > full_name+company
+🚫 Rejects company-only matches automatically
+
+STEP 4 — REMOVE OLD COMPANY-ONLY / NAME-ONLY LOGIC
+
+Search and delete any legacy conditions like:
+
+OR s.company_norm = c.company_norm
+OR s.first_name_norm = c.first_name_norm
+OR s.last_name_norm = c.last_name_norm
+
+
+These must be removed entirely.
+
+STEP 5 — CLEANUP BADLY SUPPRESSED CONTACTS
+
+Run this SQL once to unsuppress records that were wrongly flagged because of company-only matches:
+
+WITH company_only AS (
+  SELECT c.id
+  FROM contacts c
+  JOIN suppression_list s ON s.company_norm = c.company_norm
+  WHERE c.is_suppressed = true
+    AND NOT EXISTS (SELECT 1 FROM suppression_list s1 WHERE s1.email_norm = c.email_norm AND c.email_norm <> '')
+    AND NOT EXISTS (SELECT 1 FROM suppression_list s2 WHERE s2.cav_id = c.cav_id AND c.cav_id <> '')
+    AND NOT EXISTS (SELECT 1 FROM suppression_list s3 WHERE s3.cav_user_id = c.cav_user_id AND c.cav_user_id <> '')
+    AND NOT EXISTS (
+      SELECT 1 FROM suppression_list s4
+      WHERE (s4.full_name_norm = c.full_name_norm AND s4.company_norm = c.company_norm)
+         OR (s4.name_company_hash = c.name_company_hash)
+    )
+)
+UPDATE contacts
+SET is_suppressed = false,
+    suppression_reason = NULL
+WHERE id IN (SELECT id FROM company_only);
+
+STEP 6 — TEST CASES
+Scenario	Expected	Suppressed?
+Same email	✅ Email match	YES
+Same CAV ID	✅ ID match	YES
+Same CAV User ID	✅ ID match	YES
+Same Full Name + Same Company	✅ Combined match	YES
+Same Company only	🚫 Not enough	NO
+Same Name only	🚫 Not enough	NO
+Name same but different company	🚫 Not enough	NO
+Different case / spaces	✅ Normalized match	YES
+STEP 7 — FINAL VERIFICATION
+
+After deployment, run this to verify there are no more false positives:
+
+SELECT COUNT(*) AS company_only_false_matches
+FROM contacts c
+JOIN suppression_list s ON s.company_norm = c.company_norm
+WHERE c.is_suppressed = true
+  AND NOT EXISTS (SELECT 1 FROM suppression_list s1 WHERE s1.email_norm = c.email_norm)
+  AND NOT EXISTS (SELECT 1 FROM suppression_list s2 WHERE s2.cav_id = c.cav_id)
+  AND NOT EXISTS (SELECT 1 FROM suppression_list s3 WHERE s3.cav_user_id = c.cav_user_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM suppression_list s4
+    WHERE s4.full_name_norm = c.full_name_norm AND s4.company_norm = c.company_norm
+  );
+
+
+Expected output → 0
+
+✅ End Result
+
+Suppression logic is now precise, fair, and bug-free
+
+No false positives from company-only or name-only matches
+
+Optimized indexes and hashes ensure fast lookups for large datasets
+
+Fully compatible with your CRM’s Verification Campaigns module

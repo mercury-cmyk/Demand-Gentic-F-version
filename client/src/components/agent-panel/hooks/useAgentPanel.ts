@@ -94,12 +94,12 @@ export function useAgentPanel(): UseAgentPanelReturn {
     const effectiveWidth = state.orderMode ? Math.max(state.width, ORDER_MODE_WIDTH) : state.width;
     const offsetPx = state.isOpen ? (state.isCollapsed ? COLLAPSED_WIDTH_PX : effectiveWidth) : 0;
 
-    root.style.setProperty('--agentx-panel-offset', `${offsetPx}px`);
-    root.style.setProperty('--agentx-panel-width', `${effectiveWidth}px`);
-    root.style.setProperty('--agentx-panel-collapsed-width', `${COLLAPSED_WIDTH_PX}px`);
-    root.dataset.agentxPanelOpen = state.isOpen ? 'true' : 'false';
-    root.dataset.agentxPanelCollapsed = state.isCollapsed ? 'true' : 'false';
-    root.dataset.agentxOrderMode = state.orderMode ? 'true' : 'false';
+    root.style.setProperty('--agentc-panel-offset', `${offsetPx}px`);
+    root.style.setProperty('--agentc-panel-width', `${effectiveWidth}px`);
+    root.style.setProperty('--agentc-panel-collapsed-width', `${COLLAPSED_WIDTH_PX}px`);
+    root.dataset.agentcPanelOpen = state.isOpen ? 'true' : 'false';
+    root.dataset.agentcPanelCollapsed = state.isCollapsed ? 'true' : 'false';
+    root.dataset.agentcOrderMode = state.orderMode ? 'true' : 'false';
   }, [state.isCollapsed, state.isOpen, state.width, state.orderMode]);
 
   useEffect(() => {
@@ -107,12 +107,12 @@ export function useAgentPanel(): UseAgentPanelReturn {
 
     const root = document.documentElement;
     return () => {
-      root.style.setProperty('--agentx-panel-offset', '0px');
-      root.style.removeProperty('--agentx-panel-width');
-      root.style.removeProperty('--agentx-panel-collapsed-width');
-      root.removeAttribute('data-agentx-panel-open');
-      root.removeAttribute('data-agentx-panel-collapsed');
-      root.removeAttribute('data-agentx-order-mode');
+      root.style.setProperty('--agentc-panel-offset', '0px');
+      root.style.removeProperty('--agentc-panel-width');
+      root.style.removeProperty('--agentc-panel-collapsed-width');
+      root.removeAttribute('data-agentc-panel-open');
+      root.removeAttribute('data-agentc-panel-collapsed');
+      root.removeAttribute('data-agentc-order-mode');
     };
   }, []);
 

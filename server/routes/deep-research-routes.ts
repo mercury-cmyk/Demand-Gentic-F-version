@@ -2,7 +2,7 @@
  * Deep Research API Routes
  *
  * Provides research and analysis endpoints powered by Kimi Platform API.
- * Used by AgentX, agentic reports, and campaign planning.
+ * Used by AgentC, agentic reports, and campaign planning.
  */
 
 import { Router, Request, Response } from "express";

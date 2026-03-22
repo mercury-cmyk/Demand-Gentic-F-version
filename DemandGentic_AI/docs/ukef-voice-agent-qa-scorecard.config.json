@@ -1,0 +1,84 @@
+{
+  "name": "ukef_voice_agent_opening_stability_v1",
+  "version": 1,
+  "totalScore": 100,
+  "thresholds": {
+    "pass": 85,
+    "warningMin": 75,
+    "warningMax": 84
+  },
+  "hardFailRules": [
+    "purpose_gap_ms > 2000",
+    "voicemail_script_leakage = true",
+    "opening_restart_count > 1",
+    "direct_question_ack_ms > 1500"
+  ],
+  "dimensions": [
+    {
+      "id": "opening_compression_value_pivot",
+      "weight": 35,
+      "passCriteria": [
+        "purpose_gap_ms <= 700",
+        "value_statement_present = true"
+      ],
+      "failureTags": ["1", "2"]
+    },
+    {
+      "id": "intro_flow_reliability",
+      "weight": 20,
+      "passCriteria": [
+        "identity_request_present = true",
+        "identity_outcome_captured = true",
+        "purpose_statement_present = true"
+      ],
+      "failureTags": ["2"]
+    },
+    {
+      "id": "voicemail_detection_abort",
+      "weight": 12,
+      "passCriteria": [
+        "vm_detection_ms <= 3000",
+        "live_script_after_vm_detected = false"
+      ],
+      "failureTags": ["3"]
+    },
+    {
+      "id": "responsiveness_to_direct_inquiries",
+      "weight": 8,
+      "passCriteria": [
+        "direct_question_ack_ms <= 1000"
+      ],
+      "failureTags": ["9"]
+    },
+    {
+      "id": "technical_stability",
+      "weight": 20,
+      "passCriteria": [
+        "p95_model_latency_ms <= 900",
+        "max_dead_air_ms <= 1200",
+        "opening_restart_count <= 1",
+        "audio_quality_pass = true"
+      ],
+      "failureTags": ["5", "6", "7", "8"]
+    },
+    {
+      "id": "data_quality_outcome_handling",
+      "weight": 5,
+      "passCriteria": [
+        "contact_unknown_flagged_within_24h = true"
+      ],
+      "failureTags": ["4"]
+    }
+  ],
+  "eventKeys": [
+    "opening.identity_prompt_sent_at",
+    "opening.identity_confirmed_at",
+    "opening.purpose_started_at",
+    "opening.restart_count",
+    "realtime.voicemail_detected_at",
+    "realtime.first_human_audio_at",
+    "realtime.max_dead_air_ms",
+    "realtime.p95_model_latency_ms",
+    "qa.contact_unknown_flagged_at"
+  ]
+}

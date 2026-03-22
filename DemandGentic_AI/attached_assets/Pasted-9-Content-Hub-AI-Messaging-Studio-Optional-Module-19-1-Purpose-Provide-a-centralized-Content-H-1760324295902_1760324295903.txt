@@ -1,0 +1,146 @@
+9) Content Hub & AI Messaging Studio (Optional Module)
+19.1 Purpose
+
+Provide a centralized Content Hub that leverages AI to analyze client assets and profiles, extract problems/needs, craft value propositions, and generate ready-to-launch collateral (landing pages, email templates, call scripts, CTAs) tightly integrated with the Campaigns module and the Client Portal (Orders).
+
+19.2 Core Capabilities
+
+AI Asset Analysis
+
+Ingest PDFs, PPTs, web pages, one-pagers, case studies.
+
+Extract product features, ICPs, use-cases, objections, compliance notes.
+
+Produce structured summaries: Problems solved, Outcomes, Proof points.
+
+PII/content safety checks; hallucination guardrails with citation links to source passages.
+
+AI Client Profile Analysis
+
+Inputs: Company description, LinkedIn specialties, installed technologies, current industry, past engagement.
+
+Outputs: ICP fit, pain hypotheses, buying committee roles, value prop angles by persona, industry-tailored messaging variants.
+
+Narrative & Messaging Composer
+
+Generate positioning statements, problem–agitate–solve narratives, objection handling, CTA libraries.
+
+Tone/style presets (formal, conversational, technical) + brand voice kit.
+
+Landing Page Generator
+
+Produces responsive page sections (Hero, Problem, Value, Proof, CTA, Lead Form).
+
+Form builder integration (fields, consent text, webhook destination).
+
+Exports: HTML/CSS bundle + JSON content model; optional hosted microsite.
+
+Email Template Studio
+
+Beautiful, responsive templates (drag‑drop blocks + code view).
+
+Personalization placeholders (contact/account fields) with preview + test send.
+
+Automatic unsubscribe block injection; seed list testing; dark‑mode support.
+
+Script & Asset Sync to Campaigns
+
+One‑click publish to Email Campaign (template + subject variants) or Telemarketing Campaign (call script + qualifying questions).
+
+A/B/n Experimentation
+
+Manage variants (subject lines, hero copy, CTA).
+
+Auto‑allocation & early‑stop rules; report lift metrics back to Content Hub.
+
+Compliance & Brand Governance
+
+Required disclaimers; compliant language packs per region.
+
+Plagiarism scan, copyright checks, brand glossary enforcement.
+
+Approval workflows with roles (Author → Reviewer → Approver → Published).
+
+19.3 Data Model Additions
+
+ContentAsset: id, tenant_id, title, type (pdf|ppt|url|image|html|script), uri, checksum, tags[], created_by, created_at.
+
+ContentAnalysis: asset_id, summary_json, problems[], value_props[], personas[], citations[], risk_flags[], model_version, analyzed_at.
+
+MessageBundle: id, audience_hint (industry/persona), problem, value_prop, proof_points[], cta_text, tone, status (draft|approved|published).
+
+LandingPage: id, bundle_id, sections_json, form_schema, html_export_uri, published_url?.
+
+EmailTemplate: id, bundle_id, html, placeholders[], variants[], approved_by, approved_at.
+
+Experiment: id, scope (email|lp), variants[], allocation, start_at, end_at, winner?.
+
+PublishingLink: { bundle_id | lp_id | email_template_id } ↔ { campaign_id }, with version pinning.
+
+19.4 APIs (Illustrative)
+
+POST /content/assets (upload + virus scan)
+
+POST /content/assets/:id/analyze → ContentAnalysis
+
+POST /content/message-bundles (seed from analysis + client profile)
+
+POST /content/landing-pages/:id/export (HTML/CSS zip)
+
+POST /content/email-templates/:id/publish → campaign_id
+
+GET /content/experiments/:id/results
+
+POST /content/approve (workflow actions)
+
+19.5 AI Stack & Guardrails
+
+Models: Long‑context LLM for analysis/composition; small classifiers for risk & tone; retrieval over uploaded assets with chunked citations.
+
+Prompts: Structured templates require: audience, problem, value, proof, CTA.
+
+Controls: Max‑quote limits; citation anchors; blocked terms library; region‑specific policy packs; reversible edits with full diff history.
+
+19.6 UX/Flows
+
+Ingest & Analyze → Upload asset → AI summary with citations → Approve.
+
+Compose → Select persona/industry → Generate Message Bundle → Edit → Approve.
+
+Produce Collateral → Generate Landing Page + Email Template → Preview (desktop/mobile) → Approve.
+
+Publish → Link to Campaign(s) with version locking.
+
+Measure & Learn → A/B results sync → Recommendations for next iteration.
+
+19.7 Integration Points
+
+Client Portal Orders: attach Message Bundle and assets to order; internal team reviews before campaign creation (bridge model).
+
+Campaigns Module: templates and scripts published with a single click; variants tracked per campaign.
+
+Reporting: attribute engagement (opens/clicks/conversions) back to Message Bundle and Variant.
+
+19.8 Security & Compliance
+
+PII redaction on ingestion; virus scan; content fingerprinting.
+
+RBAC on assets and drafts; tenant‑scoped storage in S3.
+
+Audit log for AI generations, edits, approvals, and publishes.
+
+License metadata for third‑party content; blocklist for copyrighted phrases.
+
+19.9 Acceptance Criteria
+
+Upload & analyze a PDF; generate Message Bundle with problems/value/CTA and citations.
+
+Produce a responsive LP + Email Template; both pass brand & compliance checks.
+
+Publish to Email & Telemarketing Campaigns; version pinned.
+
+Run an A/B test; view lift report tied to the originating Message Bundle.
+
+All actions are audit‑logged; tenant isolation enforced.
+
+Outcome: A scalable, governed AI Messaging Studio that turns raw client assets and profiles into production‑ready collateral, seamlessly connected to your campaign execution engine and analytics.

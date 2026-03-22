@@ -1,0 +1,32 @@
+BULK ENRICHMENT] Processing 2616 contacts with OK emails
+[BULK ENRICHMENT] Skipping contact 9fbb50d4-2a08-4ca1-a543-289a56e4dccf - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 9131b962-0d95-4783-8ca8-82a98f3c62f5 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact f28d7329-f2c3-4ad4-b958-29e1f65d415f - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 14acde62-5d16-445c-b9f2-454ba2db8805 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 1305e579-f9c1-4b9d-8a97-6932b83902be - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 2902824b-095d-4776-b265-eb857b3f8d4b - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact f7693628-0a19-4c3d-87ba-273064d5afd5 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 6f02dc98-c871-471a-91fb-aafd62d60788 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact cec7eee2-71c7-4235-b521-60da12a3b114 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 42995174-a4c6-4e4e-bb7e-36a96aa8d3a2 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 365d97e5-2c08-4765-87e9-0f26e3d9d960 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact d26fe873-699a-459d-a4f2-32e0f8ec2e15 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 6ce98162-2576-4751-898d-211cdea67955 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact c7d085c9-e061-432f-b5ea-2648d86cb3af - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact e203825f-4253-4974-be5e-2b9d19850dde - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact b56bb01f-8095-4eee-a9ca-5cc93993ae78 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact b1f25cd3-0e38-4843-9344-00ffe522a9cf - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 2ec67804-ed2f-4db8-b69e-57490200f6da - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact bbd7c2b4-8d4d-4e2b-a04c-2aa1dd21344d - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 140631ea-b5c7-4ea5-9838-da7491e48eed - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 693bc5bb-552f-4ea0-817a-104c87b81e69 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 324e758a-53d3-4fd8-8223-fe4c1884bc2d - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact fa0f8c78-9ccd-4991-a156-79dca5a33a79 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 7fb23312-c915-4fbd-9e90-83388ebdb26e - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 95e60c3b-ad94-40ea-afce-3a85416a6fb8 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 23666caa-fad4-4732-88f3-57501458435d - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 1b379a87-edc1-40af-9549-ece1f26267fc - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 8406a5b1-033c-4273-9445-145fa5f7427c - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 069087f5-484d-46b4-9adc-614a9a3c7bb3 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact 672a764d-b951-4519-8648-64b059ad1655 - email status is unknown, not valid or safe_to_send
+[BULK ENRICHMENT] Skipping contact a1b9c750-0ec2-4b68-90f2-f1fb73cbe14e - email sta

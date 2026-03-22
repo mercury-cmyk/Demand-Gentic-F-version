@@ -1,7 +1,7 @@
 /**
  * OrderContextPanel
  * Collapsible panel for adding context files and URLs to an order
- * Used within the AgentX chat interface for order creation
+ * Used within the AgentC chat interface for order creation
  */
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';

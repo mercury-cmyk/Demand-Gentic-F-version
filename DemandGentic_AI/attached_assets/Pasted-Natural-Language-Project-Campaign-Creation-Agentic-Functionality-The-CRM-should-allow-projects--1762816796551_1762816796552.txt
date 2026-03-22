@@ -1,0 +1,114 @@
+Natural Language Project & Campaign Creation (Agentic Functionality)
+
+The CRM should allow projects and campaigns to be created automatically using natural language.
+This means that an admin, team member, or even a client (if given permission) can describe a project or campaign goal in plain English, and the system should intelligently understand the request, extract all necessary details, and create the project draft automatically.
+
+Example of how it should work
+
+Someone can type or say something like:
+
+“Run a 500-lead email and call campaign for ACME in the UK targeting CFOs at mid-sized companies between 200 and 1000 employees. The cost per lead is $120, and it should start next week. Deliver the leads through API and also allow Excel download.”
+
+The system should then:
+
+Understand that this is a new project request.
+
+Identify that there are two campaign channels required: Email and Call.
+
+Recognize the target audience (CFOs at companies in the UK with 200–1000 employees).
+
+Extract commercial details such as CPL ($120) and volume (500 leads).
+
+Detect the delivery method (API + Excel download).
+
+Assign a project start timeline (“next week”).
+
+Automatically create the project draft, filling in all the extracted information.
+
+Prepare the campaigns within that project — one for email and one for call — using the corresponding templates, QA profiles, and configurations.
+
+Set up the lead delivery method and schedule according to the chosen delivery type.
+
+Send it for review if any required field is missing or uncertain.
+
+How the system should behave
+
+The system must be able to interpret natural language text or speech to understand:
+
+The goal of the campaign
+
+The target audience and filtering criteria (by account or contact fields)
+
+The channels involved (email, call, verification, CDQA)
+
+The volume of leads, CPL, and payment terms
+
+The timeline and duration
+
+The delivery method and schedule
+
+Any special notes, assets, or compliance requirements mentioned
+
+Every natural language input should be converted into a structured format internally, matching the same project structure defined in the CRM (client, audience, channels, QA, commercials, delivery, etc.).
+
+The system should only deploy automatically if all the required fields have been confidently understood (like client, channel type, audience, CPL, delivery, and start date).
+If any field is unclear or missing, the system should create the project in draft mode and ask for confirmation or edits.
+
+There must always be a human review step available so that admins can verify what the system has understood before a campaign is activated.
+
+The process should be auditable, meaning the original text request, the interpretation, and the created project must all be logged and traceable.
+
+The system should get smarter over time by learning from corrections and feedback.
+For example, if an admin adjusts the audience, CPL, or delivery method, the system should use that learning to improve future understanding.
+
+Delivery Setup and Customization
+
+While creating a project — along with the audience setup, messaging, and channel configuration — the system should also allow users to define how leads will be delivered once generated.
+This delivery configuration must be part of the project setup and editable at any time by authorized users.
+
+Each project should have a delivery method section where the admin can choose and customize one or more of the following:
+
+Dashboard Delivery: Leads appear directly in the client dashboard for viewing or download.
+
+Excel or CSV Delivery: Leads are exported in Excel or CSV format and can be sent automatically or downloaded manually.
+
+API Delivery: Leads are delivered directly into the client’s system via secure API integration.
+
+Email Delivery: Leads or reports can be sent as attachments or secure download links to authorized recipients.
+
+SFTP or Other Custom Delivery: For clients who use custom servers or secure transfer protocols.
+
+Each delivery setup should include:
+
+Frequency (real-time, daily, weekly, or on-demand)
+
+File format (CSV, XLSX, JSON)
+
+Field mapping configuration (to ensure correct alignment between our system and the client system)
+
+Access permissions or credentials (if API or SFTP is used)
+
+Notifications (who gets notified when delivery occurs)
+
+Audit and error tracking (to ensure no data loss or duplication)
+
+The goal is to make delivery setup as integrated and flexible as the campaign configuration itself, so the admin can finalize everything — audience, messaging, QA, and delivery — from a single project creation workflow.
+
+Quality assurance and safety
+
+The system must ensure compliance (GDPR, TCPA, CCPA) when automatically creating projects.
+
+It must not activate any SMS or call campaign in restricted regions or without explicit consent.
+
+It should use existing suppression lists automatically to avoid duplication or non-compliant targeting.
+
+It should never store or display personally identifiable information (PII) directly in the natural language prompt history.
+
+Delivery credentials and destinations (such as API keys or endpoints) must be stored securely and only visible to authorized users.
+
+Summary of purpose
+
+This feature will make project creation faster, more intuitive, and fully centralized.
+Admins will be able to create entire projects and campaigns using natural language, define audiences, select channels, configure QA rules, and also set up the delivery mechanism — all in one continuous flow.
+
+Over time, it will evolve into an agentic, self-configuring system that understands intent, interprets requirements, and deploys complete, compliant, and structured B2B campaigns automatically.

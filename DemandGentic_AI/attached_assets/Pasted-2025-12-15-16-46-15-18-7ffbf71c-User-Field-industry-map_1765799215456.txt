@@ -1,0 +1,132 @@
+2025-12-15 16:46:15.18
+7ffbf71c
+User
+Field industry (mapped to industry) not found in table
+2025-12-15 16:46:22.08
+7ffbf71c
+User
+11:46:22 AM [express] POST /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/filter-count 20…
+2025-12-15 16:46:22.85
+7ffbf71c
+User
+[AUTH] Authentication successful for user: ae3698b7-9de5-4124-b6e0-f635d5dc5099
+2025-12-15 16:46:22.85
+7ffbf71c
+User
+[AUTH] requireAuth called for: POST /campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/filter-count
+2025-12-15 16:46:22.85
+7ffbf71c
+User
+[AUTH] Authorization header present: true
+2025-12-15 16:46:24.57
+7ffbf71c
+User
+Field industry (mapped to industry) not found in table
+2025-12-15 16:46:28.52
+7ffbf71c
+User
+[AUTH] requireAuth called for: POST /campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/filter-count
+2025-12-15 16:46:28.52
+7ffbf71c
+User
+[AUTH] Authorization header present: true
+2025-12-15 16:46:28.52
+7ffbf71c
+User
+[AUTH] Authentication successful for user: ae3698b7-9de5-4124-b6e0-f635d5dc5099
+2025-12-15 16:46:29.54
+7ffbf71c
+User
+Field industry (mapped to industry) not found in table
+2025-12-15 16:46:32.16
+7ffbf71c
+User
+11:46:32 AM [express] POST /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/filter-count 20…
+2025-12-15 16:46:32.66
+7ffbf71c
+User
+[Worker Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+2025-12-15 16:46:33.57
+7ffbf71c
+User
+[AUTH] requireAuth called for: POST /campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/filter-count
+2025-12-15 16:46:33.57
+7ffbf71c
+User
+[AUTH] Authentication successful for user: ae3698b7-9de5-4124-b6e0-f635d5dc5099
+2025-12-15 16:46:33.57
+7ffbf71c
+User
+[AUTH] Authorization header present: true
+2025-12-15 16:46:35.17
+7ffbf71c
+User
+Field industry (mapped to industry) not found in table
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+[AUTH] requireAuth called for: POST /api/calls/disposition
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+[AUTH] Authorization header present: true
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+disposition: 'dnc-request',
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+}
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+[AUTH] Authentication successful for user: a073ce28-b6df-4e84-aa5b-7654be8cb529
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+[DISPOSITION] Received disposition request: {
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+campaignId: '70434f6e-3ab6-49e4-acf7-350b81f60ea2',
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+queueItemId: '5b7a31cd-f627-447a-868c-11bc53ddfe7e'
+2025-12-15 16:46:36.95
+7ffbf71c
+User
+contactId: 'dcd3fc11-b4c6-4eef-b2d4-63f6005c6809',
+2025-12-15 16:46:37.12
+7ffbf71c
+User
+11:46:37 AM [express] POST /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/filter-count 20…
+2025-12-15 16:46:37.19
+7ffbf71c
+User
+[DISPOSITION] DNC request for contact dcd3fc11-b4c6-4eef-b2d4-63f6005c6809
+2025-12-15 16:46:37.19
+7ffbf71c
+User
+[DISPOSITION] Company: Bradford Bolt & NUT Co. Limited
+2025-12-15 16:46:37.19
+7ffbf71c
+User
+[DISPOSITION] Contact: Sam Lerman (sam@bbn.co.uk)
+2025-12-15 16:46:37.22
+7ffbf71c
+User
+[DISPOSITION] ✅ Contact dcd3fc11-b4c6-4eef-b2d4-63f6005c6809 added to global DNC - will NEVER be called again
+2025-12-15 16:46:37.25
+7ffbf71c
+User
+[DISPOSITION] Final disposition "dnc-request" - removing contact dcd3fc11-b4c6-4eef-b2d4-63f6005c6809 from ALL queues in campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-12-15 16:46:37.28
+7ffbf71c
+User
+[DISPOSITION] ✅ Successfully removed from 4 agents' queues
+2025-12-15 16:46:37.28
+7ffbf71c
+User
+11:46:37 AM [express] POST /api/calls/disposition 201 in 328ms :: {"id":

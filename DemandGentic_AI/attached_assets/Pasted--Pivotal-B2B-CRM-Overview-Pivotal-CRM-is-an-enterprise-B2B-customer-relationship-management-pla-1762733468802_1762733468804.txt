@@ -1,0 +1,85 @@
+# Pivotal B2B CRM
+
+## Overview
+Pivotal CRM is an enterprise B2B customer relationship management platform designed to optimize sales and marketing through Account-Based Marketing (ABM) and multi-channel campaign management (Email & Telemarketing). It features advanced lead qualification, robust compliance (DNC/Unsubscribe), comprehensive lead QA workflows, and a "bridge model" linking campaigns to orders via a client portal. The platform aims to drive sales growth and operational efficiency for B2B enterprises by providing a comprehensive, intelligent solution for customer engagement.
+
+## User Preferences
+- Clean, minimal enterprise design
+- Professional blue color scheme (trust, reliability)
+- Dense information display with clear hierarchy
+- Fast, keyboard-friendly workflows
+- Comprehensive but not overwhelming
+
+## System Architecture
+The system utilizes a modern web stack: **React 18 + Vite, TypeScript, TailwindCSS, and shadcn/ui** for the frontend, and **Node.js + Express + TypeScript** with **PostgreSQL (Neon) via Drizzle ORM** for the backend. JWT authentication provides role-based access control.
+
+**Production Stability & Performance Optimizations (3M+ Contact Scale):**
+The architecture is optimized for 3+ million contacts with multi-tier connection pooling, advanced retry logic, and high-throughput CSV imports. Key optimizations include: dual-pool architecture for database connections, 6 concurrent BullMQ workers for CSV imports with rate limiting and streaming backpressure, production-grade composite and partial database indexes, and robust circuit breaker & health monitoring for critical services. All asynchronous operations employ thorough timeout hardening and proper timer clearing to prevent false failures.
+
+**Background Jobs System:**
+- **AI Quality Jobs (Continuous):** Transcription and AI Analysis for lead assessment.
+- **System Maintenance:** Lock Sweeper.
+- **On-Demand Jobs (API Triggered):** Email Validation, AI Enrichment, M365 Email Sync.
+
+**UI/UX Design:**
+- **Color Scheme:** Primary Royal Blue with Teal accent, adaptive light/dark modes.
+- **Typography:** Inter font for text, JetBrains Mono for data.
+- **Components:** shadcn/ui for consistent enterprise components, including role-based sidebar navigation, global search, data tables, and step wizards.
+- **Key Features:** Advanced filtering, dual-view architecture for accounts with state preservation, enterprise-standard navigation, and mobile-first responsive design.
+
+**Technical Implementations & Features:**
+- **AI-Powered Quality Assurance:** Integration with AssemblyAI and OpenAI (via Replit AI) for lead qualification, account enrichment, and pipeline insights, including a bulk re-evaluation feature.
+- **LinkedIn Profile Image Verification:** Gemini 2.0 Flash Vision AI-powered verification of LinkedIn screenshots during lead qualification. Features S3-based image storage, async BullMQ verification pipeline, fuzzy name/company matching (Levenshtein distance), confidence scoring (name≥80%, company≥70%), and automated flagging for QA review. Verification statuses: ai_verified, flagged_review, rejected. Includes graceful Redis degradation.
+- **Companies House UK API Integration:** Automated company validation system with account-level caching (365-day TTL for successful validations, 24-hour TTL for API errors), campaign-level bulk validation with deduplication, force refresh support, and comprehensive QA data enrichment. Validation data stored at account level and mirrored to lead.qaData for UI backward compatibility.
+- **AI-Driven Custom Qualification System:** Campaign managers define natural language qualification criteria, which are parsed into structured AI prompts for dynamic evaluation and custom field extraction from call transcripts. Features include caching for performance, robust cache invalidation, and response normalization.
+- **Telnyx Recording Sync:** Manual and batch recording sync with dual-strategy search, time-based matching, automatic transcription triggering, and production-grade error handling.
+- **Data Management:** Unified CSV Import/Export with deduplication, dynamic custom fields, company name normalization, RBAC-enforced filter visibility, and smart CSV mapping templates that auto-apply successful configurations.
+- **Compliance & Suppression:** Multi-tier suppression for emails (unsubscribe) and phones (Do Not Call) with API support, auto-suppression based on lead disposition, and consolidated voicemail disposition handling.
+- **Campaign Management:** Email campaigns (HTML editor, personalization) and Telemarketing campaigns with dual dialer strategy, call script assignment, Telnyx integration, and intelligent retry scheduling.
+- **Lead QA Workflow:** Multi-stage workflow with checklist validation, integrated recording sync, automatic asynchronous email validation, and bulk re-evaluation of AI analysis.
+- **Account-Level Email Deliverability Scoring:** Real-time weighted scoring system aggregating contact email validation statuses, displayed prominently with color-coded badges.
+- **Client Portal (Bridge Model):** Configurable webhooks for clients to specify campaign order requirements.
+- **Lead Delivery Template System:** Automatic webhook-based lead delivery upon QA approval with configurable export templates, retry logic (3 attempts with exponential backoff 1s/2s/4s), support for multiple authentication methods (API key, Bearer token, Basic auth), and comprehensive delivery attempt logging. Only retries on HTTP 5xx, 429, and network errors; fails fast on 4xx errors.
+- **Data Verification (DV) Module:** Project-based workflow for data cleaning and verification.
+- **API-Free Email Validation:** Zero-cost, 10-status email validation system with DNS-only validation that runs asynchronously. Implemented `verifyEmailsBulk()` wrapper function for batch email validation with progress tracking and delay control (200ms between requests for rate limiting).
+- **Eligible-First Workflow:** Verification campaign eligibility checks execute first, marking passing contacts as "Eligible" immediately, with email validation running separately in the background for data quality.
+- **Smart Export:** Client-customizable CSV export with data quality assessment and template management.
+- **Intelligent Data Selection:** "Best Phone & Best Address" selection with strict country matching rules.
+- **Lead Cap Enforcement:** Per-account lead cap system with multi-factor priority scoring.
+- **Submission Tracking:** Production-grade tracking of exported contacts with 2-year auto-exclusion.
+- **Enhanced Pipeline Management System:** Multi-view dashboard with Kanban, List, and Forecast views, plus real-time pipeline metrics and safe amount parsing.
+- **Flexible Pipeline Import:** CSV import with automatic column detection and mapping supporting multiple formats.
+- **Microsoft 365 Integration:** PKCE-secured OAuth for email sync, automated sequences, and tracking with AES-256 encrypted token storage.
+- **M365 Email Sync Engine:** On-demand email sync via Graph API, storing GDPR-compliant metadata only.
+- **M365 Email Inbox & Composer:** User-friendly inbox with 3-column layout, search, filters, and full-featured email composer using Microsoft Graph API.
+- **Email Sequence Engine:** Automated multi-step email campaigns with BullMQ-powered background processing for personalized sending and engagement tracking.
+- **Email Template Library:** Reusable templates with personalization tokens, HTML editor, and plain text fallback.
+- **Security & User Management:** JWT, bcrypt, multi-role RBAC with server-side ownership enforcement.
+- **Call Reporting System:** Comprehensive analytics for telemarketing campaigns.
+- **Queue Management:** Advanced agent queue system with intelligent first-pass priority logic and intelligent retry scheduling.
+- **Email Infrastructure Settings:** Domain authentication, tracking domains, sender profiles.
+- **S3-First File Architecture:** Direct-to-S3 uploads, streaming CSV processing, presigned URLs.
+- **BullMQ Job Queue System:** Redis-backed asynchronous job processing.
+- **Ultra-Fast Contact Import (PostgreSQL COPY):** Production-optimized CSV import with PostgreSQL COPY command achieving 10-20x performance improvement (~10,000-20,000 rows/sec vs. ~1,000-2,000 rows/sec legacy). Features include: single atomic transaction for accounts + contacts, GZIP decompression for S3 compressed files (60-70% faster transfer), smart camelCase→snake_case field mapping handling acronyms (QA, HQ, ABM), dynamic account field preservation (50+ fields), 10k-row batches with 6 concurrent workers, xmax-based insert/update detection, stream backpressure handling, and backward compatibility via `useOptimizedCopy` flag. Circuit breaker ensures graceful degradation if worker pool becomes unhealthy.
+
+## External Dependencies
+- **Database:** Neon (PostgreSQL)
+- **Object Storage:** AWS S3 / Cloudflare R2 / Wasabi / MinIO (S3-compatible)
+- **Cache & Queue:** Redis (Upstash)
+- **Frontend Framework:** React 18
+- **UI Component Library:** shadcn/ui
+- **Routing:** Wouter
+- **Data Fetching:** TanStack Query
+- **Form Management:** React Hook Form
+- **Charting:** Recharts
+- **Animations:** Framer Motion
+- **Authentication:** JWT
+- **Password Hashing:** bcrypt
+- **Telephony Integration:** Telnyx WebRTC
+- **AI Services:** AssemblyAI, Replit AI (OpenAI-compatible), Gemini AI (Google, via Replit Integrations)
+- **Email Service Providers:** SendGrid, AWS SES, Mailgun
+- **Microsoft 365 Integration:** OAuth 2.0 with PKCE, Microsoft Graph API
+- **Job Queue:** BullMQ
+- **Domain Parsing:** tldts
+- **Web Search API (Fallback):** Google Programmable Search Engine
+- **Companies House UK API:** Company validation and profile retrieval (HTTP Basic Auth)

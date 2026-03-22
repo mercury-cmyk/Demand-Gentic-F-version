@@ -1,0 +1,208 @@
+[dotenv@17.2.3] injecting env (76) from .env -- tip: ≡ƒöæ add access controls to secrets: https://dotenvx.com/ops
+[DB] Development mode - using DATABASE_URL from environment
+[DB] Database endpoint: ep-mute-sky-ahoyd10z-pooler
+[DB] Using Neon connection pooler: YES (already configured)
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+======================================================================
+BATCH SCORING: 390 unscored leads | Batch size: 100 | Workers: 5
+======================================================================
+
+--- Batch 1: 100 leads (390 remaining) ---
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[4/390] Mike Adams | O:35 CQ:23 below 70
+[3/390] Jon Brown | O:65 CQ:51 below 70
+[1/390] Clark Frost | O:35 CQ:57 below 70
+[5/390] Ashley Ajgaybee | O:0 CQ:0 below 70
+[2/390] John Coulter | O:82 CQ:91 Γ£ô QUALIFIES ΓåÆ QA
+[8/390] Charlie Ralph | O:100 CQ:0 below 70
+[7/390] Leo Flores | O:82 CQ:88 Γ£ô QUALIFIES ΓåÆ QA
+[10/390] Shawn Christie | O:100 CQ:0 below 70
+[11/390] Robert Dunlap | O:95 CQ:72 Γ£ô QUALIFIES ΓåÆ QA
+[9/390] Kolawole Akeredolu | O:45 CQ:35 below 70
+[12/390] Marcelo Esparza | O:25 CQ:27 below 70
+[13/390] Jordan Radewan | O:95 CQ:71 Γ£ô QUALIFIES ΓåÆ QA
+node.exe : [VertexAI] Deep Think JSON parse failed, falling back to 
+generateJSON: 
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([VertexAI] Deep... generateJSON:  
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[VertexAI] Initialized client for project: pivotalb2b-2026, location: us-central1
+[14/390] Abdirahman Abdi | O:15 CQ:13 below 70
+[15/390] Ray Sarka | O:0 CQ:0 below 70
+[6/390] William Bancroft | O:20 CQ:26 below 70
+[17/390] Jacob Montanez | O:100 CQ:0 below 70
+[16/390] Matthew Kester | O:10 CQ:34 below 70
+[21/390] Rohan Lean | O:15 CQ:7 below 70
+[18/390] William Michot | O:100 CQ:40 below 70
+[20/390] Mithila Wegapitiya | O:92 CQ:79 Γ£ô QUALIFIES ΓåÆ QA
+[19/390] Colin Yuhas | O:15 CQ:5 below 70
+[22/390] Roma Estoril | O:0 CQ:0 below 70
+[23/390] Alex King | O:88 CQ:60 below 70
+[25/390] Olga Pukhalskaya | O:92 CQ:70 Γ£ô QUALIFIES ΓåÆ QA
+[26/390] Nurana Syeda | O:25 CQ:30 below 70
+[24/390] Indraniel Aaikat | O:35 CQ:34 below 70
+[27/390] Jon Callander | O:78 CQ:69 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1234ms...
+[VertexAI] Rate limited (attempt 1/4), retrying in 1494ms...
+[28/390] Keith Haviland | O:15 CQ:17 below 70
+[VertexAI] Rate limited (attempt 2/4), retrying in 2255ms...
+[29/390] Stephen Edwards | O:45 CQ:39 below 70
+[31/390] Mark Bailey | O:35 CQ:36 below 70
+[30/390] Sonnet Sunil | O:65 CQ:52 below 70
+[33/390] Tom Mc Nally | O:15 CQ:15 below 70
+[32/390] Eddie Grant | O:10 CQ:9 below 70
+[35/390] John Warwick | O:10 CQ:7 below 70
+[34/390] Hafiz Mughal | O:15 CQ:18 below 70
+[37/390] Shaun Thorp | O:88 CQ:74 Γ£ô QUALIFIES ΓåÆ QA
+[36/390] Peter Kirby | O:35 CQ:22 below 70
+[38/390] Daniel Cranmer | O:15 CQ:8 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1266ms...
+[39/390] Bradley Riley | O:92 CQ:71 Γ£ô QUALIFIES ΓåÆ QA
+[41/390] Jackie Chen | O:88 CQ:79 Γ£ô QUALIFIES ΓåÆ QA
+[42/390] Jalen Davidson | O:95 CQ:93 Γ£ô QUALIFIES ΓåÆ QA
+[43/390] Ani Casillas | O:25 CQ:19 below 70
+[44/390] Ellen Wright | O:65 CQ:28 below 70
+[40/390] Brano Lukic | O:45 CQ:54 below 70
+[45/390] Stephanie Pohlman | O:88 CQ:86 Γ£ô QUALIFIES ΓåÆ QA
+[46/390] Ann Moore | O:95 CQ:64 below 70
+[48/390] Sarah Walder-Davis | O:95 CQ:68 below 70
+[47/390] Andy Green | O:25 CQ:15 below 70
+[49/390] Greg Collins | O:15 CQ:8 below 70
+[51/390] Chris Metcalfe | O:35 CQ:47 below 70
+[52/390] Simon Smith | O:95 CQ:40 below 70
+[50/390] Stef Lim | O:10 CQ:5 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1267ms...
+[53/390] Noel Hamill | O:25 CQ:34 below 70
+[54/390] Ritesh Chakraborty | O:65 CQ:52 below 70
+[56/390] Paul Thomas | O:15 CQ:17 below 70
+[57/390] Amanda Lawrence | O:35 CQ:25 below 70
+[55/390] Nicholas Bryan | O:88 CQ:86 Γ£ô QUALIFIES ΓåÆ QA
+[58/390] Jamie Revell | O:35 CQ:24 below 70
+[59/390] Mark Eynon | O:35 CQ:33 below 70
+[60/390] Heidi Scott | O:25 CQ:19 below 70
+[62/390] Ken Clayton | O:35 CQ:18 below 70
+[63/390] Topper Power | O:35 CQ:25 below 70
+[61/390] Arron Fellows | O:65 CQ:65 below 70
+[65/390] Alessandra Mengoni | O:72 CQ:74 Γ£ô QUALIFIES ΓåÆ QA
+[66/390] Max Gispert | O:90 CQ:84 Γ£ô QUALIFIES ΓåÆ QA
+[64/390] Xabier Eguskizaga | O:15 CQ:9 below 70
+[67/390] Fouad Sindi | O:35 CQ:35 below 70
+[70/390] Syed Hassan | O:35 CQ:20 below 70
+[68/390] Tariq Ahmed | O:15 CQ:13 below 70
+[69/390] Monica Chopra | O:65 CQ:64 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1323ms...
+[71/390] Mano Cherian | O:35 CQ:28 below 70
+[72/390] Corey Monk | O:65 CQ:63 below 70
+[73/390] Maud Rocher | O:10 CQ:9 below 70
+[74/390] Diana Minglis | O:35 CQ:24 below 70
+[75/390] Kon Maragelis | O:15 CQ:12 below 70
+[76/390] Michele Dunn | O:15 CQ:11 below 70
+[77/390] Gary Tuohy | O:85 CQ:53 below 70
+[78/390] Jerome Preese | O:35 CQ:22 below 70
+[80/390] Richard Francisco | O:72 CQ:58 below 70
+[82/390] Cory White | O:15 CQ:19 below 70
+[79/390] Philip Kilian | O:15 CQ:17 below 70
+[81/390] David Adewumi | O:32 CQ:28 below 70
+[84/390] Manny Castaneda | O:5 CQ:6 below 70
+[83/390] Herb Kaaihue | O:95 CQ:71 Γ£ô QUALIFIES ΓåÆ QA
+[87/390] Antony Lyons | O:10 CQ:9 below 70
+[86/390] Rohit Khullar | O:35 CQ:23 below 70
+[88/390] Bob Crook | O:35 CQ:28 below 70
+[90/390] Chris Brodka | O:15 CQ:20 below 70
+[85/390] Mike Province | O:88 CQ:94 Γ£ô QUALIFIES ΓåÆ QA
+[89/390] Nikolin Petro | O:72 CQ:51 below 70
+[91/390] Sean Henderson | O:45 CQ:37 below 70
+[92/390] Denton Lawson | O:78 CQ:73 Γ£ô QUALIFIES ΓåÆ QA
+[93/390] Tyrone Powell | O:95 CQ:92 Γ£ô QUALIFIES ΓåÆ QA
+[95/390] Rakesh Patel | O:38 CQ:44 below 70
+[96/390] Sherian Fernandes | O:15 CQ:23 below 70
+[97/390] Gilbert Mudoti | O:35 CQ:35 below 70
+[94/390] William Darby | O:35 CQ:36 below 70
+[98/390] Andrew Jones | O:68 CQ:54 below 70
+[100/390] Stephanie Clinkard | O:15 CQ:12 below 70
+[99/390] Nisha Mallya | O:35 CQ:37 below 70
+  Batch 1 done: 100 scored, 18 qualify, 0 errors
+
+--- Batch 2: 100 leads (290 remaining) ---
+[101/390] Clark Frost | O:82 CQ:85 Γ£ô QUALIFIES ΓåÆ QA
+[103/390] Jon Brown | O:85 CQ:78 Γ£ô QUALIFIES ΓåÆ QA
+[104/390] Mike Adams | O:45 CQ:23 below 70
+[105/390] Ashley Ajgaybee | O:10 CQ:0 below 70
+[102/390] John Coulter | O:82 CQ:88 Γ£ô QUALIFIES ΓåÆ QA
+[108/390] Charlie Ralph | O:100 CQ:0 below 70
+[109/390] Kolawole Akeredolu | O:35 CQ:28 below 70
+[106/390] William Bancroft | O:85 CQ:23 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1123ms...
+[110/390] Shawn Christie | O:100 CQ:0 below 70
+[107/390] Leo Flores | O:82 CQ:89 Γ£ô QUALIFIES ΓåÆ QA
+[112/390] Mithila Wegapitiya | O:88 CQ:78 Γ£ô QUALIFIES ΓåÆ QA
+[111/390] Robert Dunlap | O:95 CQ:58 below 70
+[114/390] Jon Callander | O:65 CQ:57 below 70
+[113/390] Alex King | O:65 CQ:51 below 70
+[115/390] Stephen Edwards | O:75 CQ:56 below 70
+[116/390] Sonnet Sunil | O:78 CQ:66 below 70
+[118/390] Eddie Grant | O:5 CQ:8 below 70
+[117/390] Mark Bailey | O:62 CQ:50 below 70
+[119/390] Tom Mc Nally | O:10 CQ:13 below 70
+[121/390] John Warwick | O:10 CQ:2 below 70
+[120/390] Hafiz Mughal | O:25 CQ:21 below 70
+[124/390] Daniel Cranmer | O:15 CQ:13 below 70
+[123/390] Shaun Thorp | O:42 CQ:34 below 70
+[127/390] Jackie Chen | O:92 CQ:81 Γ£ô QUALIFIES ΓåÆ QA
+[122/390] Peter Kirby | O:35 CQ:26 below 70
+[125/390] Bradley Riley | O:92 CQ:57 below 70
+[126/390] Brano Lukic | O:42 CQ:48 below 70
+[130/390] Ellen Wright | O:45 CQ:20 below 70
+[131/390] Stephanie Pohlman | O:72 CQ:84 Γ£ô QUALIFIES ΓåÆ QA
+[129/390] Ani Casillas | O:25 CQ:19 below 70
+[132/390] Ann Moore | O:100 CQ:56 below 70
+[128/390] Jalen Davidson | O:95 CQ:97 Γ£ô QUALIFIES ΓåÆ QA
+[134/390] Sarah Walder-Davis | O:100 CQ:50 below 70
+[135/390] Greg Collins | O:35 CQ:19 below 70
+[133/390] Andy Green | O:15 CQ:13 below 70
+[136/390] Stef Lim | O:10 CQ:7 below 70
+[137/390] Chris Metcalfe | O:25 CQ:37 below 70
+[139/390] Noel Hamill | O:35 CQ:34 below 70
+[141/390] Nicholas Bryan | O:45 CQ:50 below 70
+[140/390] Ritesh Chakraborty | O:45 CQ:38 below 70
+[138/390] Simon Smith | O:95 CQ:41 below 70
+[143/390] Amanda Lawrence | O:35 CQ:23 below 70
+[142/390] Paul Thomas | O:15 CQ:13 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1139ms...
+[144/390] Jamie Revell | O:35 CQ:22 below 70
+[145/390] Mark Eynon | O:45 CQ:42 below 70
+[146/390] Heidi Scott | O:15 CQ:13 below 70
+[149/390] Topper Power | O:35 CQ:24 below 70
+[148/390] Ken Clayton | O:35 CQ:22 below 70
+[150/390] Xabier Eguskizaga | O:15 CQ:13 below 70
+[152/390] Max Gispert | O:78 CQ:70 Γ£ô QUALIFIES ΓåÆ QA
+[147/390] Arron Fellows | O:42 CQ:49 below 70
+[151/390] Alessandra Mengoni | O:92 CQ:93 Γ£ô QUALIFIES ΓåÆ QA
+[154/390] Tariq Ahmed | O:15 CQ:13 below 70
+[155/390] Monica Chopra | O:45 CQ:46 below 70
+[156/390] Syed Hassan | O:15 CQ:9 below 70
+[157/390] Mano Cherian | O:62 CQ:58 below 70
+[153/390] Fouad Sindi | O:30 CQ:34 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1441ms...
+[158/390] Corey Monk | O:45 CQ:51 below 70
+[VertexAI] Rate limited (attempt 1/4), retrying in 1103ms...
+[160/390] Diana Minglis | O:35 CQ:22 below 70
+[162/390] Michele Dunn | O:10 CQ:12 below 70
+[163/390] Gary Tuohy | O:95 CQ:67 below 70
+[161/390] Kon Maragelis | O:10 CQ:8 below 70
+[159/390] Maud Rocher | O:15 CQ:13 below 70
+[165/390] Philip Kilian | O:15 CQ:16 below 70
+[164/390] Jerome Preese | O:35 CQ:26 below 70
+[166/390] Richard Francisco | O:72 CQ:59 below 70
+[167/390] David Adewumi | O:25 CQ:26 below 70
+[168/390] Cory White | O:15 CQ:13 below 70
+[170/390] Manny Castaneda | O:5 CQ:4 below 70
+[169/390] Herb Kaaihue | O:95 CQ:77 Γ£ô QUALIFIES ΓåÆ QA
+[172/390] Rohit Khullar | O:35 CQ:30 below 70

@@ -1,0 +1,360 @@
+[dotenv@17.2.3] injecting env (76) from .env -- tip: ≡ƒôí add observability to secrets: https://dotenvx.com/ops
+[DB] Development mode - using DATABASE_URL from environment
+[DB] Database endpoint: ep-mute-sky-ahoyd10z-pooler
+[DB] Using Neon connection pooler: YES (already configured)
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+======================================================================
+CONCURRENT BATCH SCORING: 138 unscored leads (5 workers)
+======================================================================
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 5, Idle: 1, Waiting: 0
+[2/138] Simon Smith | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[3/138] Noel Hamill | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[5/138] Topper Power | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[1/138] Stef Lim | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[4/138] Ritesh Chakraborty | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[3/138] Noel Hamill | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[1/138] Stef Lim | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[5/138] Topper Power | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[2/138] Simon Smith | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[4/138] Ritesh Chakraborty | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[3/138] Noel Hamill | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[2/138] Simon Smith | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[5/138] Topper Power | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[1/138] Stef Lim | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[4/138] Ritesh Chakraborty | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[7/138] Alessandra Mengoni | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[6/138] Xabier Eguskizaga | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[8/138] Mano Cherian | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[9/138] Corey Monk | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[10/138] Maud Rocher | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[7/138] Alessandra Mengoni | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[8/138] Mano Cherian | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[6/138] Xabier Eguskizaga | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[10/138] Maud Rocher | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[7/138] Alessandra Mengoni | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[9/138] Corey Monk | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[6/138] Xabier Eguskizaga | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[8/138] Mano Cherian | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[9/138] Corey Monk | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[13/138] Michele Dunn | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[12/138] Kon Maragelis | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[10/138] Maud Rocher | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+node.exe : [VertexAI] Deep Think JSON parse failed, falling back to 
+generateJSON: {
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([VertexAI] Deep...generateJSON: { 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  "overallScore": 35,
+  "summary": "The interaction was heavily impacted by technical latency and 
+audio connectivity issues, resulting in a disjointed opening sequence where 
+the agent and contact sp
+[VertexAI] Initialized client for project: pivotalb2b-2026, location: us-central1
+[11/138] Diana Minglis | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[14/138] Gary Tuohy | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[13/138] Michele Dunn | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[12/138] Kon Maragelis | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[15/138] Jerome Preese | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[11/138] Diana Minglis | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[14/138] Gary Tuohy | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[13/138] Michele Dunn | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[12/138] Kon Maragelis | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[VertexAI] Rate limited (attempt 1/4), retrying in 1148ms...
+[15/138] Jerome Preese | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[16/138] Pratik Rohra | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[11/138] Diana Minglis | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[14/138] Gary Tuohy | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[17/138] Raimund Martin | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[15/138] Jerome Preese | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[18/138] Arun Shenoy | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[16/138] Pratik Rohra | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[19/138] Brian Eastwood | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[17/138] Raimund Martin | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[20/138] Lucas Thomas | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[16/138] Pratik Rohra | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[19/138] Brian Eastwood | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[20/138] Lucas Thomas | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[18/138] Arun Shenoy | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[17/138] Raimund Martin | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[21/138] Mei Low | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[18/138] Arun Shenoy | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[19/138] Brian Eastwood | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[20/138] Lucas Thomas | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[22/138] Lizzie Babarczy | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[21/138] Mei Low | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[23/138] Suzanne Maybury | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[24/138] Meg Wiseman | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[25/138] Kim Chang | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[21/138] Mei Low | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[22/138] Lizzie Babarczy | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[24/138] Meg Wiseman | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[23/138] Suzanne Maybury | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[25/138] Kim Chang | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[22/138] Lizzie Babarczy | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[26/138] Kenny T | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[24/138] Meg Wiseman | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[23/138] Suzanne Maybury | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[25/138] Kim Chang | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[26/138] Kenny T | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[27/138] Rie Kubo | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[28/138] Andrea Story | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[29/138] Sue Baker | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[30/138] Adina Muguti | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[26/138] Kenny T | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[28/138] Andrea Story | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[27/138] Rie Kubo | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[29/138] Sue Baker | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[30/138] Adina Muguti | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[31/138] Sebastian Geldner | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[28/138] Andrea Story | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[27/138] Rie Kubo | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[29/138] Sue Baker | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[30/138] Adina Muguti | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[33/138] Amit Kumar | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[31/138] Sebastian Geldner | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[32/138] Numaan Riaz | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[34/138] Ragunathan A | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[35/138] Siddhesh Sawant | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[33/138] Amit Kumar | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[32/138] Numaan Riaz | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[31/138] Sebastian Geldner | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[34/138] Ragunathan A | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[35/138] Siddhesh Sawant | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[33/138] Amit Kumar | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 10,
+  "summary": "The interaction failed to progress past the opening stage due to 
+severe technical logic loops. The agent repeatedly requested identity 
+confirmation and audio chec
+[36/138] Shivam Mishra | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[32/138] Numaan Riaz | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[37/138] Dario Venturini | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[34/138] Ragunathan A | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[35/138] Siddhesh Sawant | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[37/138] Dario Venturini | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[39/138] James Harvey-Fiander | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[38/138] Lee Davis | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[40/138] Masafumi Usuda | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[36/138] Shivam Mishra | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[37/138] Dario Venturini | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[40/138] Masafumi Usuda | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[38/138] Lee Davis | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[39/138] James Harvey-Fiander | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[36/138] Shivam Mishra | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[41/138] Ryan Thompson | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[38/138] Lee Davis | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[40/138] Masafumi Usuda | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[42/138] Alex Grant | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[39/138] James Harvey-Fiander | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[41/138] Ryan Thompson | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[43/138] Takayuki Murakami | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[44/138] Sheryl Woo | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[45/138] Amit Mathad | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[41/138] Ryan Thompson | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[43/138] Takayuki Murakami | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[44/138] Sheryl Woo | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[42/138] Alex Grant | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[46/138] Aritro Chatterjee | Appointment Setting Request - Campaign RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[43/138] Takayuki Murakami | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[45/138] Amit Mathad | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[42/138] Alex Grant | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[46/138] Aritro Chatterjee | Appointment Setting Request - Campaign RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[45/138] Amit Mathad | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[44/138] Sheryl Woo | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[47/138] Ani Casillas | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[48/138] Stephanie Pohlman | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[49/138] Ann Moore | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[46/138] Aritro Chatterjee | Appointment Setting Request - Campaign FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[50/138] Renata Seixas | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[48/138] Stephanie Pohlman | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[47/138] Ani Casillas | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[49/138] Ann Moore | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[51/138] Balasujai Raja | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[50/138] Renata Seixas | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[48/138] Stephanie Pohlman | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[49/138] Ann Moore | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[51/138] Balasujai Raja | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[47/138] Ani Casillas | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[52/138] Jacques Fegghali | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[50/138] Renata Seixas | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[53/138] Joanne Morris | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[54/138] Allen Hitchen | Harver Appoitnment Gen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[51/138] Balasujai Raja | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[52/138] Jacques Fegghali | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[55/138] Kolawole Akeredolu | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[56/138] Sonnet Sunil | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[54/138] Allen Hitchen | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[53/138] Joanne Morris | Harver Appoitnment Gen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[52/138] Jacques Fegghali | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[55/138] Kolawole Akeredolu | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[56/138] Sonnet Sunil | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[54/138] Allen Hitchen | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[57/138] Brano Lukic | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[53/138] Joanne Morris | Harver Appoitnment Gen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[55/138] Kolawole Akeredolu | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[58/138] Jackie Chen | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[56/138] Sonnet Sunil | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[57/138] Brano Lukic | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[60/138] Ellen Wright | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[58/138] Jackie Chen | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[59/138] Jalen Davidson | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[61/138] Andy Green | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[58/138] Jackie Chen | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[60/138] Ellen Wright | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[61/138] Andy Green | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[57/138] Brano Lukic | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[59/138] Jalen Davidson | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[62/138] Sarah Walder-Davis | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[63/138] Max Gispert | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[60/138] Ellen Wright | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[61/138] Andy Green | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[62/138] Sarah Walder-Davis | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[63/138] Max Gispert | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[59/138] Jalen Davidson | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[64/138] Fouad Sindi | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[65/138] Tariq Ahmed | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[62/138] Sarah Walder-Davis | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[63/138] Max Gispert | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[66/138] Monica Chopra | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[64/138] Fouad Sindi | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[65/138] Tariq Ahmed | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[67/138] Syed Hassan | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[68/138] Philip Kilian | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[66/138] Monica Chopra | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[65/138] Tariq Ahmed | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[67/138] Syed Hassan | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[64/138] Fouad Sindi | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[68/138] Philip Kilian | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[69/138] Richard Francisco | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[66/138] Monica Chopra | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[67/138] Syed Hassan | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[68/138] Philip Kilian | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[69/138] Richard Francisco | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[70/138] David Adewumi | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 25,
+  "summary": "The interaction was severely impacted by a technical loop where 
+the agent repeated the greeting and value proposition multiple times, failing 
+to establish a coher
+[72/138] Herb Kaaihue | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[71/138] Cory White | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[73/138] Manny Castaneda | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[69/138] Richard Francisco | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[70/138] David Adewumi | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[72/138] Herb Kaaihue | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[73/138] Manny Castaneda | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[71/138] Cory White | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[74/138] Mike Province | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[72/138] Herb Kaaihue | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[73/138] Manny Castaneda | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[70/138] David Adewumi | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[74/138] Mike Province | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[76/138] Antony Lyons | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[74/138] Mike Province | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[77/138] Bob Crook | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[VertexAI] Rate limited (attempt 1/4), retrying in 1003ms...
+[78/138] Nikolin Petro | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[77/138] Bob Crook | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[75/138] Rohit Khullar | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[76/138] Antony Lyons | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[76/138] Antony Lyons | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[77/138] Bob Crook | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[75/138] Rohit Khullar | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[78/138] Nikolin Petro | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[80/138] Sean Henderson | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 15,
+  "summary": "The interaction failed due to a severe technical breakdown where 
+the agent entered a logic loop, repeating the greeting, introduction, and 
+value proposition multi
+[78/138] Nikolin Petro | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[79/138] Chris Brodka | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[71/138] Cory White | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[75/138] Rohit Khullar | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[80/138] Sean Henderson | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[81/138] Denton Lawson | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[82/138] Tyrone Powell | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[79/138] Chris Brodka | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[83/138] William Darby | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[82/138] Tyrone Powell | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[81/138] Denton Lawson | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[80/138] Sean Henderson | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[79/138] Chris Brodka | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[83/138] William Darby | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[82/138] Tyrone Powell | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[81/138] Denton Lawson | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[VertexAI] Deep Think JSON parse failed, falling back to generateJSON: {
+  "overallScore": 35,
+  "summary": "The agent correctly followed the opening protocol, identifying 
+the contact and stating the purpose of the call. However, the agent failed to 
+correctly interpret t
+[84/138] Rakesh Patel | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[85/138] William Keane | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[83/138] William Darby | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[87/138] Alessandro Grassetti | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[86/138] Remco Reints | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[VertexAI] Rate limited (attempt 1/4), retrying in 1045ms...
+[VertexAI] Rate limited (attempt 1/4), retrying in 1445ms...
+[85/138] William Keane | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[84/138] Rakesh Patel | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[88/138] Akhilesh Ram | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[87/138] Alessandro Grassetti | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[86/138] Remco Reints | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[88/138] Akhilesh Ram | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[85/138] William Keane | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[84/138] Rakesh Patel | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[87/138] Alessandro Grassetti | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[86/138] Remco Reints | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[88/138] Akhilesh Ram | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[89/138] Faris Khayyat | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[90/138] Safa AlMadhoob | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[91/138] Vishnu Sankar | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[93/138] Barnali Chatterjee | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[92/138] Katy Williams | RingCentral_AppointmentGen RETRY 1 after 2000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[89/138] Faris Khayyat | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[90/138] Safa AlMadhoob | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[91/138] Vishnu Sankar | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[93/138] Barnali Chatterjee | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[89/138] Faris Khayyat | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[92/138] Katy Williams | RingCentral_AppointmentGen RETRY 2 after 4000ms: there is no unique or exclusion constraint matching the ON CONFLICT specificatio
+[90/138] Safa AlMadhoob | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[91/138] Vishnu Sankar | RingCentral_AppointmentGen FAILED after 3 attempts: there is no unique or exclusion constraint matching the ON CONFLICT specification
+[ConversationQuality] Vertex AI analysis failed: fetch failed
+[ConversationQuality] Vertex AI analysis failed: fetch failed
+[ConversationQuality] Vertex AI analysis failed: fetch failed
+[ConversationQuality] Vertex AI analysis failed: fetch failed
+[ConversationQuality] Vertex AI analysis failed: fetch failed
+file:///C:/Users/Zahid/Downloads/DemandGentic_AI/node_modules/@neondatabase/ser
+verless/index.mjs:316
+0&&(o=t[0]),o instanceof Error)throw o;var u=new Error("Unhandled error."+(o?" 
+("+o.message+")":""));
+                               ^
+
+Error: Connection terminated unexpectedly
+    at Sn. (file:///C:/Users/Zahid/Downloads/DemandGentic_AI/node_mo
+dules/@neondatabase/serverless/index.mjs:1010:76)
+    at Object.onceWrapper (file:///C:/Users/Zahid/Downloads/DemandGentic_AI/nod
+e_modules/@neondatabase/serverless/index.mjs:327:95)
+    at Sn.emit (file:///C:/Users/Zahid/Downloads/DemandGentic_AI/node_modules/@
+neondatabase/serverless/index.mjs:317:79)
+    at S. (file:///C:/Users/Zahid/Downloads/DemandGentic_AI/node_mod
+ules/@neondatabase/serverless/index.mjs:971:58)
+    at S.emit (file:///C:/Users/Zahid/Downloads/DemandGentic_AI/node_modules/@n
+eondatabase/serverless/index.mjs:317:79)
+    at WebSocket. (file:///C:/Users/Zahid/Downloads/DemandGentic_AI/
+node_modules/@neondatabase/serverless/index.mjs:403:74)
+    at callListener (C:\Users\Zahid\Downloads\DemandGentic_AI\node_modules\ws\l
+ib\event-target.js:290:14)
+    at WebSocket.onClose (C:\Users\Zahid\Downloads\DemandGentic_AI\node_modules
+\ws\lib\event-target.js:220:9)
+    at WebSocket.emit (node:events:508:28)
+    at WebSocket.emitClose (C:\Users\Zahid\Downloads\DemandGentic_AI\node_modul
+es\ws\lib\websocket.js:272:10)
+
+Node.js v24.11.1

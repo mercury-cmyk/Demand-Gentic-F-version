@@ -1,0 +1,104 @@
+.89
+cdd7303c
+User
+queued: 147493,
+2025-12-19 12:27:23.89
+cdd7303c
+User
+[QUEUE STATS] Campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2 stats: {
+2025-12-19 12:27:23.89
+cdd7303c
+User
+inProgress: 0,
+2025-12-19 12:27:23.89
+cdd7303c
+User
+agents: 7
+2025-12-19 12:27:23.89
+cdd7303c
+User
+completed: 0,
+2025-12-19 12:27:23.89
+cdd7303c
+User
+total: 147493,
+2025-12-19 12:27:23.89
+cdd7303c
+User
+}
+2025-12-19 12:27:23.89
+cdd7303c
+User
+7:27:23 AM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queue/stats 200 in 136m…
+2025-12-19 12:27:32.70
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /api/campaigns/680550bd-fa5d-4ef4-92ba-c48cdaf84b97
+2025-12-19 12:27:32.70
+cdd7303c
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-12-19 12:27:32.70
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:27:32.70
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:27:32.70
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /api/campaigns/680550bd-fa5d-4ef4-92ba-c48cdaf84b97/account-stats
+2025-12-19 12:27:32.71
+cdd7303c
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-12-19 12:27:32.71
+cdd7303c
+User
+[AUTH] requireAuth called for: GET /api/agents/me/queue
+2025-12-19 12:27:32.71
+cdd7303c
+User
+[AUTH] Authorization header present: true
+2025-12-19 12:27:32.71
+cdd7303c
+User
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+2025-12-19 12:27:32.71
+cdd7303c
+User
+[AGENT QUEUE] Fetching queue for agent da0c653b-c853-47b9-82df-de9b7b754378, campaign: 680550bd-fa5d-4ef4-92ba-c48cdaf84b97, status: undefined
+2025-12-19 12:27:32.75
+cdd7303c
+User
+7:27:32 AM [express] GET /api/campaigns/680550bd-fa5d-4ef4-92ba-c48cdaf84b97 200 in 49ms :: {"id":"6…
+2025-12-19 12:27:32.81
+cdd7303c
+User
+[DB Pool] Client connected | Total: 4, Idle: 1, Waiting: 0
+2025-12-19 12:27:32.82
+cdd7303c
+User
+[DB Pool] Client connected | Total: 4, Idle: 1, Waiting: 0
+2025-12-19 12:27:32.85
+cdd7303c
+User
+[AGENT QUEUE] No campaign specified, returning empty array
+2025-12-19 12:27:32.85
+cdd7303c
+User
+[AGENT QUEUE] Campaign 680550bd-fa5d-4ef4-92ba-c48cdaf84b97 dial mode: ai_agent
+2025-12-19 12:27:32.85
+cdd7303c
+User
+7:27:32 AM [express] GET /api/agents/me/queue 200 in 145ms :: []
+2025-12-19 12:27:32.92
+cdd7303c
+User
+7:27:32 AM [express] GET /api/campaigns/680550bd-fa5d-4ef4-92ba-c48cdaf84b97/account-stats 200 in 21…
+2025-12-19 12:27:54.17
+cdd7303c
+User
+7:27:54 AM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/suppressions/stats 200 …

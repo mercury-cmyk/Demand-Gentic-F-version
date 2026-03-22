@@ -1,0 +1,140 @@
+2025-12-19 19:51:26.54
+b3ed2d52
+User
+[ElevenLabs Webhook] No campaign_id found - skipping
+2025-12-19 19:51:26.54
+b3ed2d52
+User
+2:51:26 PM [express] POST /api/webhooks/elevenlabs 200 in 45ms :: {"status":"ok","message":"No campa…
+2025-12-19 19:51:26.60
+b3ed2d52
+User
+[TelnyxAiBridge] ElevenLabs native call initiated: elevenlabs-1766155885537-hketuw8va, conversation: conv_2601kcvhg71ge0nbcnzfj21dqt10
+2025-12-19 19:51:26.64
+b3ed2d52
+User
+[AI Batch] Call 1/10 initiated for queue item 05d20135-f3ad-4944-9d07-f854e5477720
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+- To (E.164): +4401293776880
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+- Phone Number ID: phnum_8701kctbg4v4fkw8jq03h8f1kxq9
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"agent_fullName": "Sarah"
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+- Agent ID: agent_4701kctbjseeeefakcshzhks3whw
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"contact_email": "graham.lock@fhs.co.uk",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"campaign_id": "ae5b353d-64a9-44d8-92cf-69d4726ca121",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"contact_firstName": "Graham",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"company_name": "FRY Heath & Spence Llp.",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"contact_title": "Owner & Partner",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"contact_lastName": "Lock",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+}
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+- Dynamic Variables: {
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+"contact_fullName": "Graham Lock",
+2025-12-19 19:51:29.74
+b3ed2d52
+User
+- To (raw): 4401293776880
+2025-12-19 19:51:34.55
+b3ed2d52
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:51:34.55
+b3ed2d52
+User
+[AUTH] Authentication successful for user: 3400e9b5-3d22-4759-8b99-808c99d8b5a7
+2025-12-19 19:51:34.55
+b3ed2d52
+User
+[AUTH] requireAuth called for: GET /api/leads
+2025-12-19 19:51:34.55
+b3ed2d52
+User
+[AUTH] Authentication successful for user: 3400e9b5-3d22-4759-8b99-808c99d8b5a7
+2025-12-19 19:51:34.55
+b3ed2d52
+User
+[AUTH] requireAuth called for: GET /api/leads/b670699b-a742-4692-abb6-bdd2bca93ad2
+2025-12-19 19:51:34.55
+b3ed2d52
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:51:34.63
+b3ed2d52
+User
+2:51:34 PM [express] GET /api/leads/b670699b-a742-4692-abb6-bdd2bca93ad2 200 in 75ms :: {"id":"b6706…
+2025-12-19 19:51:34.99
+b3ed2d52
+User
+2:51:34 PM [express] GET /api/leads 200 in 425ms :: [{"id":"b670699b-a742-4692-abb6-bdd2bca93ad2","c…
+2025-12-19 19:51:34.99
+b3ed2d52
+User
+2:51:34 PM [express] GET /api/leads 200 in 425ms :: [{"id":"b670699b-a742-4692-abb6-bdd2bca93ad2","c…
+2025-12-19 19:51:37.88
+b3ed2d52
+User
+[AUTH] Authorization header present: true
+2025-12-19 19:51:37.88
+b3ed2d52
+User
+[AUTH] Authentication successful for user: 3400e9b5-3d22-4759-8b99-808c99d8b5a7
+2025-12-19 19:51:37.88
+b3ed2d52
+User
+[AUTH] requireAuth called for: GET /api/leads
+2025-12-19 19:51:38.33
+b3ed2d52
+User
+2:51:38 PM [express] GET /api/leads 200 in 425ms :: [{"id":"b670699b-a742-4692-abb6-bdd2bca93ad2","c…
+2025-12-19 19:51:41.77
+b3ed2d52
+User
+2:51:41 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/suppressions/stats 200 …
+2025-12-19 19:51:41.77
+b3ed2d52
+User
+2:51:41 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/suppressions/stats 200 …

@@ -1,0 +1,74 @@
+[M365 OAuth] Redirect URI: https://14bc9042-7952-4a20-9389-7de4c54465f5-00-2ywx1deu5mzyn.janeway.replit.dev/api/oauth/microsoft/callback
+2025-11-13 08:39:26.02
+14bc9042
+User
+[M365 OAuth] Generated auth URL: https://login.microsoftonline.com/pivotal-b2b.com/oauth2/v2.0/authorize?client_id=0b5fe2fe-a906-4a1a-87e9-68ed877bad71&response_type=code&redirect_uri=https%3A%2F%2F14bc9042-7952-4a20-9389-7de4c54465f5-00-2ywx1deu5mzyn.janeway.replit.dev%2Fapi%2Foauth%2Fmicrosoft%2Fcallback&response_mode=query&scope=offline_access+Mail.Read+Mail.ReadBasic+Mail.ReadWrite+Mail.Send&state=Ai0_UQ7zb16z8OTIC18mF7Sm2TNKkEPS&code_challenge=zejOQFhLMW_gkap3AugIkNULDtEZQP8p-hyMSEy3oL0&code_challenge_method=S256
+2025-11-13 08:39:26.02
+14bc9042
+User
+[M365 OAuth] Returning JSON response
+2025-11-13 08:39:26.02
+14bc9042
+User
+3:39:26 AM [express] GET /api/oauth/microsoft/authorize 200 in 2ms :: {"authUrl":"https://login.micr…
+2025-11-13 08:39:32.28
+14bc9042
+User
+[DB Pool] Client removed | Total: 4, Idle: 4, Waiting: 0
+2025-11-13 08:39:32.28
+14bc9042
+User
+[DB Pool] Client removed | Total: 3, Idle: 3, Waiting: 0
+2025-11-13 08:39:32.29
+14bc9042
+User
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+2025-11-13 08:39:32.33
+14bc9042
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-13 08:39:39.23
+14bc9042
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 08:40:19.93
+14bc9042
+User
+[DB Pool] Client connected | Total: 3, Idle: 0, Waiting: 0
+2025-11-13 08:40:20.93
+14bc9042
+User
+[EmailSequenceProcessor] Found 0 emails ready to send
+
+2025-11-13 08:40:21.23
+14bc9042
+User
+[DB Pool] Client connected | Total: 3, Idle: 2, Waiting: 0
+2025-11-13 08:40:35.93
+14bc9042
+User
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+2025-11-13 08:40:35.93
+14bc9042
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+2025-11-13 08:40:37.03
+14bc9042
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 08:40:47.63
+14bc9042
+User
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+2025-11-13 08:41:02.83
+14bc9042
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 08:41:18.03
+14bc9042
+User
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+2025-11-13 08:41:33.73
+14bc9042
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0

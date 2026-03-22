@@ -1,0 +1,122 @@
+2025-11-04 15:11:11.34
+5b23da1c
+User
+file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1384
+2025-11-04 15:11:11.34
+5b23da1c
+User
+connect",o),this._clients=this._clients.filter(u=>u!==t),s&&(o.message="Connect\
+2025-11-04 15:11:11.34
+5b23da1c
+User
+^
+2025-11-04 15:11:11.34
+5b23da1c
+User
+2025-11-04 15:11:11.34
+5b23da1c
+User
+TypeError: Cannot set property message of # which has only a getter
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at An._connectionCallback (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1384:72)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at An._handleErrorWhileConnecting (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1290:38)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at An._handleErrorEvent (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1291:33)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at fn.emit (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:397:12)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at v.reportStreamError (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1201:46)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at v.emit (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:397:12)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at WebSocket. (file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:986:42)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at callListener (/home/runner/workspace/node_modules/ws/lib/event-target.js:290:14)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at WebSocket.onError (/home/runner/workspace/node_modules/ws/lib/event-target.js:230:9)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+at WebSocket.emit (node:events:524:28)
+2025-11-04 15:11:11.34
+5b23da1c
+User
+2025-11-04 15:11:11.34
+5b23da1c
+User
+Node.js v20.19.3
+2025-11-04 15:11:16.44
+5b23da1c
+User
+npm notice
+2025-11-04 15:11:16.44
+5b23da1c
+User
+npm notice New major version of npm available! 10.8.2 -> 11.6.2
+2025-11-04 15:11:16.44
+5b23da1c
+User
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.6.2
+2025-11-04 15:11:16.44
+5b23da1c
+User
+npm notice To update run: npm install -g npm@11.6.2
+2025-11-04 15:11:16.44
+5b23da1c
+User
+npm notice
+2025-11-04 15:11:18.44
+5b23da1c
+System
+command finished with error [npm run start]: exit status 1
+2025-11-04 15:17:29.99
+7ff6547b
+User
+[Campaign Suppression] Error in batch check account caps: TypeError: sql28.array is not a function
+2025-11-04 15:17:29.99
+7ff6547b
+User
+at batchCheckAccountCaps (file:///home/runner/workspace/dist/index.js:14914:42)
+2025-11-04 15:17:29.99
+7ff6547b
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 15:17:29.99
+7ff6547b
+User
+at async file:///home/runner/workspace/dist/index.js:31557:34
+2025-11-04 15:17:29.99
+7ff6547b
+User
+[DISPOSITION] Error handling qualified disposition suppression: TypeError: sql28.array is not a function
+2025-11-04 15:17:29.99
+7ff6547b
+User
+at batchCheckAccountCaps (file:///home/runner/workspace/dist/index.js:14914:42)
+2025-11-04 15:17:29.99
+7ff6547b
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-04 15:17:29.99
+7ff6547b
+User
+at async file:///home/runner/workspace/dist/index.js:31557:34

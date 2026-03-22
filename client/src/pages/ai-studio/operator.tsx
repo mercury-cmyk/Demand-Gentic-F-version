@@ -255,7 +255,7 @@ export default function AgenticCRMOperatorPage() {
             </div>
           </div>
 
-          {/* AgentX quick actions */}
+          {/* AgentC quick actions */}
           <div className="flex flex-wrap items-center gap-3 mt-6 pt-6 border-t border-white/10">
             <Button
               size="sm"
@@ -264,7 +264,7 @@ export default function AgenticCRMOperatorPage() {
               disabled={!agentPanel}
             >
               <Bot className="h-4 w-4" />
-              Open AgentX Panel
+              Open AgentC Panel
             </Button>
             <span className="text-xs text-violet-300/50 flex items-center gap-1.5">
               <Keyboard className="h-3 w-3" />

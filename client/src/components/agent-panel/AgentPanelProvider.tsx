@@ -1,7 +1,7 @@
 import React, { createContext, useContext, ReactNode, useCallback, useMemo, useState } from 'react';
 import { useAgentPanel, type AgentPanelState, type OrderStep } from './hooks/useAgentPanel';
 
-export type AgentXStatus = 'idle' | 'thinking' | 'awaiting_review' | 'executing';
+export type AgentCStatus = 'idle' | 'thinking' | 'awaiting_review' | 'executing';
 
 interface AgentPanelContextValue {
   state: AgentPanelState;
@@ -12,8 +12,8 @@ interface AgentPanelContextValue {
   toggleCollapse: () => void;
   setConversationId: (id: string | null) => void;
   resetSession: () => void;
-  agentStatus: AgentXStatus;
-  setAgentStatus: (status: AgentXStatus) => void;
+  agentStatus: AgentCStatus;
+  setAgentStatus: (status: AgentCStatus) => void;
   // User role context
   userRole: string;
   isClientPortal: boolean;
@@ -37,7 +37,7 @@ export function AgentPanelProvider({
   isClientPortal = false,
 }: AgentPanelProviderProps) {
   const panelState = useAgentPanel();
-  const [agentStatus, setAgentStatus] = useState<AgentXStatus>('idle');
+  const [agentStatus, setAgentStatus] = useState<AgentCStatus>('idle');
 
   const resetSession = useCallback(() => {
     panelState.resetSession();

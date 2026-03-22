@@ -1,0 +1,77 @@
+Advanced
+Automatic Speech Recognition
+
+Configure how the incoming audio is processed and transcribed into text.
+
+Create text-only conversational agents that do not process audio.
+
+Switch to Scribe Realtime for Automatic Speech Recognition (ASR). Implicit language detection doesn't yet work with this model.
+
+User input audio format
+Select the input format you want to use for automatic speech recognition.
+
+
+PCM 16000 Hz
+Recommended
+Keywords
+Define a comma-separated list of keywords that have a higher likelihood of being predicted correctly.
+
+Conversational behavior
+
+Configure turn taking behavior and conversation limits.
+
+Eagerness
+Controls how eager the agent is to respond. High eagerness means the agent responds quickly, while low eagerness means the agent waits longer to ensure the user has finished speaking.
+
+
+Eager
+Take turn after silence
+The maximum number of seconds since the user last spoke. If exceeded, the agent will respond and force a turn. A value of -1 means the agent will wait indefinitely for user input.
+
+7
+Seconds
+
+End conversation after silence
+The maximum number of seconds since the user last spoke. If exceeded, the call will terminate. A value of -1 means there is no fixed cutoff.
+
+-1
+Disabled
+
+Max conversation duration
+The maximum number of seconds that a conversation can last.
+
+199
+Seconds
+
+Soft timeout
+
+Provide immediate feedback during longer responses.
+
+Soft timeout
+How long to wait for the LLM response before returning a message.
+
+-1
+Disabled
+
+Client events
+
+Select the events that should be sent to the client.
+
+Events
+Add event
+audio
+interruption
+user_transcript
+agent_response
+agent_response_correction
+Privacy
+
+Configure settings related to data retention and Personally Identifiable Information (PII).
+
+No PII will be logged during or stored after a call. Use post-call webhooks to retrieve information about the call. May impact our ability to debug calls.
+
+Conversations Retention Period
+Set the number of days to keep the conversations (-1 for unlimited).
+
+-1
+Unlimited

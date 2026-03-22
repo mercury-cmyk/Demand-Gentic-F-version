@@ -1,0 +1,1152 @@
+import { workerDb as db } from "../db";
+import { leads, campaigns, contacts, accounts, activityLog } from "@shared/schema";
+import { eq, and, isNull, inArray, isNotNull } from "drizzle-orm";
+import { parseNaturalLanguageRules, generateDynamicEvaluationPrompt } from "./natural-language-rule-parser";
+import { buildAgentSystemPrompt } from "../lib/org-intelligence-helper";
+import { deepAnalyze } from "./ai-analysis-router";
+import { chat } from "./vertex-ai/vertex-client";
+
+interface QAParameters {
+  required_info: string[];
+  scoring_weights: {
+    content_interest: number;
+    permission_given: number;
+    compliance_consent: number;
+    qualification_answers: number;
+    data_accuracy: number;
+    email_deliverable: number;
+  };
+  min_score: number;
+  client_criteria: {
+    industry?: string[];
+    industries?: string[];
+    company_size?: string[];
+    revenue_range?: string[];
+    technologies?: string[];
+    job_titles?: string[];
+    seniority_levels?: string[];
+  };
+  qualification_questions?: Array;
+}
+
+interface AIAnalysisResult {
+  score: number;
+  qualification_status: 'qualified' | 'not_qualified' | 'needs_review';
+  analysis: {
+    content_interest: { score: number; evidence: string };
+    permission_given: { score: number; evidence: string };
+    compliance_consent: { score: number; evidence: string };
+    qualification_answers: { score: number; evidence: string };
+    data_accuracy: { score: number; evidence: string };
+    email_deliverable: { score: number; evidence: string };
+  };
+  missing_info: string[];
+  recommendations: string[];
+  account_verification: {
+    industry_match: boolean;
+    size_match: boolean;
+    revenue_match: boolean;
+    technology_match: boolean;
+    confidence: number;
+  };
+}
+
+/**
+ * Normalize client criteria to use consistent field names
+ * Maps legacy 'industry' to 'industries' for backward compatibility
+ */
+function normalizeClientCriteria(clientCriteria: QAParameters['client_criteria']): QAParameters['client_criteria'] {
+  const normalized = { ...clientCriteria };
+  
+  // If legacy 'industry' exists but 'industries' doesn't, copy it over
+  if (normalized.industry && normalized.industry.length > 0 && (!normalized.industries || normalized.industries.length === 0)) {
+    normalized.industries = [...normalized.industry];
+  }
+  
+  // Remove legacy field after normalization
+  delete normalized.industry;
+  
+  return normalized;
+}
+
+function normalizeQaParameters(rawQaParams?: Partial | null): QAParameters {
+  const defaults = getDefaultQAParameters();
+  const criteria = normalizeClientCriteria((rawQaParams?.client_criteria as QAParameters['client_criteria']) || {});
+
+  return {
+    required_info: Array.isArray(rawQaParams?.required_info)
+      ? rawQaParams!.required_info as string[]
+      : defaults.required_info,
+    scoring_weights: {
+      content_interest: Number(rawQaParams?.scoring_weights?.content_interest ?? defaults.scoring_weights.content_interest),
+      permission_given: Number(rawQaParams?.scoring_weights?.permission_given ?? defaults.scoring_weights.permission_given),
+      compliance_consent: Number(rawQaParams?.scoring_weights?.compliance_consent ?? defaults.scoring_weights.compliance_consent),
+      qualification_answers: Number(rawQaParams?.scoring_weights?.qualification_answers ?? defaults.scoring_weights.qualification_answers),
+      data_accuracy: Number(rawQaParams?.scoring_weights?.data_accuracy ?? defaults.scoring_weights.data_accuracy),
+      email_deliverable: Number(rawQaParams?.scoring_weights?.email_deliverable ?? defaults.scoring_weights.email_deliverable),
+    },
+    min_score: Number(rawQaParams?.min_score ?? defaults.min_score),
+    client_criteria: criteria,
+    qualification_questions: Array.isArray(rawQaParams?.qualification_questions)
+      ? rawQaParams!.qualification_questions
+      : undefined,
+  };
+}
+
+function extractJsonObject(raw: string): string {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '{}';
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return trimmed;
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+
+  return trimmed;
+}
+
+function parseAiJsonResponse(text: string): any {
+  return JSON.parse(extractJsonObject(text));
+}
+
+/**
+ * Analyze lead using AI based on transcript, contact data, account data, and QA parameters
+ * CRITICAL: Optimized to batch queries and prevent connection pool exhaustion
+ */
+export async function analyzeLeadQualification(leadId: string): Promise {
+  try {
+    // OPTIMIZATION: Batch all SELECT queries to reduce round trips
+    // Instead of 4 sequential queries (lead, contact, account, campaign), use Promise.all
+    const [
+      [lead],
+      contactData,
+      accountData,
+      campaignData
+    ] = await Promise.all([
+      // Query 1: Lead
+      db.select().from(leads).where(eq(leads.id, leadId)).limit(1),
+      
+      // Query 2: Contact (conditional based on lead.contactId)
+      // We'll fetch based on the lead data we get, but for now just fetch empty if needed
+      Promise.resolve([]),
+      
+      // Query 3: Account (conditional)
+      Promise.resolve([]),
+      
+      // Query 4: Campaign (conditional)
+      Promise.resolve([])
+    ]);
+
+    if (!lead) return null;
+
+    // Now fetch related records only if they're needed
+    let contact: any = null;
+    let account: any = null;
+    let campaign: any = null;
+
+    // Batch fetch remaining relationships if we have IDs
+    if (lead.contactId || lead.campaignId) {
+      const [contactResult, campaignResult] = await Promise.all([
+        lead.contactId ? db.select().from(contacts).where(eq(contacts.id, lead.contactId)).limit(1) : Promise.resolve([]),
+        lead.campaignId ? db.select().from(campaigns).where(eq(campaigns.id, lead.campaignId)).limit(1) : Promise.resolve([])
+      ]);
+      
+      [contact] = contactResult;
+      [campaign] = campaignResult;
+      
+      // Fetch account only if we have a contact with accountId
+      if (contact?.accountId) {
+        const [accountResult] = await Promise.all([
+          db.select().from(accounts).where(eq(accounts.id, contact.accountId)).limit(1)
+        ]);
+        [account] = accountResult;
+      }
+    }
+
+    if (!lead.transcript) {
+      console.log('[AI-QA] No transcript available for lead:', leadId);
+      
+      // Update lead with clear reason for needing review
+      await db.update(leads)
+        .set({
+          qaStatus: 'under_review',
+          qaDecision: 'Needs review: No call transcript available for AI analysis',
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, leadId));
+      
+      return null;
+    }
+
+    // Get QA parameters from campaign and normalize client criteria
+    const qaParams = normalizeQaParameters(campaign?.qaParameters as Partial | null);
+
+    // Check if campaign has custom QA rules or fields
+    const customQaFields = (campaign?.customQaFields as any[]) || [];
+    const hasCustomFields = customQaFields.length > 0;
+    
+    // Use cached parsed rules (generated once on campaign save) for performance
+    const parsedRules = (campaign?.parsedQaRules as any) || { criteria: [], evaluation_instructions: "" };
+    const hasCustomRules = parsedRules.criteria && parsedRules.criteria.length > 0;
+
+    // Preserve existing qaData to avoid overwriting Companies House validation data
+    const existingQaData = (lead.qaData as Record) || {};
+    
+    let analysisPrompt: string;
+    let customFieldsData: Record = {};
+    
+    // Use dynamic evaluation if custom rules or fields are defined
+    if (hasCustomRules || hasCustomFields) {
+      console.log('[AI-QA] Using dynamic evaluation with custom rules/fields for lead:', leadId);
+
+      // Build contact/account data for verification (including Companies House)
+      const contactData = {
+        contact: {
+          fullName: contact?.fullName,
+          email: contact?.email,
+          phone: contact?.directPhone,
+          title: contact?.jobTitle,
+          emailVerificationStatus: contact?.emailVerificationStatus,
+        },
+        account: {
+          name: account?.name,
+          industry: account?.industryStandardized,
+          companySize: account?.employeesSizeRange,
+          revenue: account?.revenueRange,
+          technologies: account?.webTechnologies,
+          domain: account?.domain,
+        },
+        companiesHouse: existingQaData.ch_validation_status === 'validated' ? {
+          legalName: existingQaData.ch_legal_name,
+          companyNumber: existingQaData.ch_company_number,
+          status: existingQaData.ch_status,
+          isActive: existingQaData.ch_is_active,
+          dateOfCreation: existingQaData.ch_date_of_creation,
+          address: existingQaData.ch_address,
+          validationStatus: 'VERIFIED via Companies House UK API'
+        } : null
+      };
+
+      // Generate dynamic evaluation prompt (includes campaign objective & success criteria)
+      analysisPrompt = generateDynamicEvaluationPrompt(
+        parsedRules,
+        customQaFields,
+        lead.transcript,
+        contactData,
+        {
+          campaignName: campaign?.name,
+          campaignObjective: campaign?.campaignObjective,
+          successCriteria: campaign?.successCriteria,
+          targetAudienceDescription: campaign?.targetAudienceDescription,
+          campaignContextBrief: campaign?.campaignContextBrief,
+        }
+      );
+    } else {
+      // Use standard evaluation (pass existingQaData for CH info)
+      analysisPrompt = buildAnalysisPrompt(lead, contact, account, campaign, qaParams, existingQaData);
+    }
+
+    // Use Vertex AI (Gemini) for analysis - no external API keys needed
+    const systemPrompt = await buildAgentSystemPrompt(
+      "You are an expert B2B lead qualification analyst. Analyze call transcripts and data to determine if leads meet qualification criteria. Return structured JSON analysis."
+    );
+
+    // Use Gemini 3 Deep Think for conversation quality analysis
+    let rawAnalysis: any;
+    try {
+      console.log(`[AI-QA] Using Gemini 3 Deep Think for lead qualification (lead: ${leadId})`);
+      const fullPrompt = `${systemPrompt}\n\n---\n\n${analysisPrompt}`;
+      rawAnalysis = await deepAnalyze(fullPrompt, {
+        temperature: 0.3,
+        maxTokens: 2000,
+        label: "qa-analyzer",
+        preferredProvider: "deepseek",
+      });
+    } catch (analysisError: any) {
+      console.error('[AI-QA] Deep Think analysis failed:', analysisError.message);
+      // Fallback to chat-based analysis
+      console.log('[AI-QA] Falling back to chat...');
+      try {
+        const textResponse = await chat(systemPrompt, [{ role: "user", content: analysisPrompt + "\n\nRespond with valid JSON only." }], { temperature: 0.3, maxTokens: 2000 });
+        rawAnalysis = parseAiJsonResponse(textResponse);
+      } catch (chatError) {
+        console.error('[AI-QA] Chat fallback also failed');
+        throw chatError;
+      }
+    }
+
+    // Compute weighted score fallback from criterion-level scores when top-level score is missing
+    const scoreFromResponse = rawAnalysis.score ?? rawAnalysis.ai_score;
+    const criterionWeights = qaParams.scoring_weights || {
+      content_interest: 25,
+      permission_given: 30,
+      compliance_consent: 15,
+      qualification_answers: 15,
+      data_accuracy: 10,
+      email_deliverable: 5,
+    };
+
+    const criterionKeys: Array = [
+      'content_interest',
+      'permission_given',
+      'compliance_consent',
+      'qualification_answers',
+      'data_accuracy',
+      'email_deliverable',
+    ];
+
+    const fallbackWeightedScore = Math.round(
+      criterionKeys.reduce((acc, key) => {
+        const criterionScore = Number(rawAnalysis?.analysis?.[key]?.score ?? 0);
+        const weight = Number(criterionWeights[key] ?? 0);
+        return acc + (criterionScore * weight);
+      }, 0) / 100
+    );
+
+    // Normalize response format (dynamic prompts return ai_score/ai_qualification_status, legacy returns score/qualification_status)
+    const normalizedAnalysis: AIAnalysisResult = {
+      score: Number.isFinite(Number(scoreFromResponse)) ? Number(scoreFromResponse) : fallbackWeightedScore,
+      qualification_status: rawAnalysis.qualification_status ?? rawAnalysis.ai_qualification_status ?? 'needs_review',
+      analysis: rawAnalysis.analysis ?? {},
+      missing_info: rawAnalysis.missing_info ?? [],
+      recommendations: rawAnalysis.recommendations ?? [],
+      account_verification: rawAnalysis.account_verification ?? {
+        industry_match: false,
+        size_match: false,
+        revenue_match: false,
+        technology_match: false,
+        confidence: 0
+      }
+    };
+
+    // Extract custom QA field data from analysis if custom fields were used
+    if (hasCustomFields || hasCustomRules) {
+      customFieldsData = rawAnalysis.qa_data || {};
+    }
+
+    // Merge AI analysis details into qaData (preserving existing data like Companies House validation)
+    const updatedQaData = {
+      ...existingQaData, // Preserve existing data (e.g., Companies House validation)
+      ...customFieldsData, // Add custom QA field data if any
+      // Store detailed AI insights for "needs review" cases
+      ai_analysis: {
+        score: normalizedAnalysis.score,
+        qualification_status: normalizedAnalysis.qualification_status,
+        analysis: normalizedAnalysis.analysis, // Per-criterion evidence
+        missing_info: normalizedAnalysis.missing_info, // What's missing
+        recommendations: normalizedAnalysis.recommendations, // Action items
+        account_verification: normalizedAnalysis.account_verification,
+      }
+    };
+
+    // Determine qaStatus based on AI qualification status and score
+    type QAStatusType = 'new' | 'under_review' | 'approved' | 'rejected' | 'returned' | 'published';
+    let qaStatus: QAStatusType = (lead.qaStatus as QAStatusType) || 'under_review';
+    let qaDecisionComment: string | null = null;
+    
+    const minScore = qaParams.min_score || 70;
+    const autoRejectThreshold = 30; // Balanced threshold - not too aggressive, not too permissive
+    
+    // QUALITY GATE: Check call duration - short calls require manual review
+    const MINIMUM_QUALIFIED_DURATION = 30; // seconds
+    const callDuration = lead.callDuration || 0;
+    const isShortDurationCall = callDuration  0;
+    
+    if (isShortDurationCall) {
+      console.warn(`[AI-QA] ⚠️ SHORT DURATION: Lead ${leadId} has call duration ${callDuration}s (min: ${MINIMUM_QUALIFIED_DURATION}s). Forcing manual review.`);
+    }
+    
+    // =========================================================================
+    // CALL SCREENING / BOT DETECTION — Must run BEFORE any qualification logic
+    // Detects: Google Call Assist, call screening bots, IVR, voicemail, etc.
+    // These are NOT human conversations and must NEVER be qualified.
+    // =========================================================================
+    const transcriptLower = (lead.transcript || '').toLowerCase();
+    
+    // Google Call Assist / Call Screening patterns
+    const isCallScreening = /call\s*assist\s*by\s*google|calling\s*assist\s*by\s*google|google.*recording\s*this\s*call\s*for|i'?m\s*screening\s*calls|before\s*i\s*try\s*to\s*connect\s*you|can\s*i\s*ask\s*what\s*you'?re?\s*calling\s*about|let\s*me\s*try\s*to\s*get\s*the\s*person.*on\s*the\s*line|screening\s*this\s*call/i.test(transcriptLower);
+    
+    // IVR / Auto-attendant patterns
+    const isIVR = /press\s*\d+\s*(for|to)|your\s*call\s*is\s*(important|being\s*recorded)|please\s*hold|for\s*english\s*press|para\s*español|automated\s*attendant|dial\s*by\s*name|extension\s*number/i.test(transcriptLower);
+    
+    // Voicemail patterns (when wrongly dispositioned as qualified)
+    const isVoicemail = /leave\s*(a\s*)?message|after\s*the\s*(tone|beep)|voicemail\s*box|mailbox\s*is\s*full|not\s*available.*leave/i.test(transcriptLower);
+    
+    // No real prospect engagement — agent talked but contact never responded meaningfully
+    // Count actual contact turns (excluding screening bot phrases)
+    const contactTurns = (lead.transcript || '').split('\n')
+      .filter((line: string) => /^contact:/i.test(line.trim()))
+      .map((line: string) => line.replace(/^contact:\s*/i, '').trim())
+      .filter((text: string) => {
+        const lower = text.toLowerCase();
+        // Exclude bot/screening phrases — these are NOT human responses
+        const isBotPhrase = /call\s*assist|google|recording\s*this\s*call|try\s*to\s*connect|what\s*you'?re?\s*calling\s*about|get\s*the\s*person|on\s*the\s*line|screening/i.test(lower);
+        // Exclude very short non-substantive responses
+        const isTooShort = lower.replace(/[^a-z]/g, '').length = minScore) {
+      // Auto-approve high-scoring qualified leads (only if not short duration)
+      qaStatus = 'approved';
+      qaDecisionComment = `Auto-approved: AI score ${normalizedAnalysis.score}/100 (threshold: ${minScore})`;
+      console.log(`[AI-QA] Lead ${leadId} AUTO-APPROVED with score ${normalizedAnalysis.score}`);
+    } else if (hasPositiveEngagement) {
+      // Leads with callback/interest signals ALWAYS go to manual review regardless of score
+      qaStatus = 'under_review';
+      const signals = [];
+      if (hasCallbackSignal) signals.push('callback request');
+      if (hasInterestSignal) signals.push('expressed interest/challenges');
+      qaDecisionComment = `Manual review: ${signals.join(', ')} detected (Score: ${normalizedAnalysis.score}/100)`;
+      console.log(`[AI-QA] Lead ${leadId} NEEDS REVIEW (positive engagement): ${qaDecisionComment}`);
+    } else if (normalizedAnalysis.qualification_status === 'not_qualified' && normalizedAnalysis.score  0 
+        ? normalizedAnalysis.missing_info.join(', ')
+        : 'Failed qualification criteria';
+      qaDecisionComment = `Auto-rejected: ${reasons} (Score: ${normalizedAnalysis.score}/100)`;
+      console.log(`[AI-QA] Lead ${leadId} AUTO-REJECTED with score ${normalizedAnalysis.score}`);
+    } else {
+      // Borderline cases need manual review
+      qaStatus = 'under_review';
+      const reviewReasons: string[] = [];
+      
+      if (normalizedAnalysis.missing_info.length > 0) {
+        reviewReasons.push(`Missing: ${normalizedAnalysis.missing_info.join(', ')}`);
+      }
+      if (normalizedAnalysis.score >= 40 && normalizedAnalysis.score  0) {
+        reviewReasons.push(normalizedAnalysis.recommendations[0]); // Add first recommendation
+      }
+      
+      qaDecisionComment = reviewReasons.length > 0 
+        ? `Needs review: ${reviewReasons.join(' | ')}`
+        : `Manual review required (Score: ${normalizedAnalysis.score}/100)`;
+      
+      console.log(`[AI-QA] Lead ${leadId} NEEDS REVIEW: ${qaDecisionComment}`);
+    }
+
+    // Save AI analysis to database with normalized values AND decision
+    await db.update(leads)
+      .set({
+        aiScore: String(normalizedAnalysis.score), // numeric column expects string
+        aiAnalysis: rawAnalysis as any, // Keep raw analysis for full context
+        aiQualificationStatus: normalizedAnalysis.qualification_status,
+        qaStatus: qaStatus,
+        qaDecision: qaDecisionComment,
+        qaData: updatedQaData, // Merged data preserving all fields
+        updatedAt: new Date(),
+      })
+      .where(eq(leads.id, leadId));
+
+    console.log('[AI-QA] Analysis completed for lead:', leadId, 'Score:', normalizedAnalysis.score, 'Status:', normalizedAnalysis.qualification_status, 'QA Status:', qaStatus);
+
+    // Determine the specific QA event type for activity logging
+    let qaEventType: 'qa_auto_approved' | 'qa_auto_rejected' | 'qa_needs_review' | 'qa_analysis_completed';
+    if (qaStatus === 'approved') {
+      qaEventType = 'qa_auto_approved';
+    } else if (qaStatus === 'rejected') {
+      qaEventType = 'qa_auto_rejected';
+    } else {
+      qaEventType = 'qa_needs_review';
+    }
+
+    // Insert activity log for QA decision
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'lead',
+        entityId: leadId,
+        eventType: qaEventType as any,
+        payload: {
+          score: normalizedAnalysis.score,
+          qualificationStatus: normalizedAnalysis.qualification_status,
+          qaStatus: qaStatus,
+          qaDecision: qaDecisionComment,
+          callDuration: callDuration,
+          isShortDuration: isShortDurationCall,
+          hasPositiveEngagement: hasPositiveEngagement,
+          campaignId: lead.campaignId,
+          contactId: lead.contactId,
+          analysisHighlights: {
+            contentInterest: normalizedAnalysis.analysis?.content_interest?.score,
+            permissionGiven: normalizedAnalysis.analysis?.permission_given?.score,
+            complianceConsent: normalizedAnalysis.analysis?.compliance_consent?.score,
+          },
+          missingInfo: normalizedAnalysis.missing_info,
+        },
+        createdBy: null,
+      });
+    } catch (logErr) {
+      console.error('[AI-QA] Failed to log QA decision activity:', logErr);
+    }
+
+    return normalizedAnalysis;
+
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing lead:', formatAnalyzerError(error));
+    return null;
+  }
+}
+
+/**
+ * Build comprehensive analysis prompt
+ */
+function buildAnalysisPrompt(
+  lead: any,
+  contact: any,
+  account: any,
+  campaign: any,
+  qaParams: QAParameters,
+  existingQaData?: Record
+): string {
+  // Extract Companies House data if available
+  const chData = existingQaData || {};
+  const hasCompaniesHouseData = chData.ch_validation_status === 'validated';
+  
+  return `Analyze this B2B telemarketing lead for qualification:
+
+## CALL TRANSCRIPT:
+${lead.transcript}
+
+## CONTACT DATA (VERIFIED - ALREADY IN SYSTEM):
+- Full Name: ${contact?.fullName || 'Not provided'}
+- Email: ${contact?.email || 'Not provided'}
+- Phone: ${contact?.directPhone || 'Not provided'}
+- Job Title: ${contact?.jobTitle || 'Not provided'}
+- Email Verification: ${contact?.emailVerificationStatus || 'Pending validation'}
+
+## COMPANY/ACCOUNT DATA (VERIFIED - ALREADY IN SYSTEM):
+- Company Name: ${account?.name || 'Not provided'}
+- Industry: ${account?.industryStandardized || 'Not provided'}
+- Company Size: ${account?.employeesSizeRange || 'Not provided'}
+- Annual Revenue: ${account?.revenueRange || 'Not provided'}
+- Technologies: ${account?.webTechnologies?.join(', ') || 'Not provided'}
+- Domain: ${account?.domain || 'Not provided'}
+
+${hasCompaniesHouseData ? `
+## COMPANIES HOUSE VALIDATION (OFFICIAL UK REGISTRY - ALREADY VERIFIED):
+- Legal Company Name: ${chData.ch_legal_name || 'N/A'}
+- Company Registration Number: ${chData.ch_company_number || 'N/A'}
+- Company Status: ${chData.ch_status || 'N/A'} ${chData.ch_is_active ? '(ACTIVE)' : '(INACTIVE)'}
+- Date of Creation: ${chData.ch_date_of_creation || 'N/A'}
+- Registered Address: ${chData.ch_address || 'N/A'}
+- Validation Status: ✓ VERIFIED via Companies House UK API
+
+**IMPORTANT: This company has been officially verified through the UK Companies House registry. Do NOT mark "Company Registration Number", "Company Status", or "Legal Name" as missing - they are already validated and available above.**
+` : ''}
+
+## CAMPAIGN OBJECTIVE & SUCCESS CRITERIA:
+- Campaign: ${campaign?.name || 'Content offer'}
+- Objective: ${campaign?.campaignObjective || 'Not specified'}
+- Success Criteria: ${campaign?.successCriteria || 'Not specified'}
+- Target Audience: ${campaign?.targetAudienceDescription || 'Not specified'}
+- Context Brief: ${campaign?.campaignContextBrief || 'Not specified'}
+- Call Script Context: ${campaign?.callScript?.substring(0, 500) || 'Marketing campaign'}
+
+**IMPORTANT**: Score this lead against the campaign objective and success criteria above.
+- The lead MUST align with the stated objective to be considered qualified.
+- The success criteria define what a successful outcome looks like — verify whether the call achieved it.
+- If the target audience is specified, verify that the prospect matches the described profile.
+
+## QUALIFICATION CRITERIA:
+${JSON.stringify(qaParams, null, 2)}
+
+## YOUR TASK:
+Evaluate this lead based on the following criteria (each scored 0-100):
+
+1. **content_interest** (${qaParams.scoring_weights.content_interest}% weight): 
+   - Did prospect show genuine interest in the whitepaper/eBook/guide?
+   - Did they ask questions or express enthusiasm?
+
+2. **permission_given** (${qaParams.scoring_weights.permission_given}% weight):
+   - Did they explicitly agree to receive the content?
+   - Did they say "yes" or give clear affirmative consent?
+
+3. **compliance_consent** (${qaParams.scoring_weights.compliance_consent}% weight):
+   - Did they agree to compliance statements (marketing, privacy)?
+   - Did they acknowledge terms or not disagree?
+
+4. **qualification_answers** (${qaParams.scoring_weights.qualification_answers}% weight):
+   - Did they answer qualification questions satisfactorily?
+   - Were responses aligned with client criteria?
+   - IMPORTANT: If Companies House data is provided above, the company is ALREADY VERIFIED. Score this section based on conversation quality, NOT on whether registration details were verbally confirmed.
+
+5. **data_accuracy** (${qaParams.scoring_weights.data_accuracy}% weight):
+   - Does contact/company data match client audience criteria?
+   - Industry: ${qaParams.client_criteria.industries?.join(', ') || 'any'}
+   - Company Size: ${qaParams.client_criteria.company_size?.join(', ') || 'any'}
+   - Revenue: ${qaParams.client_criteria.revenue_range?.join(', ') || 'any'}
+   - Job Title: ${qaParams.client_criteria.job_titles?.join(', ') || 'any'}
+   - Seniority Level: ${qaParams.client_criteria.seniority_levels?.join(', ') || 'any'}
+
+6. **email_deliverable** (${qaParams.scoring_weights.email_deliverable}% weight):
+   - Email Status: ${contact?.emailVerificationStatus || 'unknown'}
+   - IMPORTANT: Only 'invalid' emails are considered non-deliverable. All other statuses ('valid', 'acceptable', 'unknown') should be scored as deliverable.
+   - Score 100 for 'valid', 80-90 for 'acceptable', 60-70 for 'unknown', and 0 for 'invalid'.
+
+## ACCOUNT VERIFICATION:
+Verify if the account data aligns with client criteria:
+- Industry match: ${qaParams.client_criteria.industries?.length ? 'Required: ' + qaParams.client_criteria.industries.join(', ') : 'Any'}
+- Size match: ${qaParams.client_criteria.company_size ? 'Required: ' + qaParams.client_criteria.company_size.join(', ') : 'Any'}
+- Revenue match: ${qaParams.client_criteria.revenue_range ? 'Required: ' + qaParams.client_criteria.revenue_range.join(', ') : 'Any'}
+- Job Title match: ${qaParams.client_criteria.job_titles ? 'Required: ' + qaParams.client_criteria.job_titles.join(', ') : 'Any'}
+- Seniority Level match: ${qaParams.client_criteria.seniority_levels ? 'Required: ' + qaParams.client_criteria.seniority_levels.join(', ') : 'Any'}
+
+Return JSON in this exact format:
+{
+  "score": ,
+  "qualification_status": "qualified" | "not_qualified" | "needs_review",
+  "analysis": {
+    "content_interest": { "score": , "evidence": "" },
+    "permission_given": { "score": , "evidence": "" },
+    "compliance_consent": { "score": , "evidence": "" },
+    "qualification_answers": { "score": , "evidence": "" },
+    "data_accuracy": { "score": , "evidence": "" },
+    "email_deliverable": { "score": , "evidence": "" }
+  },
+  "missing_info": [""],
+  "recommendations": [""],
+  "account_verification": {
+    "industry_match": ,
+    "size_match": ,
+    "revenue_match": ,
+    "technology_match": ,
+    "confidence": 
+  }
+}
+
+## SCORING GUIDANCE:
+- Calculate final score as weighted average.
+- If score >= ${qaParams.min_score}, status is "qualified". If score (
+  operation: () => Promise,
+  maxRetries: number = 3,
+  initialDelayMs: number = 1000
+): Promise {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt  setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Background job to analyze leads with transcripts but no AI analysis
+ * CRITICAL: Includes connection pool management and error recovery
+ */
+export async function processUnanalyzedLeads(): Promise {
+  try {
+    console.log('[AI-QA] Starting background lead analysis batch...');
+
+    // OPTIMIZATION: Set a query timeout to prevent connection hangs
+    // If a query takes >30s, release the connection immediately
+    const QUERY_TIMEOUT_MS = 30000;
+    const ANALYSIS_TIMEOUT_MS = 60000; // Longer for AI analysis
+
+    // Process 10 leads per cycle (safe with aiScore IS NULL filter)
+    const BATCH_SIZE = 10;
+
+    let unanalyzedLeads: any[] = [];
+    try {
+      // FIXED: Use retry wrapper for Neon connection resilience
+      unanalyzedLeads = await withConnectionRetry(async () => {
+        const queryPromise = db.select()
+          .from(leads)
+          .where(and(
+            eq(leads.transcriptionStatus, 'completed'),
+            isNull(leads.aiScore)
+          ))
+          .limit(BATCH_SIZE);
+
+        // Wrap query with timeout
+        return await Promise.race([
+          queryPromise,
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Lead query timed out after 30s')), QUERY_TIMEOUT_MS)
+          )
+        ]);
+      });
+    } catch (queryError: any) {
+      console.error('[AI-QA] Failed to fetch unanalyzed leads after retries:', queryError.message);
+      // Return early instead of crashing to allow next iteration
+      return;
+    }
+
+    console.log(`[AI-QA] Found ${unanalyzedLeads.length} leads to analyze`);
+
+    // CRITICAL: Process leads sequentially with timeout per lead
+    for (const lead of unanalyzedLeads) {
+      if (!lead.aiScore && lead.transcript) {
+        try {
+          console.log(`[AI-QA] Analyzing lead: ${lead.id} (call duration: ${lead.callDuration}s)`);
+
+          // Wrap analysis with retry logic for connection resilience AND timeout
+          const result = await withConnectionRetry(async () => {
+            const analysisPromise = analyzeLeadQualification(lead.id);
+            return await Promise.race([
+              analysisPromise,
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Analysis timeout for lead ${lead.id}`)), ANALYSIS_TIMEOUT_MS)
+              )
+            ]);
+          }, 2, 2000); // 2 retries with 2s initial delay for analysis
+
+          if (result) {
+            console.log(`[AI-QA] ✓ Lead ${lead.id} analyzed (score: ${result.score}, status: ${result.qualification_status})`);
+          }
+        } catch (leadError: any) {
+          console.warn(`[AI-QA] ⚠️ Failed to analyze lead ${lead.id}:`, leadError.message);
+          // Continue to next lead instead of failing entire batch
+          continue;
+        }
+      }
+    }
+
+    console.log(`[AI-QA] Background batch complete (processed ${unanalyzedLeads.length} leads)`);
+  } catch (error) {
+    console.error('[AI-QA] Error processing unanalyzed leads:', error);
+    // Don't throw - allow job scheduler to continue running
+  }
+}
+
+/**
+ * Re-evaluate all QA pending leads for a campaign
+ * Used when campaign AI quality criteria are updated
+ */
+export async function reEvaluateCampaignLeads(campaignId: string): Promise {
+  const result = {
+    success: true,
+    processed: 0,
+    updated: 0,
+    failed: 0,
+    errors: [] as string[]
+  };
+
+  try {
+    console.log(`[AI-QA] Starting bulk re-evaluation for campaign ${campaignId}`);
+
+    // Find all QA pending leads (new or under_review) with completed transcripts
+    const pendingLeads = await db.select()
+      .from(leads)
+      .where(and(
+        eq(leads.campaignId, campaignId),
+        inArray(leads.qaStatus, ['new', 'under_review']),
+        eq(leads.transcriptionStatus, 'completed'),
+        isNotNull(leads.transcript)
+      ))
+      .limit(1000);
+
+    console.log(`[AI-QA] Found ${pendingLeads.length} QA pending leads with transcripts`);
+
+    if (pendingLeads.length === 0) {
+      return result;
+    }
+
+    // Re-analyze each lead
+    for (const lead of pendingLeads) {
+      try {
+        result.processed++;
+        console.log(`[AI-QA] Re-evaluating lead ${lead.id} (${result.processed}/${pendingLeads.length})`);
+        
+        const analysis = await analyzeLeadQualification(lead.id);
+        
+        if (analysis) {
+          result.updated++;
+        } else {
+          result.failed++;
+          result.errors.push(`Lead ${lead.id}: Analysis returned null`);
+        }
+      } catch (error) {
+        result.failed++;
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        result.errors.push(`Lead ${lead.id}: ${errorMsg}`);
+        console.error(`[AI-QA] Error re-evaluating lead ${lead.id}:`, error);
+      }
+    }
+
+    console.log(`[AI-QA] Re-evaluation complete. Processed: ${result.processed}, Updated: ${result.updated}, Failed: ${result.failed}`);
+
+  } catch (error) {
+    result.success = false;
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    result.errors.push(`Campaign-level error: ${errorMsg}`);
+    console.error('[AI-QA] Error in bulk re-evaluation:', error);
+  }
+
+  return result;
+}
+
+// ==================== QA CONTENT TYPE ANALYSIS ====================
+
+import {
+  clientSimulationSessions,
+  clientMockCalls,
+  clientReports,
+} from "@shared/schema";
+
+/**
+ * Generic content analysis result for non-lead content types
+ */
+export interface ContentAnalysisResult {
+  score: number;
+  qualificationStatus: 'qualified' | 'not_qualified' | 'needs_review';
+  highlights: string[];
+  recommendations: string[];
+  analysis: {
+    quality: { score: number; evidence: string };
+    completeness: { score: number; evidence: string };
+    professionalism: { score: number; evidence: string };
+    clientReadiness: { score: number; evidence: string };
+  };
+}
+
+/**
+ * Analyze simulation session quality for client delivery
+ */
+export async function analyzeSimulationQuality(sessionId: string): Promise {
+  try {
+    const [session] = await db
+      .select()
+      .from(clientSimulationSessions)
+      .where(eq(clientSimulationSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) {
+      console.error(`[AI-QA] Simulation session not found: ${sessionId}`);
+      return null;
+    }
+
+    // Build analysis based on session data
+    let qualityScore = 50;
+    let completenessScore = 50;
+    let professionalismScore = 70;
+    let clientReadinessScore = 50;
+    const highlights: string[] = [];
+    const recommendations: string[] = [];
+
+    // Analyze transcript quality
+    const transcript = session.transcript as Array | null;
+    if (transcript && Array.isArray(transcript)) {
+      const messageCount = transcript.length;
+      const totalLength = transcript.reduce((acc, msg) => acc + (msg.content?.length || 0), 0);
+
+      if (messageCount >= 6) {
+        qualityScore += 20;
+        highlights.push('Substantial conversation with multiple exchanges');
+      } else if (messageCount  500) {
+        completenessScore += 15;
+        highlights.push('Detailed responses throughout conversation');
+      }
+
+      // Check for agent vs user balance
+      const agentMessages = transcript.filter(m => m.role === 'assistant' || m.role === 'agent').length;
+      const userMessages = transcript.filter(m => m.role === 'user' || m.role === 'prospect').length;
+      if (agentMessages > 0 && userMessages > 0 && Math.abs(agentMessages - userMessages) = 60) {
+        qualityScore += 15;
+        clientReadinessScore += 15;
+        highlights.push('Good conversation duration');
+      } else if (session.durationSeconds  0) {
+        highlights.push(...evalResult.strengths.slice(0, 2));
+        qualityScore += 10;
+      }
+      if (evalResult.improvements && evalResult.improvements.length > 0) {
+        recommendations.push(...evalResult.improvements.slice(0, 2));
+      }
+    }
+
+    // Check session name (indicates intentional demo)
+    if (session.sessionName) {
+      clientReadinessScore += 5;
+      highlights.push('Named session for client reference');
+    }
+
+    // Calculate final score
+    const finalScore = Math.round(
+      (qualityScore * 0.35) +
+      (completenessScore * 0.25) +
+      (professionalismScore * 0.2) +
+      (clientReadinessScore * 0.2)
+    );
+
+    const qualificationStatus = finalScore >= 70 ? 'qualified' :
+      (finalScore >= 45 ? 'needs_review' : 'not_qualified');
+
+    return {
+      score: Math.min(100, finalScore),
+      qualificationStatus,
+      highlights,
+      recommendations,
+      analysis: {
+        quality: { score: Math.min(100, qualityScore), evidence: 'Conversation depth and engagement' },
+        completeness: { score: Math.min(100, completenessScore), evidence: 'Transcript and data completeness' },
+        professionalism: { score: Math.min(100, professionalismScore), evidence: 'Conversation flow and tone' },
+        clientReadiness: { score: Math.min(100, clientReadinessScore), evidence: 'Ready for client presentation' },
+      },
+    };
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing simulation:', error);
+    return null;
+  }
+}
+
+/**
+ * Analyze mock call quality for client delivery
+ */
+export async function analyzeMockCallQuality(callId: string): Promise {
+  try {
+    const [call] = await db
+      .select()
+      .from(clientMockCalls)
+      .where(eq(clientMockCalls.id, callId))
+      .limit(1);
+
+    if (!call) {
+      console.error(`[AI-QA] Mock call not found: ${callId}`);
+      return null;
+    }
+
+    let qualityScore = 50;
+    let completenessScore = 50;
+    let professionalismScore = 60;
+    let clientReadinessScore = 50;
+    const highlights: string[] = [];
+    const recommendations: string[] = [];
+
+    // Check recording availability
+    if (call.recordingUrl) {
+      qualityScore += 20;
+      clientReadinessScore += 15;
+      highlights.push('Call recording available for playback');
+    } else {
+      recommendations.push('No recording available - client cannot listen to call');
+      clientReadinessScore -= 15;
+    }
+
+    // Check transcript
+    if (call.transcript && call.transcript.length > 100) {
+      completenessScore += 20;
+      highlights.push('Full transcript available');
+
+      // Simple keyword analysis for professionalism
+      const lowerTranscript = call.transcript.toLowerCase();
+      if (lowerTranscript.includes('thank') || lowerTranscript.includes('appreciate')) {
+        professionalismScore += 10;
+      }
+      if (lowerTranscript.includes('interested') || lowerTranscript.includes('tell me more')) {
+        qualityScore += 10;
+        highlights.push('Positive engagement detected');
+      }
+    } else if (call.transcript) {
+      completenessScore += 10;
+      recommendations.push('Transcript is brief - consider more detailed call');
+    } else {
+      recommendations.push('No transcript available');
+      completenessScore -= 10;
+    }
+
+    // Check duration
+    if (call.durationSeconds) {
+      if (call.durationSeconds >= 60) {
+        qualityScore += 15;
+        highlights.push('Good call duration for demonstration');
+      } else if (call.durationSeconds >= 30) {
+        qualityScore += 10;
+      } else {
+        recommendations.push('Very short call - may not effectively demonstrate capabilities');
+      }
+    }
+
+    // Check disposition
+    if (call.disposition) {
+      completenessScore += 10;
+      if (['qualified', 'connected', 'callback-requested'].includes(call.disposition)) {
+        qualityScore += 10;
+        highlights.push(`Positive outcome: ${call.disposition}`);
+      }
+    }
+
+    // Use existing AI analysis if available
+    if (call.aiAnalysis) {
+      const analysis = call.aiAnalysis as { highlights?: string[]; recommendations?: string[] };
+      if (analysis.highlights) highlights.push(...analysis.highlights.slice(0, 2));
+      if (analysis.recommendations) recommendations.push(...analysis.recommendations.slice(0, 2));
+    }
+
+    if (call.aiScore) {
+      // Weight existing AI score into quality
+      qualityScore = Math.round((qualityScore + call.aiScore) / 2);
+    }
+
+    // Calculate final score
+    const finalScore = Math.round(
+      (qualityScore * 0.4) +
+      (completenessScore * 0.25) +
+      (professionalismScore * 0.15) +
+      (clientReadinessScore * 0.2)
+    );
+
+    const qualificationStatus = finalScore >= 70 ? 'qualified' :
+      (finalScore >= 45 ? 'needs_review' : 'not_qualified');
+
+    return {
+      score: Math.min(100, finalScore),
+      qualificationStatus,
+      highlights,
+      recommendations,
+      analysis: {
+        quality: { score: Math.min(100, qualityScore), evidence: 'Call quality and engagement' },
+        completeness: { score: Math.min(100, completenessScore), evidence: 'Recording and transcript availability' },
+        professionalism: { score: Math.min(100, professionalismScore), evidence: 'Call conduct and tone' },
+        clientReadiness: { score: Math.min(100, clientReadinessScore), evidence: 'Ready for client review' },
+      },
+    };
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing mock call:', error);
+    return null;
+  }
+}
+
+/**
+ * Analyze report quality for client delivery
+ */
+export async function analyzeReportQuality(reportId: string): Promise {
+  try {
+    const [report] = await db
+      .select()
+      .from(clientReports)
+      .where(eq(clientReports.id, reportId))
+      .limit(1);
+
+    if (!report) {
+      console.error(`[AI-QA] Report not found: ${reportId}`);
+      return null;
+    }
+
+    let qualityScore = 60;
+    let completenessScore = 50;
+    let professionalismScore = 70;
+    let clientReadinessScore = 60;
+    const highlights: string[] = [];
+    const recommendations: string[] = [];
+
+    // Check report data
+    const reportData = report.reportData as Record | null;
+    if (reportData && Object.keys(reportData).length > 0) {
+      completenessScore += 20;
+      const dataPoints = Object.keys(reportData).length;
+      if (dataPoints >= 5) {
+        qualityScore += 15;
+        highlights.push('Comprehensive data included');
+      }
+    } else {
+      recommendations.push('Report data is empty or missing');
+      completenessScore -= 20;
+    }
+
+    // Check summary
+    if (report.reportSummary && report.reportSummary.length > 50) {
+      qualityScore += 15;
+      clientReadinessScore += 10;
+      highlights.push('Executive summary provided');
+    } else {
+      recommendations.push('Add a summary for quick client review');
+    }
+
+    // Check date range
+    if (report.reportPeriodStart && report.reportPeriodEnd) {
+      completenessScore += 15;
+      highlights.push('Clear reporting period defined');
+    } else {
+      recommendations.push('Specify the report date range');
+    }
+
+    // Check file export
+    if (report.fileUrl) {
+      clientReadinessScore += 15;
+      highlights.push('Export file available for download');
+
+      if (report.fileFormat === 'pdf') {
+        professionalismScore += 10;
+        highlights.push('Professional PDF format');
+      }
+    } else {
+      recommendations.push('Generate a downloadable file for client');
+    }
+
+    // Check report type
+    if (report.reportType) {
+      completenessScore += 5;
+    }
+
+    // Calculate final score
+    const finalScore = Math.round(
+      (qualityScore * 0.3) +
+      (completenessScore * 0.3) +
+      (professionalismScore * 0.15) +
+      (clientReadinessScore * 0.25)
+    );
+
+    const qualificationStatus = finalScore >= 70 ? 'qualified' :
+      (finalScore >= 45 ? 'needs_review' : 'not_qualified');
+
+    return {
+      score: Math.min(100, finalScore),
+      qualificationStatus,
+      highlights,
+      recommendations,
+      analysis: {
+        quality: { score: Math.min(100, qualityScore), evidence: 'Data quality and insights' },
+        completeness: { score: Math.min(100, completenessScore), evidence: 'Report completeness' },
+        professionalism: { score: Math.min(100, professionalismScore), evidence: 'Professional presentation' },
+        clientReadiness: { score: Math.min(100, clientReadinessScore), evidence: 'Ready for client delivery' },
+      },
+    };
+  } catch (error) {
+    console.error('[AI-QA] Error analyzing report:', error);
+    return null;
+  }
+}
+
+/**
+ * Unified content analysis entry point
+ * Routes to appropriate analyzer based on content type
+ */
+export async function analyzeContentQualification(
+  contentType: 'simulation' | 'mock_call' | 'report' | 'lead',
+  contentId: string
+): Promise {
+  switch (contentType) {
+    case 'simulation':
+      return analyzeSimulationQuality(contentId);
+    case 'mock_call':
+      return analyzeMockCallQuality(contentId);
+    case 'report':
+      return analyzeReportQuality(contentId);
+    case 'lead':
+      return analyzeLeadQualification(contentId);
+    default:
+      console.error(`[AI-QA] Unknown content type: ${contentType}`);
+      return null;
+  }
+}
+
+function formatAnalyzerError(error: any): Record {
+  const message =
+    error?.message ??
+    error?.error?.message ??
+    error?.response?.data?.error?.message ??
+    String(error);
+
+  return {
+    name: error?.name,
+    message,
+    code: error?.code,
+    status: error?.status ?? error?.statusCode ?? error?.response?.status,
+    statusText: error?.statusText ?? error?.response?.statusText,
+    stack: error?.stack,
+  };
+}

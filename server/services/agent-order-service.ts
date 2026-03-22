@@ -1,6 +1,6 @@
 /**
  * Agent Order Service
- * Handles order creation through AgentX chat interface
+ * Handles order creation through AgentC chat interface
  * Reuses logic from client-portal-agentic routes
  */
 
@@ -496,7 +496,7 @@ export async function executePlan(params: {
       tenantId,
       clientAccountId,
       name: `${configuration.campaignType} - ${configuration.volume} leads`,
-      description: `Order ${orderNumber} - Created via AgentX`,
+      description: `Order ${orderNumber} - Created via AgentC`,
       status: "pending",
       metadata: {
         orderId,

@@ -1,0 +1,177 @@
+Add-On Requirement: Apply the Same Email Validation Logic to QA and Leads Sections
+
+To ensure full consistency and accuracy across the entire platform, the unified email validation logic must also be applied to:
+
+Quality Assurance (QA) module
+
+Leads QA
+
+Leads section
+
+Leads generated from Call Campaigns
+
+Any QA or post-processing workflow
+
+This ensures the same standardization across ALL lead-generation streams.
+
+1. Unified Email Validation Logic (Reapplied)
+
+The same four statuses must be used everywhere in QA:
+
+VALID
+
+INVALID
+
+UNKNOWN
+
+ACCEPTABLE
+
+All four statuses must follow the same definition and decision logic already set for campaigns.
+
+2. Where to Apply This in QA
+Apply this logic in:
+2.1. QA Lead Review Flow
+
+When a QA analyst reviews leads, the email status displayed must match the unified logic.
+
+If the email is VALID → show VALID
+
+If catch-all/accept-all → show ACCEPTABLE
+
+If undetermined → show UNKNOWN
+
+If any failure → show INVALID
+
+No custom or legacy status names should appear.
+
+2.2. Leads QA Dashboard
+
+All filters, counts, statuses, and exports must now use the four unified statuses.
+
+Examples:
+
+“Valid Emails” → VALID
+
+“Unverified / unknown / unverifiable” → UNKNOWN
+
+“Accept-All Emails” → ACCEPTABLE
+
+“Invalid Emails” → INVALID
+
+2.3. Call Campaign–Generated Leads in QA
+
+Any lead created through a call campaign MUST also be validated using the same standardized logic.
+
+Whether created through:
+
+Manual call entry
+
+Autodialer
+
+Call disposition forms
+
+Lead capture forms during calls
+
+The email status must be derived using the platform-wide rules.
+
+2.4. QA Scoring & Approval System
+
+When determining whether a lead passes QA:
+
+INVALID emails should automatically flag the lead as failing QA (unless manually overridden by an admin).
+
+UNKNOWN and ACCEPTABLE emails remain passable (depending on campaign settings).
+
+VALID emails should contribute positively to lead quality scoring.
+
+3. Platform-Wide Alignment Requirement
+
+All modules—Campaigns, Leads, QA, Call Campaigns—must use the same:
+
+Email validation engine
+
+Same status mapping
+
+Same output format
+
+Same verification rules
+
+Same filtering logic
+
+Same internal database fields
+
+Same UI labels and values
+
+There should be zero discrepancies between:
+
+Verification campaigns
+
+Email campaigns
+
+Call campaigns
+
+QA sections
+
+Lead creation workflows
+
+Lead editing forms
+
+Lead scoring / QA scoring
+
+API endpoints
+
+Any integrations
+
+4. Development Requirements (Add-On)
+
+Extend email validation logic layer so QA and Leads use the same shared service/microservice.
+
+Audit all QA modules for old validation labels or conditions.
+
+Map or remove legacy statuses that do not match VALID / INVALID / UNKNOWN / ACCEPTABLE.
+
+Update UI labels, dropdowns, and filters in:
+
+QA Dashboard
+
+Leads List
+
+Lead Detail View
+
+QA Review Modals
+
+Update backend logic for:
+
+QA pass/fail logic
+
+Lead scoring logic
+
+Call campaign lead creation
+
+API response normalization
+
+Ensure all exports (CSV/XLSX/API downloads) use unified statuses.
+
+Test end-to-end in:
+
+Verification → Lead Creation
+
+Email Campaigns → QA
+
+Call Campaigns → QA
+
+Lead Editing → QA
+
+5. Final Outcome
+
+Once implemented:
+
+Every email across the entire platform—regardless of origin—will use the same validation standard.
+
+QA reviewers, campaign managers, and sales teams will see consistent, predictable statuses.
+
+Reports and dashboards will align perfectly.
+
+Bugs caused by mismatched statuses will be eliminated.
+
+The platform will become faster, cleaner, and easier to maintain.

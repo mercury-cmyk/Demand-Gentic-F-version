@@ -563,9 +563,9 @@ router.post("/orders/create", async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "High Quality Leads (HQL) orders are limited to a maximum of 100 leads." });
     }
 
-    console.log(`[Client Agentic] Creating order for client ${context.clientAccountId} via AgentX`);
+    console.log(`[Client Agentic] Creating order for client ${context.clientAccountId} via AgentC`);
 
-    // Initialize AgentX (Client Agentic Hub)
+    // Initialize AgentC (Client Agentic Hub)
     const agentHub = createClientAgenticHub(context);
 
     // Map timeline to Agent supported values
@@ -599,7 +599,7 @@ router.post("/orders/create", async (req: Request, res: Response) => {
       budget: budget ? Number(budget) : undefined,
     };
 
-    // Execute order creation via AgentX
+    // Execute order creation via AgentC
     const result = await agentHub.createCampaignOrder(agentRequest);
 
     if (!result.success) {

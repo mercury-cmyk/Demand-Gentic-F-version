@@ -605,7 +605,7 @@ Generate the Account Messaging Brief JSON now.`;
       const { GoogleGenerativeAI } = await import("@google/generative-ai");
       const genAI = new GoogleGenerativeAI(geminiKey);
       const model = genAI.getGenerativeModel({ 
-        model: process.env.GEMINI_FLASH_MODEL || "gemini-2.0-flash",
+        model: process.env.GEMINI_FLASH_MODEL || "gemini-2.5-flash",
         generationConfig: {
           temperature: 0.2,
           maxOutputTokens: 700,

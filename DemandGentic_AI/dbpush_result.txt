@@ -1,0 +1,4 @@
+STDERR: DATABASE_URL, ensure the database is provisioned
+
+STDOUT: No config path provided, using default 'drizzle.config.ts'
+Reading config file 'C:\Users\Precision\OneDrive\Documents\GitHub\DemandGentic-V.01\drizzle.config.ts'

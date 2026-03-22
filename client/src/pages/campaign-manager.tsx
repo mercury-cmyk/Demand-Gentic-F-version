@@ -283,76 +283,62 @@ export default function CampaignManagerPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 text-white p-6 shadow-lg">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <Megaphone className="h-5 w-5" />
-              <p className="text-sm uppercase tracking-wide text-white/80">Campaign Manager</p>
-            </div>
-            <h1 className="text-3xl font-semibold">AI Quarterly Campaign Manager</h1>
-            <p className="text-white/80 mt-2 max-w-3xl">
-              Plans quarterly campaigns based on your Organization Intelligence — identity, ICP, positioning, offerings,
-              outreach strategies, and performance learnings. Everything is grounded in your org's source of truth.
-            </p>
-          </div>
-          <Badge className="bg-white/20 text-white border-white/30">Org Intelligence First</Badge>
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold tracking-tight">Campaign Planner</h2>
+          <p className="text-sm text-muted-foreground">
+            Plan quarterly campaigns grounded in your Organization Intelligence — ICP, positioning, offerings, and performance learnings.
+          </p>
         </div>
+        <Badge variant="outline" className="shrink-0">
+          <BrainCircuit className="h-3 w-3 mr-1" />
+          Org Intelligence
+        </Badge>
       </div>
 
-      {/* Organization Intelligence Source Card */}
-      <Card className={hasOrg ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20" : "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"}>
-        <CardContent className="pt-5 pb-4">
-          {orgLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Loading organization intelligence...</span>
-            </div>
-          ) : hasOrg ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <BrainCircuit className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                <span className="font-semibold text-emerald-700 dark:text-emerald-300">Organization Intelligence Connected</span>
-                <Badge variant="outline" className="text-xs border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300">Source of Truth</Badge>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                {orgCtx?.orgName && (
-                  <div className="flex items-center gap-2">
-                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Organization:</span>
-                    <span className="font-medium">{orgCtx.orgName}</span>
-                  </div>
-                )}
-                {orgCtx?.icpPersonas && orgCtx.icpPersonas.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">ICP Personas:</span>
-                    <span className="font-medium">{orgCtx.icpPersonas.length}</span>
-                  </div>
-                )}
-                {orgCtx?.coreProducts && orgCtx.coreProducts.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Products:</span>
-                    <span className="font-medium">{orgCtx.coreProducts.length}</span>
-                  </div>
-                )}
-              </div>
-              {orgCtx?.learningSummary && (
-                <p className="text-xs text-muted-foreground mt-1">Performance learnings from recent campaigns will be included in the plan.</p>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <BrainCircuit className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-              <span className="text-sm text-amber-700 dark:text-amber-300">
-                No organization intelligence configured. Using default brand positioning.
-                Configure org intelligence for more targeted quarterly plans.
-              </span>
+      {/* ── Org Intelligence Status ── */}
+      {orgLoading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading organization intelligence...
+        </div>
+      ) : hasOrg ? (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm border rounded-lg px-4 py-3 bg-muted/30">
+          <div className="flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Connected
+          </div>
+          {orgCtx?.orgName && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Building2 className="h-3.5 w-3.5" />
+              {orgCtx.orgName}
             </div>
           )}
-        </CardContent>
-      </Card>
+          {orgCtx?.icpPersonas && orgCtx.icpPersonas.length > 0 && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Users className="h-3.5 w-3.5" />
+              {orgCtx.icpPersonas.length} personas
+            </div>
+          )}
+          {orgCtx?.coreProducts && orgCtx.coreProducts.length > 0 && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <TrendingUp className="h-3.5 w-3.5" />
+              {orgCtx.coreProducts.length} products
+            </div>
+          )}
+          {orgCtx?.learningSummary && (
+            <span className="text-xs text-muted-foreground/70">Learnings included</span>
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-sm border border-amber-200/60 dark:border-amber-800/40 rounded-lg px-4 py-3 bg-amber-50/40 dark:bg-amber-950/20">
+          <BrainCircuit className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+          <span className="text-amber-700 dark:text-amber-300">
+            No organization intelligence configured. Using default positioning. Configure OI for more targeted plans.
+          </span>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

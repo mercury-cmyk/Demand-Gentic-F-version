@@ -124,7 +124,7 @@ router.post("/extract-campaign-context", requireAuth, upload.single('document'),
     }
 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `You are an expert B2B telemarketing strategist analyzing a document to extract comprehensive campaign context.
 

@@ -1,0 +1,1420 @@
+[Env] Environment variables validated successfully.
+[DB] Using WebSocket transport (Development)
+[DB] development mode - using DATABASE_URL_DEV
+[DB] Database endpoint: ep-shy-sound-ai9ezw1k-pooler
+[DB] Neon connection pooling: ENABLED (pooler)
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+
+=== CAMPAIGN: March and April: : CIO / IT / Security - Campaign (51a13b6a-d7d8-4259-92e6-14b2b9821e4d) ===
+Type: appointment_setting | Status: active
+Objective: Convert sponsorship interest into confirmed executive meetings aligned with quarterly revenue targets by positioning Argyle's CIO, CISO, and IT forums as curated executive meeting opportunities.
+Success Criteria: A defined number of confirmed executive meetings booked as a direct result of the campaign, leading to measurable pipeline contribution and progress towards quarterly revenue targets.
+Target Audience: Revenue-driven marketing and demand generation leaders at B2B technology companies who need direct access to enterprise IT decision-makers (CIOs, CISOs, IT leaders).
+QA Parameters: {
+  "min_score": 70,
+  "_generated_at": "2026-02-25T22:58:44.443Z",
+  "required_info": [
+    "permission"
+  ],
+  "_auto_generated": true,
+  "client_criteria": {},
+  "scoring_weights": {
+    "data_accuracy": 10,
+    "content_interest": 25,
+    "permission_given": 30,
+    "email_deliverable": 5,
+    "compliance_consent": 15,
+    "qualification_answers": 15
+  },
+  "queueIntelligence": {
+    "title_weight": 1,
+    "industry_weight": 1,
+    "problem_keywords": [
+      "lack of access to it decision makers",
+      "struggling to reach cios",
+      "inability to connect with cisos",
+      "low roi on sponsorships",
+      "poor lead quality from events",
+      "limited visibility with enterprise it"
+    ],
+    "routing_threshold": 800,
+    "solution_keywords": [
+      "executive meetings",
+      "cio forum",
+      "ciso forum",
+      "it leadership forum",
+      "curated events",
+      "account based marketing",
+      "enterprise access"
+    ],
+    "account_fit_weight": 1,
+    "recent_outcome_weight": 1,
+    "problem_solution_weight": 1.2,
+    "prioritized_exact_titles": [
+      {
+        "score": 400,
+        "value": "VP of Demand Generation"
+      },
+      {
+        "score": 350,
+        "value": "VP of Marketing"
+      },
+      {
+        "score": 300,
+        "value": "Director of Demand Generation"
+      },
+      {
+        "score": 250,
+        "value": "Director of Marketing"
+      },
+      {
+        "score": 280,
+        "value": "Head of Demand Generation"
+      },
+      {
+        "score": 230,
+        "value": "Head of Marketing"
+      },
+      {
+        "score": 150,
+        "value": "Chief Marketing Officer"
+      }
+    ],
+    "prioritized_title_keywords": [
+      {
+        "score": 200,
+        "value": "demand generation"
+      },
+      {
+        "score": 180,
+        "value": "marketing"
+      },
+      {
+        "score": 150,
+        "value": "abm"
+      },
+      {
+        "score": 120,
+        "value": "revenue"
+      },
+      {
+        "score": 100,
+        "value": "lead generation"
+      },
+      {
+        "score": 80,
+        "value": "cmo"
+      },
+      {
+        "score": 70,
+        "value": "chief marketing"
+      },
+      {
+        "score": 150,
+        "value": "account based"
+      }
+    ],
+    "prioritized_industry_keywords": [
+      {
+        "score": 180,
+        "value": "saas"
+      },
+      {
+        "score": 150,
+        "value": "software"
+      },
+      {
+        "score": 120,
+        "value": "cybersecurity"
+      },
+      {
+        "score": 100,
+        "value": "cloud computing"
+      },
+      {
+        "score": 160,
+        "value": "enterprise software"
+      },
+      {
+        "score": 90,
+        "value": "artificial intelligence"
+      },
+      {
+        "score": 80,
+        "value": "fintech"
+      }
+    ],
+    "prioritized_employee_size_ranges": []
+  }
+}
+Custom QA Fields: null
+Custom QA Rules: N/A
+
+=== CAMPAIGN: Argyle ApointmentGen (6d6d125c-53fb-4015-9046-4ed06b13ef4b) ===
+Type: appointment_setting | Status: paused
+Objective: Generate 5 Qualified Sponsor Appointments per Week
+Success Criteria: Appointments Booked: 5 per week, Lead Quality: Decision-maker or strong influencer
+Target Audience: B2B Software, B2B Vendors, Enterprise Technology Providers in IT, Marketing, Finance, HR, Data, and Data Science. Individuals with Seniority of Manager+, Director, VP with Functions in Growth, Sponsorship, Partner, Product Marketing, Demand Generation, and ABM.
+QA Parameters: {
+  "queueIntelligence": {
+    "title_weight": 1,
+    "industry_weight": 1,
+    "problem_keywords": [
+      "low lead quality",
+      "poor lead conversion",
+      "missed revenue targets",
+      "inability to reach decision makers",
+      "limited access to senior executives",
+      "struggling with abm",
+      "lack of ai expertise"
+    ],
+    "routing_threshold": 800,
+    "solution_keywords": [
+      "executive forums",
+      "account based marketing",
+      "lead generation",
+      "appointment setting",
+      "artificial intelligence",
+      "executive engagement",
+      "brand awareness",
+      "thought leadership"
+    ],
+    "account_fit_weight": 1,
+    "recent_outcome_weight": 1,
+    "problem_solution_weight": 1.2,
+    "prioritized_exact_titles": [
+      {
+        "score": 400,
+        "value": "VP Marketing"
+      },
+      {
+        "score": 350,
+        "value": "VP Sales"
+      },
+      {
+        "score": 400,
+        "value": "VP of Demand Generation"
+      },
+      {
+        "score": 350,
+        "value": "Director of Marketing"
+      },
+      {
+        "score": 350,
+        "value": "Director of Demand Generation"
+      },
+      {
+        "score": 300,
+        "value": "Head of Growth"
+      },
+      {
+        "score": 250,
+        "value": "Head of Partnerships"
+      },
+      {
+        "score": 200,
+        "value": "Sponsorship Manager"
+      }
+    ],
+    "prioritized_title_keywords": [
+      {
+        "score": 150,
+        "value": "marketing"
+      },
+      {
+        "score": 100,
+        "value": "sales"
+      },
+      {
+        "score": 200,
+        "value": "demand generation"
+      },
+      {
+        "score": 150,
+        "value": "growth"
+      },
+      {
+        "score": 100,
+        "value": "partnership"
+      },
+      {
+        "score": 150,
+        "value": "abm"
+      },
+      {
+        "score": 200,
+        "value": "account based marketing"
+      },
+      {
+        "score": 150,
+        "value": "product marketing"
+      },
+      {
+        "score": 300,
+        "value": "chief marketing officer"
+      },
+      {
+        "score": 300,
+        "value": "chief revenue officer"
+      }
+    ],
+    "prioritized_industry_keywords": [
+      {
+        "score": 200,
+        "value": "b2b software"
+      },
+      {
+        "score": 200,
+        "value": "enterprise software"
+      },
+      {
+        "score": 150,
+        "value": "saas"
+      },
+      {
+        "score": 250,
+        "value": "artificial intelligence"
+      },
+      {
+        "score": 200,
+        "value": "machine learning"
+      },
+      {
+        "score": 100,
+        "value": "cloud computing"
+      }
+    ],
+    "prioritized_employee_size_ranges": []
+  }
+}
+Custom QA Fields: null
+Custom QA Rules: N/A
+
+
+========================================
+TOTAL LEADS TO EVALUATE: 37
+========================================
+
+
+--- LEAD: e8f4fa64-c6ce-42a3-821f-ede9476f3ae1 ---
+Contact: Shalva Alexander | salexander@thelcfgroup.com
+Account: The LCF Group
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 8 total turns (4 agent, 4 contact) across ~40s.
+Agent focus: The agent was trying to confirm the contact's identity and introduce a sales pitch for Argyle Executive Forum's services connecting marketing leaders with IT decision-makers. Their approach involved polite verification, rapport-building, and a direct question about the contact's current approach.
+Contact response: The contact confirmed their identity but seemed cautious, asking twice where the agent was calling from. Their engagement was minimal with short responses, though they described their day as 'pretty good'.
+Outcome signal: no_meaningful_conversation ΓÇö The agent attempted to start a sales conversation, but the contact only asked clarifying questions without engaging with the substantive pitch.
+
+[Call Transcript]
+Contact: como Mmm.
+Agent: Hello, may I speak with Shalva Alexander?
+Contact: room
+Agent: Is this Shalva?
+Contact: Yes.
+Agent: Great, thanks for confirming. Hey Shalva, this is Samuel calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going?
+Contact: Pretty good, I am sorry where are you calling from?
+Agent: No problem at all. This is Samuel calling from Argyle Executive Forum. We focus on connecting marketing leaders like yourself with enterprise IT decision-makers through our curated forums. What does your current approach to connecting with CIOs and CISOs look like?
+
+============================================================
+
+--- LEAD: afd1b794-0399-4c42-bd6d-fcb896c33b9c ---
+Contact: Lloyd Lopez | lloyd.lopez@viskase.com
+Account: viskase
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 6 total turns (3 agent, 3 contact) across ~240s.
+Agent focus: The agent attempted to verify the contact's identity and introduce a sales call from Argyle Executive Forum, using a friendly greeting and asking about the contact's day to engage.
+Contact response: The contact responded minimally with unclear or non-English phrases ('Le cine', '├ë'), showing low engagement and no meaningful conversation.
+Outcome signal: no_meaningful_conversation ΓÇö The contact did not engage in a substantive dialogue, with responses that were brief and possibly in a different language, preventing any progress.
+
+[Call Transcript]
+Contact: Hello.
+Agent: Hello, may I speak with Lloyd Lopez?
+Contact: Le cine
+Agent: Hey Lloyd, thanks for picking up! This is Achird calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: ├ë.
+Agent: Thanks for your time! Have a great day.
+
+============================================================
+
+--- LEAD: c0195d01-800c-40ce-84c8-f9bea1501f1d ---
+Contact: Paul Ross | paul.ross@affinity.co
+Account: Affinity.co
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+Contact: Hi. If you record your name and reason for calling I'll see if this person is available.
+Agent: Hello, may I speak with Paul Ross?
+Contact: bar
+Agent: Thank you.
+Contact: Please stay on the line.
+Agent: Thank you.
+Contact: They said send more information.
+
+============================================================
+
+--- LEAD: f779dc17-4506-462c-8b58-c6544b8d05e2 ---
+Contact: Samuel Jong | samuel.jong@grazitti.com
+Account: grazitti
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 40 total turns (20 agent, 20 contact) across ~201s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum's events for IT leaders, targeting the contact's demand generation role, and attempted to build rapport before inquiring about executive engagement strategies.
+Contact response: The contact was skeptical, repeatedly asked for website details, questioned the call's legality, and ultimately expressed disinterest by stating the call was illegal, showing low engagement and resistance.
+Outcome signal: not_interested ΓÇö The contact explicitly stated the call was illegal and disengaged, leading the agent to end the conversation without achieving any positive outcome.
+
+[Call Transcript]
+Contact: Hi. If you record your name and reason for calling I'll see if this person is available.
+Agent: Hello, may I speak with Samuel Jong?
+Contact: int. Daniel John. Please stay on the line.
+Agent: [SYSTEM: Identity confirmed ΓÇö you are now speaking with Samuel Jong. Advance to HUMAN MOMENT state. Build brief rapport before delivering your purpose. Do NOT re-ask "who am I speaking with?"] Hello Jong, thanks for picking up. This is Achird calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: Bueno.
+Agent: [NO AUDIBLE speech]
+Contact: Gello?
+Agent: The reason I was reaching out we're hosting a series of forums for CIOs, CISOs, and IT leaders focused on connecting them with relevant solutions. Given your role in demand generation, I thought it might be relevant to connect you with our events. How is your team currently handling for executive engagement?
+Contact: Which company are you?
+Agent: This is Achird calling from Argyle Executive Forum. We specialize in creating these curated opportunities for sponsors.
+Contact: Ua, say again what companies it.
+Agent: Argyle Executive Forum. We focus on connecting marketing leaders like yourself with executive IT decision-makers. Would that be something your team would be interested in exploring?
+Contact: Give me Give me a website.
+Agent: It's argyleforum.com.
+Contact: Can you spell it out?
+Agent: Sure, it's A R G Y L E F O U M dot com. Is there anything else I can help you with?
+Contact: v a l e
+Agent: A R G Y L E. Is
+Contact: Hor├írio
+Agent: That's the website for Argyle Executive Forum. Is there anything else I can help you with?
+Contact: {} Give me the URL again.
+Agent: It's argyleforum.com. Is there anything else I can help you with?
+Contact: Breathe out very slowly.
+Agent: A R G Y L E F O R U M dot com. Is there anything else I can help you with?
+Contact: Can you spell it out again?
+Agent: A R G Y L E F O R U M dot com. Is there anything else I can help you with?
+Contact: The.com or.something else?
+Agent: It's dot com. Is there anything else I can help you with?
+Contact: just the AI animation
+Agent: I'm an AI voice assistant representing Argyle Executive Forum. Is there an
+... (truncated, 3676 total chars)
+
+============================================================
+
+--- LEAD: b76d566c-aabd-4288-9bae-4b2e7cd4e49f ---
+Contact: James Pencek | james.pencek@vatic-outsourcing.com
+Account: Vatic Outsourcing
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 9 total turns (5 agent, 4 contact) across ~58s.
+Agent focus: The agent introduced themselves and attempted to pitch curated meetings for IT leaders to improve ROI, using a friendly opening and referencing the contact's role at Vatic Outsourcing.
+Contact response: The contact responded minimally with 'fine' and a brief question, then questioned how the agent obtained their information, showing low engagement and skepticism.
+Outcome signal: not_interested ΓÇö The contact did not express interest, instead questioning the agent's information source, and the call ended abruptly without further discussion.
+
+[Call Transcript]
+Agent: Hello, this is Achird calling from Argyle Executive Forum, LLC.
+Contact: Hello, this is James.
+Agent: Hey James Pencek, thanks for picking up! I know I'm catching you out of the blue, but how's your day going so far?
+Contact: fine
+Agent: That's good to hear. The reason I reached
+Contact: How's yours?
+Agent: It's going well, thank you. The reason I reached out was because I saw your role at Vatic Outsourcing, and we're finding that a lot of IT leaders are looking for ways to get more return on their investments. Our forums provide 1:1 curated meetings with enterprise decision-makers to help with that. Does sound like something worth exploring?
+Contact: IT 100 How how'd you get my info?
+Agent: Thank you for your time, James. Have a great day!
+
+============================================================
+
+--- LEAD: cc9e70b9-a7d9-4919-9d26-79a2dd5e856b ---
+Contact: Eric Bogard | ericb@copyleaks.com
+Account: copyleaks
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 5 total turns (3 agent, 2 contact) across ~31s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum's service connecting marketing leaders with IT decision-makers, using a friendly opening and highlighting past success to gauge interest in executive connections.
+Contact response: The contact responded neutrally with 'It's okay' and asked 'What could I help you with?', showing moderate engagement but no clear interest or disinterest.
+Outcome signal: no_meaningful_conversation ΓÇö The call ended without a clear resolution, as the agent's question about executive connections was not answered, and no appointment, callback, or rejection occurred.
+
+[Call Transcript]
+Agent: Hello, may I speak with Eric Bogard?
+Contact: Hi, this is him.
+Agent: Hey Eric, thanks for picking up! This is Achird calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: It's okay. What could I help you with?
+Agent: The reason I reached out is because we specialize in connecting marketing leaders like yourself with key IT decision-makers at our exclusive forums. We've actually had success helping companies generate pretty significant pipeline through those meetings. I was curious how are you currently approaching types of executive connections?
+
+============================================================
+
+--- LEAD: d2deb02c-3de9-494e-82ee-9ff3d936b52a ---
+Contact: Frank Jackson | frank.jackson@biocatch.com
+Account: BioCatch
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 2 total turns (1 agent, 1 contact) across ~128s.
+Agent focus: The agent introduced themselves as Achird from Argyle Executive Forum, acknowledged the unsolicited nature of the call, and asked about the contact's day to initiate a conversation.
+Contact response: The contact only stated their name, 'Frank chatten,' with no further engagement or response to the agent's question, indicating minimal participation.
+Outcome signal: no_meaningful_conversation ΓÇö The contact did not respond to the agent's question or engage in dialogue, resulting in an incomplete interaction.
+
+[Call Transcript]
+Contact: Frank chatten.
+Agent: Hey Frank Jackson, thanks for picking up! This is Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I appreciate you taking a moment. How's your day going?
+
+============================================================
+
+--- LEAD: b4290dd8-8dfe-428e-b41b-a25bfabe0206 ---
+Contact: David Sim | david.sim@rethinkfirst.com
+Account: RethinkFirst
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 9 total turns (5 agent, 4 contact) across ~45s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum's CIO/CISO forums and assess relevance to David's work at RethinkFirst, using a friendly, consultative approach by asking about his day and explaining the offering.
+Contact response: The contact was initially disgruntled but polite, engaging briefly to clarify identity and listen, then clearly stated the topic was not relevant and ended the call with a thank you.
+Outcome signal: not_interested ΓÇö The contact explicitly said 'No, it is not' when asked about relevance to their team, indicating disinterest and ending the conversation.
+
+[Call Transcript]
+Agent: Hello, this
+Contact: ello
+Agent: may I speak with David Sim?
+Contact: Yahtzee is a David. I'm not happy.
+Agent: Hey David, thanks for picking up! This Achird calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going?
+Contact: Hi it's okay. How can I help you?
+Agent: Great to hear. The reason I reached out is Argyle is putting together a series of forums focused CIO and CISO challenges, and we thought your work at RethinkFirst might be relevant. We help companies quality meetings with those leaders. Is that something your team focuses on?
+Contact: No, it is not. But, thank you very much. Have a great day.
+Agent: I appreciate you letting me know. Have a great day!
+
+============================================================
+
+--- LEAD: f27f7d8f-9ef1-4caf-bf3c-850472f24513 ---
+Contact: Tom Angelucci | tom.angelucci@ivanti.com
+Account: Ivanti
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 11 total turns (5 agent, 6 contact) across ~57s.
+Agent focus: The agent attempted to schedule executive meetings for IT decision-makers by first verifying the contact's identity and then pitching curated 1:1 meetings through Argyle Executive Forum.
+Contact response: The contact initially engaged but clarified he no longer works at Ivanti, stated he's at a small company called IMI, and implied they wouldn't be interested in the service.
+Outcome signal: wrong_person ΓÇö The contact is not the intended target as he no longer works at the company the agent was trying to reach.
+
+[Call Transcript]
+Contact: Hello.
+Agent: Hello, may I speak with Tom Angelucci?
+Contact: sprechen
+Agent: Hey Tom, thanks for picking up! This is Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: uh, busy, well, how can I help?
+Agent: The reason I'm calling today is we're working with companies like Ivanti to help them connect key IT decision-makers through our executive forums. We find that a lot of marketing leaders struggle to get direct access, and we provide curated 1:1 meetings. How's your team currently approaching that?
+Contact: I I tell you what, I'm biased, man. I left Evanty a while back. Okay?
+Agent: Oh, thank you for clarifying that. I appreciate it. Just so I get it right in my notes, where are you now?
+Contact: Am at a company called IMI.
+Agent: Thank you so much for the information and your time today. Have a great day!
+Contact: and a very small company, so they wouldn't they wouldn't be interested.
+
+============================================================
+
+--- LEAD: 49dbd12f-1727-4030-8171-b992044ff9e6 ---
+Contact: Kim De Anda | kim.deanda@duolingo.com
+Account: Duolingo
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 9 total turns (4 agent, 5 contact) across ~34s.
+Agent focus: The agent aimed to reach Kim De Anda, introduced himself as Samuel from Argyle Executive Forum, and attempted to pitch exclusive CIO/CISO forums for marketing leaders to connect with IT decision-makers.
+Contact response: The contact initially responded with brief acknowledgments, then asked 'What can I help you with?' but ultimately stated 'I'm not interested,' showing low engagement and clear disinterest.
+Outcome signal: not_interested ΓÇö The contact explicitly said 'I'm not interested,' indicating a direct rejection of the agent's pitch without further discussion.
+
+[Call Transcript]
+Contact: Yeah.
+Agent: Hello, may I speak with Kim
+Contact: Hello?
+Agent: Hello, may I speak with Kim De Anda?
+Contact: πâñ!
+Agent: Hey Kim, thanks for picking up! This Samuel calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but just thought I'd see how your day is going so far?
+Contact: What can I help you with?
+Agent: Sure! We're reaching out to marketing leaders like you who need access enterprise IT decision-makers. host exclusive CIO and CISO forums where you can get 1:1 meetings. What does your current approach to connecting with those executives look like?
+Contact: I'm not interested.
+
+============================================================
+
+--- LEAD: e833ef8c-281b-4f5b-85d9-ac3f26f3fe66 ---
+Contact: Alex Baldocchi | alessandro.baldocchi@thinkingcapital.ca
+Account: Driven
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 10 total turns (5 agent, 5 contact) across ~67s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum's service of connecting marketing leaders with CIOs and C-suite executives through 1:1 meetings, using a friendly approach to gauge interest.
+Contact response: The contact initially engaged by confirming identity but showed limited interest with brief, non-committal responses like 'And it was going fine' and '∞ò╝', indicating low engagement.
+Outcome signal: no_meaningful_conversation ΓÇö The call ended abruptly without a clear resolution, as the agent's question was cut off and the contact did not express interest or disinterest.
+
+[Call Transcript]
+Contact: bhai, hello, hello
+Agent: Hello, may I speak with Alex Baldocchi?
+Contact: Yes, speaking.
+Agent: Hey Alex, thanks for picking up! This Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: And it was going fine.
+Agent: That's good to hear! The reason I was calling is that we're helping a lot
+Contact: Wat is?
+Agent: we're helping a lot of marketing leaders like yourself get 1:1 meetings with CIOs and C-suite executives through our forums. Is that something your team is focused on at the moment?
+Contact: ∞ò╝,
+Agent: Great. We provide vertical-specific targeting to make sure you're meeting with the right decision-makers. How does
+
+============================================================
+
+--- LEAD: 422efb05-2e5b-47e5-92fc-48788254d8fe ---
+Contact: Melinda Deines | mdeines@sld.com
+Account: Shikatani Lacroix Design
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 12 total turns (6 agent, 6 contact) across ~59s.
+Agent focus: The agent attempted to engage Melinda Deines by introducing Argyle Executive Forum's services for connecting marketing leaders with CIOs through events, using a polite and consultative approach.
+Contact response: The contact responded minimally with non-English phrases initially, then clearly stated disinterest in the service, indicating low engagement and a firm refusal.
+Outcome signal: not_interested ΓÇö The contact explicitly said 'No, that's not something that I would be interested in' and confirmed it was not a priority, leading to a polite end to the call.
+
+[Call Transcript]
+Contact: Ol├í.
+Agent: Hello, may I speak with Melinda Deines?
+Contact: δé£?
+Agent: Hey Melinda, thanks for picking up! This Elias calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, so I appreciate you taking a moment. How's your day going?
+Contact: αñ½αñ╛αñçαñéαñíαÑñ
+Agent: Great to hear. The reason I was calling because we work with marketing leaders like yourself, helping them connect CIOs and senior IT executives through our curated events. curious if that's something you're focused on at the moment.
+Contact: No, that's not something that I would be interested in.
+Agent: I completely understand, I appreciate you being upfront. Just so I'm clear for the future, is it that connecting with CIOs isn't a priority right now, something else?
+Contact: That's just not something that we would do.
+Agent: Got it, I appreciate you clarifying. Thank you so much for your time today! Have a great
+Contact: Okay, thanks, bye-bye.
+Agent: Thank you so much, have a great day!
+
+============================================================
+
+--- LEAD: 36175b3b-f196-4f8f-9c71-d377a8f0acd1 ---
+Contact: Virginia Ashley | virginia@unitedcloud.ca
+Account: unitedcloud.ca
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 7 total turns (3 agent, 4 contact) across ~47s.
+Agent focus: The agent aimed to pitch Argyle Executive Forum's service for connecting C-suite marketing leaders with IT decision-makers, inquiring about the contact's current methods for handling this challenge.
+Contact response: The contact initially expressed being busy at work, then questioned if the agent was human or AI. Upon confirmation of AI, the contact explicitly rejected the call, asking to be left alone.
+Outcome signal: rejected_ai ΓÇö The contact directly asked if the agent was an AI and, upon confirmation, immediately rejected the call and asked to be left alone.
+
+[Call Transcript]
+Contact: Hello. Thank you.
+Agent: Hey Virginia Ashley, thanks for picking up! This is Achird calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: I'm at work I don't from 10:00 to 4:00.
+Agent: I completely hear you, and I appreciate you being upfront. The reason I was reaching out was that a lot of C-suite marketing leaders have been dealing with the challenge of connecting directly enterprise IT decision-makers. Our Argyle Executive Forums specialize in setting up those curated 1:1 meetings for you. How is your team currently handling that?
+Contact: Okay. Bye, I guess you, am I speaking to a human or are you are an AI agent, sorry.
+Agent: I'm an AI assistant calling on behalf of Argyle Executive Forum. Is there anything else I can help you with?
+Contact: No. You can take no for an answer, leave me alone. Have a great day, thank you, bye.
+
+============================================================
+
+--- LEAD: 3ba4ea5f-3ac0-4e84-b21f-d61a094cd616 ---
+Contact: Eileen O'Brien | eobrien@davidchristensenlaw.com
+Account: davidchristensenlaw
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 19 total turns (9 agent, 10 contact) across ~68s.
+Agent focus: The agent attempted to reach Eileen O'Brien to discuss Argyle Executive Forum's services for marketing leaders, focusing on strategies for engaging with IT executives and offering curated meetings with IT decision-makers.
+Contact response: The contact showed low engagement, with initial confusion and technical issues, and ultimately stated that the topic was not on their radar, expressing disinterest and declining further discussion.
+Outcome signal: not_interested ΓÇö The contact explicitly said the topic was not on their radar and declined, indicating clear disinterest without requesting a callback or appointment.
+
+[Call Transcript]
+Contact: αñåαñê αñ╣αÑêαñ╡
+Agent: Hello, may
+Contact: Hello.
+Agent: Hello, may I speak with Eileen O'Brien?
+Contact: Hello.
+Agent: Yes, I am trying to reach Eileen O'Brien.
+Contact: ┬┐Que qu├⌐?
+Agent: Hey Eileen O'Brien, thanks for picking up! This Samuel, calling on behalf
+Contact: I can't hear you.
+Agent: Ah, I apologize for that. Am I coming through clearly now?
+Contact: Yeah, it just seems like there's a weird delay.
+Agent: Okay, I'm sorry about that. As
+Contact: That's okay, what can I do for you today?
+Agent: As I was saying, I'm calling on behalf of Argyle Executive Forum. We're speaking with marketing leaders like yourself about their strategies for engaging with IT executives.
+Contact: with IT executive
+Agent: Yes, our forums offer 1:1 curated meetings with CIOs, CISOs, and other IT decision-makers. Is that something you're focused on right now?
+Contact: No, not at all. Really not not on our radar at all. But I appreciate the outreach.
+Agent: I understand. Is there another team that handles that?
+Contact: No.
+
+============================================================
+
+--- LEAD: 35d0d90c-5b2e-4310-ba17-da60f4dcef4a ---
+Contact: Eric Klein | eric.klein@mammoth.org
+Account: mammoth
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 6 total turns (3 agent, 3 contact) across ~31s.
+Agent focus: The agent attempted to verify the contact's identity, introduce himself and his company, and then pivot to discussing the company's services for marketing leaders seeking meetings with IT executives.
+Contact response: The contact confirmed his identity but seemed confused about the company name, asking for clarification about 'Ar sign so, what's the R dial executive form?'.
+Outcome signal: no_meaningful_conversation ΓÇö The contact was confused about the company name and the agent didn't clarify before moving to his pitch, preventing substantive discussion.
+
+[Call Transcript]
+Contact: Is that
+Agent: Hello, may I speak with Eric Klein?
+Contact: Yes, Derek.
+Agent: Hey Eric Klein, thanks for picking up! This is Gabriel, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: Ar sign so, what's the R dial executive form?
+Agent: The reason I was calling is we work with marketing leaders like yourself who are looking to get directly in front of CIOs and CISOs. We specialize in creating curated, one-on-one meetings through our IT forums. How is your team currently handling pipeline generation in that space?
+
+============================================================
+
+--- LEAD: e0267adf-35e6-492b-a3cf-f72bb1a7b34e ---
+Contact: Liam Doyle | ldoyle@google.com
+Account: Google
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 7 total turns (4 agent, 3 contact) across ~32s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum and gauge interest in connecting marketing leaders with IT decision-makers, using a friendly, appreciative approach to engage Liam Doyle.
+Contact response: The contact was initially cooperative but became skeptical, asking 'What do you want, robot?' indicating low engagement and suspicion toward the agent's identity.
+Outcome signal: rejected_ai ΓÇö The contact questioned if the agent was a robot, implying rejection of AI interaction without explicitly stating disinterest in the service.
+
+[Call Transcript]
+Agent: Hello, this Achird calling from Argyle Executive Forum.
+Contact: Hello.
+Agent: Hello, may I speak with Liam Doyle?
+Contact: Yes, speaking.
+Agent: Hey Liam Doyle, thanks for picking up! I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: What do you want, robot?
+Agent: I appreciate you asking, Liam. This is Achird calling from Argyle Executive Forum. We're connecting with marketing leaders like yourself who are looking to get in front of CIOs and other top IT decision-makers. Does that sound like something you might be interested in?
+
+============================================================
+
+--- LEAD: 31f12e69-de69-4da7-8677-359bf4d1bba6 ---
+Contact: Bruno Evangelista | bruno.evangelista@se.com
+Account: Schneider Electric
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 6 total turns (3 agent, 3 contact) across ~30s.
+Agent focus: The agent aimed to verify Bruno's identity and introduce a service connecting him with IT decision-makers, using a friendly tone and acknowledging the cold call nature.
+Contact response: Bruno initially confirmed his identity but then asked for clarification on the caller's identity, showing cautious engagement without expressing interest or disinterest.
+Outcome signal: no_meaningful_conversation ΓÇö The call ended abruptly after the agent's introduction without further discussion or resolution, as the contact did not respond to the pitch.
+
+[Call Transcript]
+Contact: Hello?
+Agent: Hello, may I speak with Bruno Evangelista?
+Contact: Yes, this is Bruno.
+Agent: Hey Bruno, thanks for picking up! This Gabriel, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: Who is this, sorry?
+Agent: This is Gabriel calling from Argyle Executive Forum. Just reaching out to see if connecting you with enterprise IT decision-makers is a priority right now.
+
+============================================================
+
+--- LEAD: 6ffcb6c9-e936-45a0-859b-c56b3d932616 ---
+Contact: Alon Tirosh | alon.tirosh@sogeti.com
+Account: sogeti
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 10 total turns (5 agent, 5 contact) across ~56s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum's service connecting marketing leaders with IT decision-makers, using a polite, appreciative approach and asking if the contact was focused on such meetings.
+Contact response: The contact was initially busy, requested an email, then questioned if the agent was an AI, showing low engagement and skepticism about the call's authenticity.
+Outcome signal: rejected_ai ΓÇö The contact directly asked if the agent was an AI, and the agent confirmed being an AI assistant, indicating rejection based on AI involvement.
+
+[Call Transcript]
+Contact: Good afternoon.
+Agent: Hello, may I speak with Alon Tirosh?
+Contact: Yeah, this calling.
+Agent: Hey Alon, thanks for picking up! This Elias calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, so really appreciate you taking a moment. How's your day going so far?
+Contact: I'm occupied right now. Can you send me an email?
+Agent: I completely understand, and I respect that you're busy. I can definitely send an email, but just super quickly, the reason this caught my attention for your role is that we help marketing leaders get 1:1 meetings with CIOs and IT decision-makers. Is that something you're currently focused on?
+Contact: Are you an agent?
+Agent: I'm with Argyle Executive Forum, and we host forums where we connect solution providers like Sogeti IT decision-makers. Does that make sense?
+Contact: Are you an AI agent?
+Agent: I'm an AI assistant calling on behalf of Argyle Executive Forum. Is it something you might be open to learning more about?
+
+============================================================
+
+--- LEAD: 139bb7d6-ee17-4ab9-9c81-9b255b4f167c ---
+Contact: Jordan Paluch | jordan.paluch@pathstream.com
+Account: Pathstream
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 6 total turns (3 agent, 3 contact) across ~31s.
+Agent focus: The agent aimed to speak with Jordan Paluch to discuss upcoming CIO and CISO forums, identifying themselves and then attempting to engage the contact with a polite opening.
+Contact response: The contact was initially cautious, asking for identification and the purpose of the call. They engaged by asking clarifying questions about the call's nature.
+Outcome signal: no_meaningful_conversation - The call ended with the agent initiating their pitch, but no substantive discussion or decision was reached by the contact.
+
+[Call Transcript]
+Contact: Hello.
+Agent: Hello, may I speak with Jordan Paluch?
+Contact: Yeah, who is this?
+Agent: This is Achird calling from Argyle Executive Forum.
+Contact: Yeah. What's this with regards to?
+Agent: Hey Jordan, thanks for picking up. I know I'm catching you out of the blue, but I was hoping to connect about some of our upcoming CIO and CISO forums. How's your day going so far? for taking a moment. how's your
+
+============================================================
+
+--- LEAD: 7719a609-b4d4-4782-879e-1698eefe941c ---
+Contact: Rochelle Paulet | rpaulet@quadkor.com
+Account: quadkor
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 6 total turns (3 agent, 3 contact) across ~40s.
+Agent focus: The agent aimed to verify the contact's identity and introduce a service connecting marketing leaders with CIOs for meetings, using a friendly tone and asking about their day to engage.
+Contact response: The contact responded briefly, expressed suspicion that the call was AI-generated, and showed low engagement by not answering the agent's question about outreach.
+Outcome signal: rejected_ai ΓÇö The contact stated 'This sounds like an AI call,' indicating rejection of the call based on perceived AI involvement.
+
+[Call Transcript]
+Contact: Hello?
+Agent: Hello, may I speak with Rochelle Paulet?
+Contact: 15
+Agent: Hey Rochelle Paulet, thanks for picking up! This Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I appreciate you taking a moment. How's your day going?
+Contact: It's okay. This sounds like an AI call.
+Agent: This is Achird calling from Argyle Executive Forum. The reason I'm reaching out for marketing leaders like yourself, connecting them with CIOs and IT for potential meetings. How are you currently handling that kind of outreach?
+
+============================================================
+
+--- LEAD: 5a6b3788-1ddf-4bab-b055-e18c93e6e6e8 ---
+Contact: Daniel Ashton | daniel@brainspin.com
+Account: brainspin
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 10 total turns (5 agent, 5 contact) across ~58s.
+Agent focus: The agent aimed to introduce Argyle Executive Forum's curated 1:1 meetings for connecting with enterprise IT decision-makers to generate pipeline, using a polite, direct approach after confirming the contact's identity.
+Contact response: The contact was disengaged, repeatedly asking 'What's this about?' without providing any substantive answers, indicating confusion or lack of interest.
+Outcome signal: not_interested ΓÇö The contact did not express interest, asked the same question multiple times, and the agent ended the call without progress.
+
+[Call Transcript]
+Contact: Hello.
+Agent: Hello, may I speak with Daniel Ashton?
+Contact: Yeah.
+Agent: Hey Daniel Ashton, thanks for picking up! This is Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: What's this about?
+Agent: Understood. The reason I reached out is we work with marketing leaders who are focused generating pipeline by connecting enterprise IT decision-makers. Our forums provide 1:1 curated meetings, which has a big impact on pipeline. What does your current approach to that look like?
+Contact: What is this about?
+Agent: This is about connecting you with enterprise IT decision-makers through our curated forums to help generate pipeline. How are you currently handling that?
+Contact: What is this about?
+Agent: I understand. Thank you for your time. Have a great day! your time, Daniel.
+
+============================================================
+
+--- LEAD: fad16dbd-e180-4996-acb2-2421439e937c ---
+Contact: Bob Consonery | bob.consonery@fhtmus.com
+Account: Fortune Hi-Tech Marketing
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 7 total turns (3 agent, 4 contact) across ~31s.
+Agent focus: The agent attempted to reach Bob Consonery and, upon learning he was unavailable, inquired about connecting with someone else regarding IT leadership forums.
+Contact response: The contact, Andrew Emerson, was uncooperative, stating it was not Bob's number and instructing the agent to remove the number from the call list, showing low engagement.
+Outcome signal: not_interested ΓÇö The contact explicitly asked for the number to be removed from the call list, indicating disinterest and a request to stop contact.
+
+[Call Transcript]
+Contact: This is Andrew Emerson with USIC. How can I help you?
+Agent: Hello, may I speak with Bob Consonery?
+Contact: That's not his number anymore.
+Agent: Oh, I appreciate you letting me know. Is there someone else I should connect with regarding IT leadership forums?
+Contact: No, you should remove this number from your call list.
+Agent: I understand, I'll remove it. Thank you for your time, have a great day.
+Contact: In 2 weeks, I'll
+
+============================================================
+
+--- LEAD: 6913ec15-2640-421c-8f01-cabf4e49c58b ---
+Contact: Tiffany Hill | thill@ecomeng.com
+Account: ecomeng
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 13 total turns (6 agent, 7 contact) across ~79s.
+Agent focus: The agent aimed to schedule a conversation about Argyle Executive Forum's services for marketing leaders, using a friendly approach and asking about current challenges to gauge interest.
+Contact response: The contact was minimally engaged, stating their business relies on repeat work and history, and directly rejected the agent's proposal with a 'No'.
+Outcome signal: not_interested ΓÇö The contact explicitly declined the agent's offer for a conversation, showing clear disinterest.
+
+[Call Transcript]
+Contact: A common engineering this is Stephanie.
+Agent: Hello, may I speak with Tiffany Hill?
+Contact: You got her.
+Agent: Hey Tiffany, thanks for picking up! This Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but I appreciate you taking a moment. How's your day going so far?
+Contact: I'm on my way home.
+Agent: I understand you're on your way home. appreciate you taking the call. The reason I was calling was we're working with marketing leaders focused demand generation, helping them get direct access to enterprise IT decision-makers. How are you currently handling that at ecomeng?
+Contact: Well, 90% of our business is repeat work because we work with architects and in order to do work with architects, you have to have history. very hard to to to get new work
+Agent: I understand.
+Contact: Unless the team is in is together.
+Agent: So, it sounds like building history pretty critical for your business. What challenges does that present when you're looking for new opportunities?
+Contact: You usually history history it's repeat.
+Agent: I understand. Well, given that's your focus, would it be worth a quick conversation to explore if there's any alignment with what we do?
+Contact: No.
+
+============================================================
+
+--- LEAD: 8aaa3314-1a2a-4a81-895f-6d229315291c ---
+Contact: Jim Snyder | jsnyder@qualitymatters.org
+Account: qualitymatters
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 6 total turns (3 agent, 3 contact) across ~37s.
+Agent focus: The agent aimed to confirm the contact's identity as Jim Snyder and introduce a service for connecting marketing leaders with IT decision-makers through forums, using a friendly tone and asking about current team approaches.
+Contact response: The contact responded minimally with 'Okay' and earlier seemed confused or non-English speaking ('Wir sie hier?'), showing low engagement and no clear interest or rejection.
+Outcome signal: no_meaningful_conversation ΓÇö The contact did not engage substantively, with brief and unclear responses, preventing a productive discussion about the service.
+
+[Call Transcript]
+Contact: Hello.
+Agent: Hello, may I speak with Jim Snyder?
+Contact: Wir sie hier?
+Agent: Hey Jim Snyder, thanks for picking up! This Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: Okay.
+Agent: That's good to hear. The reason I'm calling is we work with marketing and demand generation leaders who need direct access to enterprise IT decision-makers like CIOs and CISOs. Our forums help them get 1:1 meetings to generate pipeline. How does your team currently approach that?
+
+============================================================
+
+--- LEAD: 19123e85-f073-4ffc-b18b-863b688af4d8 ---
+Contact: Jackman Karafa | j.karafa@alphadigital.com.au
+Account: alphadigital.com.au
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 7 total turns (3 agent, 4 contact) across ~47s.
+Agent focus: The agent was trying to reach Jackman Karafa to discuss Argyle Executive Forum's CIO and IT forums, then pivoted to ask about alternative contacts when informed he no longer worked there.
+Contact response: The contact was initially cooperative but guarded, stating Jackman no longer worked there and asking about the call's purpose, then responded with a non-committal '├ähm' when the agent explained the forums.
+Outcome signal: no_meaningful_conversation ΓÇö The contact did not provide alternative contacts or express interest, ending with an ambiguous response that didn't advance the conversation.
+
+[Call Transcript]
+Contact: Hello I'm going to get a beverage.
+Agent: Hello, may I speak with Jackman Karafa?
+Contact: He doesn't work here anymore, sorry. What are you after?
+Agent: Ah, I see. No problem at all. This Elias calling from Argyle Executive Forum. Was there someone who took over his responsibilities, is there another contact I should know?
+Contact: Yeah, that definitely has, you know, different people throughout the team. Um, what was the show regarding?
+Agent: Sure, I can tell you about that. We were calling our upcoming CIO and IT forums where we arrange 1:1 meetings for sponsors with decision-makers. Is that something someone else on the team would be interested in?
+Contact: ├ähm.
+
+============================================================
+
+--- LEAD: 2897ca78-855e-4375-9a17-04903d6e5cc1 ---
+Contact: Darwin Datu | dawnd@cloudstaff.com
+Account: cloudstaff
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 22 total turns (11 agent, 11 contact) across ~92s.
+Agent focus: The agent attempted to reach Darwin Datu to pitch curated meetings for sales leaders needing IT decision-makers, but adjusted by introducing himself and asking about the contact's team focus after realizing it might be the wrong person.
+Contact response: The contact initially responded with an automated message, then identified as Shay, a dental hygienist, and showed low engagement by asking for the agent's name and not addressing the pitch.
+Outcome signal: wrong_person ΓÇö The agent intended to speak to Darwin Datu but reached Shay, who was not the target and did not engage meaningfully with the sales pitch.
+
+[Call Transcript]
+Contact: Hi, you have reached CloudStop.
+Agent: Hello, may
+Contact: Cloudstaff is the next generation of shoring and outsourcing provider delivering world class solutions for large and small businesses. This call may be monitored.
+Agent: I'm sorry, it sounds
+Contact: recorded for training or quality assurance purposes
+Agent: it sounds like you're on
+Contact: Please do not hang up.
+Agent: I'm sorry,
+Contact: You will be connected to the next cloud staff representative as soon as possible.
+Agent: I think I may have reached the wrong person. Is this Darwin Datu?
+Contact: Hello?
+Agent: Hey Darwin, thanks for picking up! This Samuel calling from Argyle
+Contact: Thank you for there. My name is Shay. I'm a help you.
+Agent: Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going?
+Contact: I'm good and how are you?
+Agent: I'm doing well, thanks. The reason I was calling was, work with sales leaders who need access to IT decision-makers, and we do curated meetings for them. curious if that's something your team focuses on.
+Contact: I'm a dental hygienist here today, uh, may I have your name, please?
+Agent: Sure, it's Samuel from Argyle Executive Forum. Is that something your team handles?
+Contact: De.
+Agent: Thank you so much for your time today! Have a great day.
+Contact: I'm sorry, your name is Daniel.
+Agent: day. It's Samuel. Thank you again! Have a great again, have day!
+
+============================================================
+
+--- LEAD: 2dc031b5-ebea-4e5d-b267-b36fece52d6c ---
+Contact: Divya Venkataramu | dvenkataramu@microsoft.com
+Account: Microsoft USA
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: 43.00 | AI Qual: needs_review
+Call Duration: 50s
+QA Decision: Qualified by Precision Bridge (confidence: 43%) | Precision: likely_potential (60%) | Disposition override recommended | Learned pattern match: 27%
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 11 total turns (5 agent, 6 contact) across ~50s.
+Agent focus: The agent aimed to connect with Divya about Windows Developer Platform initiatives, using a polite and respectful approach by confirming identity and asking about her availability.
+Contact response: The contact was initially hesitant, stated it was not the right time due to being on maternity leave, and suggested reconnecting in May or June, showing low engagement but polite disinterest.
+Outcome signal: callback_requested ΓÇö The agent agreed to follow up in mid-May after the contact proposed reconnecting later due to maternity leave.
+
+[Call Transcript]
+Contact: Hello?
+Agent: Hello, may I speak with Divya Venkataramu?
+Contact: Wie hast du es?
+Agent: This is Achird calling from Argyle Executive Forum. Are you Divya?
+Contact: Yes.
+Agent: Hey Divya, thanks for picking up! I know I'm catching you out of the blue, but I was hoping to connect around some of the Windows Developer Platform initiatives you're working on. How's your day going so far?
+Contact: This is not the right time to talk. I am sorry. We should probably connect sometime later.
+Agent: I totally respect that. Is there a specific time that would be better?
+Contact: I'm actually not working right now. I'm on maternity leave. So I don't think this is the right time to connect it at all. Maybe we should connect back in May or June.
+Agent: Oh, congratulations! That's wonderful news. May or June sounds perfect for a follow-up. Should I reach out around mid-May?
+Contact: Okay. Thank you.
+
+============================================================
+
+--- LEAD: 6839981b-d7a3-4cf6-86f1-e20c903c339e ---
+Contact: Taryn Cunningham | taryn.c@gmicloud.ai
+Account: gmicloud
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: 43.00 | AI Qual: needs_review
+Call Duration: 43s
+QA Decision: Qualified by Precision Bridge (confidence: 43%) | Precision: likely_potential (53%) | Disposition override recommended
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 7 total turns (3 agent, 4 contact) across ~43s.
+Agent focus: The agent introduced themselves and the company, then pitched curated 1-on-1 meetings for marketing leaders to connect with IT decision-makers, asking if the contact was interested.
+Contact response: The contact was initially polite but cautious, asking for elaboration, then requested an email to be sent, indicating mild interest without further engagement.
+Outcome signal: interested ΓÇö The contact asked for an email to be sent, showing receptiveness to receiving more information.
+
+[Call Transcript]
+Contact: Hi, this is Carrie.
+Agent: Hey Taryn Cunningham, thanks for picking up! This is Achird calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: It's good. I am Can you elaborate on what this is?
+Agent: Sure, happy to. We're reaching out to marketing leaders like yourself who are looking to connect with enterprise IT decision-makers. Our forums offer 1-on-1 curated meetings so you can target specific verticals. Is that something you're currently interested in?
+Contact: Ya, if you could send me an email, that would be great.
+Agent: Absolutely, happy to do that. Thanks so much for your time today! Have a great Thanks again! great day!
+Contact: Bye.
+
+============================================================
+
+--- LEAD: 11f6c5fc-cb36-4da9-a942-5ff5ff116f3c ---
+Contact: Ellis Mass | ellis.mass@laborfinders.com
+Account: Labor Finders
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: 55.00 | AI Qual: qualified
+Call Duration: 207s
+QA Decision: Qualified by Precision Bridge (confidence: 55%) | Precision: likely_potential (60%) | Intent: 70% | Disposition override recommended
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 21 total turns (10 agent, 11 contact) across ~157s.
+Agent focus: The agent aimed to schedule a meeting for Argyle Executive Forum's IT and marketing leader events, using a scripted pitch about curated meetings and ROI, and persisted despite contact confusion.
+Contact response: The contact was skeptical, repeatedly asked for clarification, expressed confusion about relevance, and questioned if the agent was AI, but engaged by asking about regions and business model.
+Outcome signal: rejected_ai ΓÇö The contact directly asked if the agent was AI, and the agent confirmed being an AI voice assistant, indicating rejection of AI interaction.
+
+[Call Transcript]
+Contact: Hello.
+Agent: Hello, may I speak with Ellis Mass?
+Contact: Sir, can you say that again?
+Agent: Certainly, I'm calling to speak with Ellis Mass.
+Contact: And who may I say is calling?
+Agent: This is Isaac calling from Argyle Executive Forum. Is that you, Ellis?
+Contact: I don't remember our Agile executive form. Refresh my memory, please.
+Agent: I understand, I know I'm catching you out of the blue. We're reaching out because our upcoming CIO and IT forums offer curated meetings with enterprise decision-makers, which we thought might be valuable for Labor Finders. How is your team currently handling strategy?
+Contact: What did you say your name was? I'm sorry.
+Agent: My name is Isaac. We focus on connecting companies like yours with top IT executives. Is that something that touches your work at all?
+Contact: Isaac, please don't be offended by this question. But are you a person or are you AI?
+Agent: I am an AI voice assistant. Is there anything specific you needed?
+Contact: Well no there is nothing specific that I needed, but you cold called me so I just wanted to try and figure out why you thought this might be a fit for me.
+Agent: Certainly. Our forums provide 1:1 meetings with enterprise IT leaders, helping sponsors generate pipeline and measure ROI. Would that be valuable for your team?
+Contact: Not really sure I understand, I'm not an IT leader.
+Agent: I appreciate you clarifying that, Ellis. We work with both IT and marketing leaders to facilitate those connections. Would it be worth a brief conversation to explore if this aligns with your goals?
+Contact: Can you let me know what regions of what countries you operate in?
+Agent: We primarily operate in North America, with forums in major cities. Would that be relevant to your business?
+Contact: What's your business model like?
+Agent: We operate as a sponsorship-based model, where partners connect with executives through curated meetings at our events. Is there a specific area you're interested in?
+Contact: Well, I'm not sure. I still don't really understand your value proposition and how it pertains to me, although I can confirm I am a marketing leader.
+
+============================================================
+
+--- LEAD: 82e11dff-6235-4e10-8745-4a8c27ca0a43 ---
+Contact: Marc Fitten | marc.fitten@oracle.com
+Account: Oracle
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 4 total turns (2 agent, 2 contact) across ~30s.
+Agent focus: The agent introduced himself as Gabriel from Argyle Executive Forum, LLC and tried to engage Mark by asking about his day. He then pitched setting up 1-on-1 meetings with enterprise IT decision-makers to drive pipeline.
+Contact response: Mark briefly answered the greeting with 'brake' (likely 'great'), showing minimal engagement. He did not respond to the agent's question about prioritizing meetings with IT decision-makers.
+Outcome signal: no_meaningful_conversation ΓÇö The contact gave only a brief, unclear response to the initial greeting and did not engage with the agent's main pitch question.
+
+[Call Transcript]
+Contact: Hello this is mark.
+Agent: Hey Marc Fitten, thanks for picking up! This Gabriel, calling on behalf of Argyle Executive Forum, LLC. I know I'm catching you out of the blue, and I really appreciate you taking a moment. How's your day going so far?
+Contact: brake
+Agent: That's great to hear. The reason this caught my attention for someone in your role is that a lot of product marketing leaders have been really focused connecting directly with enterprise IT decision-makers to drive pipeline. We specialize in setting up those 1-on-1 meetings at our forums. Is something you're currently prioritizing?
+
+============================================================
+
+--- LEAD: b3aeddcc-1c7e-4ee4-ab4f-d49e54092587 ---
+Contact: Michael Griffiths | michael.griffiths@databricks.com
+Account: Databricks
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: 35.00 | AI Qual: not_qualified
+Call Duration: 82s
+QA Decision: Reanalysis: Needs review ΓÇö not qualified
+
+AI Analysis: {
+  "score": 35,
+  "analysis": {
+    "data_accuracy": {
+      "score": 100,
+      "evidence": "Contact data matches client criteria: Michael Griffiths, Head of Industry & Solutions Marketing at Databricks (10,001+ employees, Computer Software industry). Job title aligns with target audience of revenue-driven marketing/demand gen leaders."
+    },
+    "content_interest": {
+      "score": 20,
+      "evidence": "Prospect responded neutrally to weather small talk but did not engage with the core offe
+
+[TRANSCRIPT]
+Contact: le Michael
+Agent: Hey Michael Griffiths, thanks for picking up! This is Daniel, calling on behalf of Argyle Executive Forum, LLC. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: It's not bad. Sunny, warm weather, can't complain.
+Agent: That's great to hear! Well, the reason I reached out was that I noticed your role at Databricks focuses driving revenue through marketing and demand gen, a lot of the C-suite leaders we work with are prioritizing 1:1 meetings with partners like yourselves to evaluate new solutions. We host exclusive CIO and IT forums that provide curated to help you achieve that. Would that be something worth looking into?
+Contact: uh probably would we have a group that focuses really on those uh uh level we focus on CUS CUS CUS on those round tables in executive events so they would probably be the best suited to I I lead all of our industry marketing across verticals you know fins healthcare pubsec all that but they would probably be the right ones to talk about it we would be interested in we do a lot of our own first party uh events CUS forums and round tables and what not but uh yeah I think they'd probably probably be the best place to start.
+Agent: Thank you so much for your time, Michael. Have a great day!
+Contact: Are. Thanks.
+
+============================================================
+
+--- LEAD: 93e949e8-9644-4fb5-910b-420607dd3c38 ---
+Contact: Martin Pettersson | martin.pettersson@protegrity.com
+Account: Protegrity
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: new | AI Score: N/A | AI Qual: N/A
+Call Duration: N/As
+QA Decision: Created via disposition reanalysis override ΓÇö pending QA review
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 25 total turns (13 agent, 12 contact) across ~169s.
+Agent focus: The agent aimed to schedule a follow-up call to discuss Argyle Executive Forum's services for connecting with IT decision-makers, using a consultative approach by asking about timing and value.
+Contact response: The contact showed low engagement with unclear or off-topic responses, repeatedly asked for repetition, and eventually indicated a desire to end the call.
+Outcome signal: not_interested ΓÇö The contact stated 'I can cut the call and' and the agent acknowledged this by ending the conversation.
+
+[Call Transcript]
+Agent: Hello, may I speak with Martin Pettersson?
+Contact: Hello.
+Agent: Great, thanks for confirming. Hey Martin
+Contact: Hello, good morning.
+Agent: Hey Martin Pettersson, thanks for picking up! This is Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue and I appreciate you taking a moment. How's your day going so far?
+Contact: auto maintainer
+Agent: Sounds good. The reason I was calling is we're seeing a lot of demand generation leaders struggling to connect with the right enterprise IT decision-makers for their sponsorship initiatives. Our CIO and CISO forums provide targeted, 1:1 meetings with those exact executives. Does finding opportunities sound like it would be valuable?
+Contact: ALKAT the.
+Agent: What happens when those opportunities aren't being captured?
+Contact: sprecher
+Agent: I see. Well, securing those curated meetings is our primary focus. Would early next week or later in the week be better for a quick call to discuss how we can align with your goals?
+Contact: What. Do you repeat?
+Agent: I was just asking if early next week or later in the week would be better for a short call to see if our forums are a good fit.
+Contact: αñù αñùαñ╛αñíαñ╝αÑÇ
+Agent: Regarding how we can connect you with the right IT decision-makers for potential sponsorships.
+Contact: Could you repeat?
+Agent: Certainly. It's about how Argyle's forums can provide you with 1:1 meetings with enterprise IT leaders to help you meet your pipeline goals.
+Contact: Regarding what meeting?
+Agent: The meetings would be between you and enterprise IT decision-makers to discuss potential sponsorships.
+Contact: to discuss about
+Agent: To discuss how Argyle's forums can help you connect with those leaders.
+Contact: Are you from interest?
+Agent: I am calling from Argyle Executive Forum. Are you interested in exploring that further?
+Contact: I can cut the call and
+Agent: I understand. Thank you for your time! Have a great day.
+
+============================================================
+
+--- LEAD: abcf1b1a-e3e1-4997-a6bd-ff3d0d232222 ---
+Contact: Jerry Straub | jstraub@thetmg.com
+Account: Tarbell Management Group LLC
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: under_review | AI Score: 0.00 | AI Qual: needs_review
+Call Duration: N/As
+QA Decision: Manual review required (Score: 0/100)
+
+AI Analysis: {}
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 9 total turns (4 agent, 5 contact) across ~27s.
+Agent focus: The agent aimed to identify Jerry Straub, introduce himself as Gabriel from Argyle Executive Forum, and initiate a conversation about executive forums for IT leaders, using a friendly, direct approach.
+Contact response: The contact responded with brief, non-committal answers like 'It's fine' and switched to Spanish asking '┬┐D├│nde la puedo ver?', indicating low engagement and potential confusion or disinterest.
+Outcome signal: no_meaningful_conversation ΓÇö The call ended abruptly with the contact asking a question in Spanish that was unrelated to the agent's pitch, preventing any substantive discussion or clear resolution.
+
+[Call Transcript]
+Contact: alo
+Agent: Hello, may I speak with Jerry Straub?
+Contact: Hello Hello.
+Agent: Hey Jerry, thanks for picking up! This is Gabriel calling from Argyle Executive Forum.
+Contact: {} Yeah, who's this? {}
+Agent: This is Gabriel from Argyle Executive Forum, we host executive forums for CIOs, CISOs, and IT leaders. I know I'm catching you out of the blue, how's your day going?
+Contact: It's fine.
+Agent: Great. The reason I'm calling is we work with companies who want to connect
+Contact: ┬┐D├│nde la puedo ver?
+
+============================================================
+
+--- LEAD: 60bb63f7-3b23-4e4f-a4ad-ee88378cd029 ---
+Contact: Shezmeen Hudani | sprasad@brave.com
+Account: Brave
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: under_review | AI Score: 0.00 | AI Qual: needs_review
+Call Duration: N/As
+QA Decision: Manual review required (Score: 0/100)
+
+AI Analysis: {}
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 13 total turns (6 agent, 7 contact) across ~100s.
+Agent focus: The agent was trying to determine if the contact faced challenges connecting with CIOs/IT decision-makers and pitch Argyle Executive Forum's services. Their approach was to ask about current marketing challenges and offer email follow-up.
+Contact response: The contact was polite but disengaged, stating they have a wholesale team handling such needs and are 'okay for now.' They requested email information for future reference but showed no immediate interest.
+Outcome signal: not_interested ΓÇö The contact explicitly stated they don't currently need the service, have a team in place, and only requested email information for potential future reference with no commitment.
+
+[Call Transcript]
+Contact: Gez├ñhlt?
+Agent: Hello, may I speak with Shezmeen Hudani?
+Contact: Speaking please speak.
+Agent: Hey Shezmeen, thanks for picking up! This is Achird, calling on behalf of Argyle Executive Forum. I know I'm catching you out of the blue, but how's your day going so far?
+Contact: Yes sir. I was about to get into another meeting. How can we help you?
+Agent: I completely hear you, and I appreciate you taking a moment. The reason I was calling is we're finding many marketing VPs are challenged with securing direct, qualified meetings with CIOs and IT decision-makers. Our Argyle forums are designed specifically for that, offering 1:1 vertical-specific audiences. Are you facing similar challenges with your campaigns? understand, today we're working with marketing leaders like yourself who need access to enterprise decision-makers, and CISOs. Our forums curated to help you generate pipeline and track your ROI. What does your current approach to that look like?
+Contact: No, we're doing okay, actually. We have a wholesale team who does that and takes care of that, so I think I'm okay for now.
+Agent: That's great to hear you have a team in place. Just to make sure I'm not missing anything, does this topic of connecting with those CIOs touch your work at all, even indirectly?
+Contact: Not at the moment.
+Agent: I can certainly do that
+Contact: let me think, trying to think where I'm at on my side. I think that the like the team that I work with, they currently have been doing okay and have like a good pipeline so far. But, if you wanted to send me an email with your info, I can just keep that on file in case somebody approaches me and I'm looking for info, I can I can just reference back.
+Agent: I can certainly do that. Is shezmeen.hudani@brave.com the best email for that? Thank you so much for your time today! Have a great
+Contact: Thank you.
+
+============================================================
+
+--- LEAD: 7ce1e098-9562-4ba6-b8cd-4b631be3eb82 ---
+Contact: Mariya R Denkova | denkova@progress.com
+Account: Ipswitch IMail Server
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: approved | AI Score: 45.00 | AI Qual: qualified
+Call Duration: N/As
+QA Decision: Backfill: Moved to review ΓÇö AI score 45/100, status: not_qualified
+
+AI Analysis: {
+  "score": 45,
+  "analysis": {
+    "data_accuracy": {
+      "score": 100,
+      "evidence": "The contact and company data match the client's audience criteria as there are no specific restrictions on industry, company size, revenue, job title, or seniority level."
+    },
+    "content_interest": {
+      "score": 30,
+      "evidence": "Mariya asked 'What are the discussion topics?' showing some initial curiosity, but then stated 'I may be interested at a later point, but not right now.'"
+    },
+
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 17 total turns (8 agent, 9 contact) across ~93s.
+Agent focus: Hi, may I speak with Mariya R Denkova please?
+Contact response: Maybe in December.
+Outcome signal: Conversation ended without a strong explicit outcome signal.
+
+[Call Transcript]
+Contact: Hello. Hi Hi.
+Agent: Hi, may I speak with Mariya R Denkova please?
+Contact: Sure. It's me. Excuse me.
+Agent: Hi Mariya, Hi. May I speak with Maria Ardankova, please? this Achird calling on behalf of Argyle Executive Forum, LLC. We've been Hi, Maria. This is Akired calling on behalf of Argyle Executive Forum.
+Contact: Kimchi
+Agent: Yes, I can hear you. Can you hear me okay?
+Contact: Yes. Yes.
+Agent: Great. I was just saying, this is Achird calling LLC. Yes. I can hear you. Can you hear me okay? on behalf of Argyle Executive Forum, LLC. We've been working Great. I was just saying, this is Akired calling on behalf of Argyle Executive Forum, LLC. with sales and marketing leaders to set up curated 1-on-1 meetings with enterprise IT decision makers. I was We've been working with sales and marketing leaders to set up curated one on one meetings with curious if that's something you're focused on right now.
+Contact: Mhmm. I have no idea what this meeting will be about. I have no idea what this meeting will be about.
+Agent: No worries! It would be a brief discussion about opportunities enterprise IT decision makers. I was curious if that's something you're focused on right now. to connect with CIOs, CISOs, and other IT leaders through No worries. It would be a brief discussion about opportunities to connect with our forums. Would that be worth a quick chat? CIOs, CISOs, and other IT leaders through our forums. Would that be worth a quick chat?
+Contact: What are the discussion topics? What are the discussion topics?
+Agent: It's mainly about how our forums can help you target specific IT audiences and get 1-on-1 meetings with them. Is It's mainly about how our forums can help you target specific IT audience that something you're interested in?
+Contact: I may be interested at a later point, but not right now. Hey maybe to that a 11-min movie, but I am not right now.
+Agent: I understand. audiences and get one on one meetings with them. Is that something you're interested in? my notes. I understand, maybe at a later time then?
+Contact: Yes. αñ»αñ╛.
+Agent: Thank you so much for your time, Mariya. Let me check my notes. I understand. Maybe at a later time? Have a great day!
+Contact: Maybe in December.
+
+============================================================
+
+--- LEAD: 1ac2753f-83a5-40a2-a690-c2a99af338a6 ---
+Contact: Jason Iseman | jason.iseman@chownow.com
+Account: chownow
+Campaign: March and April: : CIO / IT / Security - Campaign
+QA Status: approved | AI Score: 51.00 | AI Qual: qualified
+Call Duration: N/As
+QA Decision: Backfill: Moved to review ΓÇö AI score 51/100, status: not_qualified
+
+AI Analysis: {
+  "score": 51,
+  "analysis": {
+    "data_accuracy": {
+      "score": 100,
+      "evidence": "The contact and company data match the client audience criteria, as the job title is Director of Marketing and no specific industry, size, or revenue is required."
+    },
+    "content_interest": {
+      "score": 0,
+      "evidence": "The contact did not express any interest in the sponsorship opportunities. The conversation was cut short."
+    },
+    "permission_given": {
+      "score": 0,
+      "evide
+
+[TRANSCRIPT]
+[Call Summary]
+Call overview: 19 total turns (9 agent, 10 contact) across ~76s.
+Agent focus: Hi, may.
+Contact response: Thank you, thank you so much. Mhmm. Thank you. Have a good day. Bye. Mhmm. Thank you. Bye. Thank you. Have a good day.ΓÇª.
+Outcome signal: Conversation ended without a strong explicit outcome signal.
+
+[Call Transcript]
+Contact: Hi. Can you send me a new card? ∞òä, Ω│ä∞åì φòÿδèö Ω▒░δïêΩ╣î.
+Agent: Hi, may
+Contact: Hi. IQS Santa Monica. 1 x 3
+Agent: I apologize for the connection there, can you hear me now?
+Contact: Hello? Hello.
+Agent: Am I
+Contact: Yes. I can hear you. Hello? Yes, I can hear you. Hello?
+Agent: Great. Am I speaking with Jason Iseman? Hi. I apologize for the connection there. Can you hear me now? Great.
+Contact: Who? I'm sorry?
+Agent: Hi Jason,
+Contact: Who? I'm sorry.
+Agent: this is Achird calling on behalf of Argyle Executive Forum, LLC. We're reaching out to connect you with 1:1 executive meetings with IT decision-makers. What's Am I speaking with Jason Iceman? Hi, Jason. Hi, Jason. This is Akhir calling on behalf of Argo Executive Forum LLC. We're reaching out to connect you with your question? this is Achird calling on behalf of Argyle Executive Forum, one on one executive meetings with IT decision makers. What is your question? LLC. I'm calling to discuss sponsorship opportunities. This is Akired calling on behalf of Argyle Executive Forum LLC. Did you have a moment?
+Contact: Oh, the the code he wasn't here. He will be back in forty five minutes later. Could you please call half an hour later? Oh. The Cody he wasn't here. He will be back in 45 minutes later. Could you please call half an hour later?
+Agent: Oh, I see. He's not at his desk right I'm calling to discuss sponsorship opportunities. Did you have a moment? now? I can certainly call back in 30 minutes. Is that okay? Oh, I see. He's not at his desk right now. I can certainly call back in thirty minutes. Is that okay?
+Contact: Yes. Correct. Thank you. Yes. It's correct. Yeah. Okay. Thank you. Yes correct, thank you, yes it's correct yeah. It's okay. Thank you.
+Agent: Perfect, I'll set a reminder for that. Thank you so much for your time, have a great day! Perfect, I'll give him a call back then. Thank you so much, have a Perfect. I'll set a reminder for that. Thank you so much for your time. Have a good day. great day! my schedule for that time. Thank you so much Perfect. I'll give him a callback then. Thank you so much. Have a good day. Let me check for that time. for your time, Jason. Have a great day!
+Contact: Thank you. Thank you so much.
+Agent: Thank you so much, have a great day!
+Contact: Thank you, thank you so much. Mhmm. Thank you. Have a good day. Bye. Mhmm. Thank you. Bye. Thank you. Have a good day. Bye. Thank you. Bye.
+
+============================================================
+
+--- LEAD: 2c4f2ffe-0855-40c0-a8be-5b0f9c7a94c3 ---
+Contact: Mithila Wegapitiya | mithila@potenza.sg
+Account: potenza.sg
+Campaign: Argyle ApointmentGen
+QA Status: approved | AI Score: 78.00 | AI Qual: qualified
+Call Duration: 58s
+QA Decision: ≡ƒô₧ CALLBACK REQUESTED: Prospect asked to be called back. Schedule and confirm callback time.
+
+AI Analysis: {
+  "score": "78.00",
+  "summary": "Call with Mithila Wegapitiya for Appointment Setting Request - Campaign. Duration: 58s. No meaningful contact engagement detected in transcript.",
+  "analyzed_at": "2026-02-18T01:11:33.662Z",
+  "analysis_method": "backfill_scoring",
+  "scoring_breakdown": {
+    "duration": 12,
+    "interest": 20,
+    "engagement": 23,
+    "campaign_fit": 8,
+    "qualification": 16
+  },
+  "qualification_status": "qualified"
+}
+
+============================================================
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0

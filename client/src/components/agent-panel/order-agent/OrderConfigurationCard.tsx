@@ -1,6 +1,6 @@
 /**
  * OrderConfigurationCard
- * Displays and allows editing of order configuration within AgentX chat
+ * Displays and allows editing of order configuration within AgentC chat
  */
 import { useState } from 'react';
 import { motion } from 'framer-motion';

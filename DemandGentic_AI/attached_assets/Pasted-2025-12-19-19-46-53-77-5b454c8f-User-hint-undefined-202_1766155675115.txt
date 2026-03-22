@@ -1,0 +1,84 @@
+2025-12-19 19:46:53.77
+5b454c8f
+User
+hint: undefined,
+2025-12-19 19:46:53.77
+5b454c8f
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-12-19 19:46:53.77
+5b454c8f
+User
+internalQuery: undefined,
+2025-12-19 19:46:53.77
+5b454c8f
+User
+severity: 'ERROR',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+[ElevenLabs Webhook] Error: error: null value in column "call_job_id" of relation "call_sessions" violates not-null constraint
+2025-12-19 19:46:53.77
+5b454c8f
+User
+internalPosition: undefined,
+2025-12-19 19:46:53.77
+5b454c8f
+User
+table: 'call_sessions',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+code: '23502',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+dataType: undefined,
+2025-12-19 19:46:53.77
+5b454c8f
+User
+at async file:///home/runner/workspace/dist/index.js:33990:27 {
+2025-12-19 19:46:53.77
+5b454c8f
+User
+routine: 'ExecConstraints'
+2025-12-19 19:46:53.77
+5b454c8f
+User
+at async NeonPreparedQuery.execute (file:///home/runner/workspace/node_modules/drizzle-orm/neon-serverless/session.js:76:20)
+2025-12-19 19:46:53.77
+5b454c8f
+User
+where: undefined,
+2025-12-19 19:46:53.77
+5b454c8f
+User
+detail: 'Failing row contains (f7ca2f5b-0cf4-4004-85ce-2b229118e3aa, null, null, null, , 2025-12-19 14:46:53.74, 2025-12-19 14:46:53.74, 0, null, completed, 2025-12-19 14:46:53.761992, ai, agent_4701kctbjseeeefakcshzhks3whw, conv_8101kcvh54w1emmv1k4abr2ndzpg, [{"role":"agent","agent_metadata":{"agent_id":"agent_4701kctbjse..., {"call_successful": "success", "call_summary_title": "Reaching J..., Completed, null, ae5b353d-64a9-44d8-92cf-69d4726ca121, 8c4e33fe-caed-4152-abb6-72e0cd0f3756, 2a4dcdd2-6663-4d1e-8ee2-6e97ae8ba68a).',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+column: 'call_job_id',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+2025-12-19 19:46:53.77
+5b454c8f
+User
+line: '2032',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+schema: 'public',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+constraint: undefined,
+2025-12-19 19:46:53.77
+5b454c8f
+User
+file: 'execMain.c',
+2025-12-19 19:46:53.77
+5b454c8f
+User
+length: 712,

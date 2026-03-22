@@ -1,0 +1,354 @@
+import { spawn, execSync } from 'child_process';
+import http from 'http';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
+
+// Helper to parse .env file simple
+function parseEnv(filePath: string) {
+    if (!fs.existsSync(filePath)) return {};
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const env: Record = {};
+    content.split('\n').forEach(line => {
+        const cleanLine = line.replace(/\r$/, ''); // Strip Windows line endings
+        const match = cleanLine.match(/^([^=]+)=(.*)$/);
+        if (match) {
+            let value = match[2].trim();
+            if (value.startsWith('"') && value.endsWith('"')) {
+                value = value.slice(1, -1);
+            }
+            env[match[1].trim()] = value;
+        }
+    });
+    return env;
+}
+
+// Load envs with explicit development precedence:
+// .env -> .env.development -> .env.local -> .env.development.local
+const envDefault = parseEnv(path.join(process.cwd(), '.env'));
+const envDevelopment = parseEnv(path.join(process.cwd(), '.env.development'));
+const envLocal = parseEnv(path.join(process.cwd(), '.env.local'));
+const envDevLocal = parseEnv(path.join(process.cwd(), '.env.development.local'));
+const mergedEnv = { ...envDefault, ...envDevelopment, ...envLocal, ...envDevLocal };
+
+function resolveEnv(key: string): string | undefined {
+    return process.env[key] || envDevLocal[key] || envLocal[key] || envDevelopment[key] || envDefault[key];
+}
+
+const devDatabaseUrl = resolveEnv('DATABASE_URL_DEV');
+if (!devDatabaseUrl) {
+  console.error('❌ DATABASE_URL_DEV is required for isolated development mode.');
+  console.error('   Create .env.development with DATABASE_URL_DEV=... and retry.');
+  process.exit(1);
+}
+
+// Determine PORT: process.env > .env.local > .env > 5000
+const PORT_STR = '5000';
+const PORT = parseInt(PORT_STR, 10);
+console.log(`ℹ️  Resolved PORT to ${PORT}`);
+
+// Check if ngrok is installed
+try {
+  execSync('ngrok --version', { stdio: 'ignore' });
+} catch (e) {
+  console.error('❌ ngrok is not installed or not in PATH.');
+  console.error('Please install ngrok to use the development tunnel.');
+  process.exit(1);
+}
+
+// Global cleanup of ngrok
+// try {
+//     if (process.platform === 'win32') {
+//        execSync('taskkill /F /IM ngrok.exe', { stdio: 'ignore' });
+//     } else {
+//        execSync('pkill ngrok', { stdio: 'ignore' });
+//     }
+// } catch(e) {} 
+
+
+// Helper to kill port
+try {
+  if (process.platform === 'win32') {
+    try {
+        const cmd = `for /f "tokens=5" %a in ('netstat -aon ^| find ":${PORT}" ^| find "LISTENING"') do taskkill /f /pid %a`;
+        execSync(cmd, { stdio: 'ignore', shell: 'cmd.exe' });
+        console.log(`🧹 Freed port ${PORT}`);
+    } catch(e) {
+        // Ignore if no process found
+    }
+  } else {
+    try {
+        execSync(`lsof -ti:${PORT} | xargs kill -9`, { stdio: 'ignore' });
+        console.log(`🧹 Freed port ${PORT}`);
+    } catch(e) {
+        // Ignore if no process found
+    }
+  }
+} catch (e) {
+  // Ignore errors
+}
+
+console.log(`🚀 Starting ngrok tunnel on port ${PORT}...`);
+
+let tunnelUrl: string | null = null;
+let devProcess: any = null;
+let ngrokProcess: any = { kill: () => {} };
+
+// Helper to fetch tunnel URL from ngrok local API
+function getTunnels() : Promise {
+    return new Promise((resolve) => {
+        const req = http.get('http://127.0.0.1:4040/api/tunnels', { timeout: 1000 }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    const tunnel = json.tunnels.find((t: any) => t.proto === 'https');
+                    if (tunnel) {
+                        resolve(tunnel.public_url.replace('https://', 'wss://'));
+                    } else {
+                        resolve(null);
+                    }
+                } catch (e) {
+                    resolve(null);
+                }
+            });
+        });
+
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => {
+            req.destroy();
+            resolve(null);
+        });
+    });
+}
+
+// Check if ngrok is already running
+const checkExistingNgrok = async (): Promise => {
+  try {
+    const url = await getTunnels();
+    return url !== null;
+  } catch {
+    return false;
+  }
+};
+
+// Start ngrok if not already running
+(async () => {
+  const existingTunnel = await checkExistingNgrok();
+  if (!existingTunnel) {
+    console.log('📡 Starting ngrok tunnel...');
+    ngrokProcess = spawn('ngrok', ['http', `127.0.0.1:${PORT}`, '--log=stdout'], {
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    // Stream ngrok output to console for debugging
+    ngrokProcess.stdout?.on('data', (data: Buffer) => {
+      const msg = data.toString();
+      if (msg.includes('lvl=eror') || msg.includes('lvl=warn') || msg.includes('502 Bad Gateway') || msg.includes('503 Service Unavailable')) {
+        process.stderr.write(`[ngrok] ${msg}`);
+      }
+    });
+    ngrokProcess.stderr?.on('data', (data: Buffer) => {
+      process.stderr.write(`[ngrok err] ${data.toString()}`);
+    });
+  } else {
+    console.log('✅ Using existing ngrok tunnel');
+  }
+})();
+
+// Poll for tunnel
+let attempts = 0;
+const maxAttempts = 120; // 60 seconds (increased from 10s to allow ngrok updates/connect)
+
+const pollInterval = setInterval(async () => {
+    attempts++;
+    process.stdout.write('.');
+    
+    tunnelUrl = await getTunnels();
+    
+    if (tunnelUrl) {
+        clearInterval(pollInterval);
+        console.log('\n');
+        startDevServer();
+    } else if (attempts >= maxAttempts) {
+        clearInterval(pollInterval);
+        console.warn('\n⚠️  Failed to obtain ngrok URL after 10 seconds.');
+        console.warn('Starting dev server without ngrok tunnel...');
+        console.warn('Local development server: http://localhost:' + PORT);
+        startDevServer();
+    }
+}, 500);
+
+// ============ Mailgun Webhook Registration ============
+
+const MAILGUN_EVENT_TYPES = [
+  'delivered', 'opened', 'clicked', 'permanent_fail', 'temporary_fail', 'complained', 'unsubscribed'
+];
+
+async function registerMailgunWebhooks(webhookUrl: string, apiKey: string, domain: string): Promise {
+  console.log(`\n📧 Registering Mailgun webhooks for ${domain}...`);
+  console.log(`   Target URL: ${webhookUrl}`);
+
+  for (const eventType of MAILGUN_EVENT_TYPES) {
+    try {
+      // Try PUT first (update existing), fall back to POST (create new)
+      const success = await mailgunWebhookRequest('PUT', eventType, webhookUrl, apiKey, domain);
+      if (!success) {
+        await mailgunWebhookRequest('POST', eventType, webhookUrl, apiKey, domain);
+      }
+      console.log(`   ✅ ${eventType}`);
+    } catch (err: any) {
+      console.warn(`   ⚠️  ${eventType}: ${err.message || err}`);
+    }
+  }
+
+  console.log(`📧 Mailgun webhook registration complete.\n`);
+}
+
+function mailgunWebhookRequest(
+  method: 'PUT' | 'POST',
+  eventType: string,
+  webhookUrl: string,
+  apiKey: string,
+  domain: string
+): Promise {
+  return new Promise((resolve, reject) => {
+    const urlPath = method === 'PUT'
+      ? `/v3/domains/${domain}/webhooks/${eventType}`
+      : `/v3/domains/${domain}/webhooks`;
+
+    const body = method === 'PUT'
+      ? `url=${encodeURIComponent(webhookUrl)}`
+      : `id=${eventType}&url=${encodeURIComponent(webhookUrl)}`;
+
+    const auth = Buffer.from(`api:${apiKey}`).toString('base64');
+
+    const options = {
+      hostname: 'api.mailgun.net',
+      path: urlPath,
+      method,
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode  need https://xxxx.ngrok.io for webhooks
+  let publicWebhookHost = `localhost:${PORT}`;
+  let telnyxWebhookUrl = `http://localhost:${PORT}/`;
+
+  if (tunnelUrl) {
+    // tunnelUrl is like "wss://xxxx.ngrok-free.app" - convert to https host
+    publicWebhookHost = tunnelUrl.replace('wss://', '').replace('ws://', '');
+    telnyxWebhookUrl = `https://${publicWebhookHost}/`;
+    console.log(`✅ Tunnel established: ${tunnelUrl}`);
+    console.log(`🔗 PUBLIC_WEBHOOK_HOST=${publicWebhookHost}`);
+    console.log(`🔗 TELNYX_WEBHOOK_URL=${telnyxWebhookUrl}`);
+  }
+  // Register Mailgun webhooks with ngrok URL
+  let mailgunWebhookUrl = '';
+  if (tunnelUrl) {
+      mailgunWebhookUrl = `https://${publicWebhookHost}/api/mailgun/webhooks`;
+      console.log(`🔗 MAILGUN_WEBHOOK_URL=${mailgunWebhookUrl}`);
+
+      const mailgunApiKey = resolveEnv('MAILGUN_API_KEY');
+      const mailgunDomain = resolveEnv('MAILGUN_DOMAIN');
+      if (mailgunApiKey && mailgunDomain) {
+          // Non-blocking — register in background, don't delay server start
+          registerMailgunWebhooks(mailgunWebhookUrl, mailgunApiKey, mailgunDomain).catch(err => {
+            console.warn(`⚠️  Mailgun webhook registration failed: ${err.message}`);
+          });
+      } else {
+          console.warn('⚠️  MAILGUN_API_KEY or MAILGUN_DOMAIN not set — skipping Mailgun webhook registration');
+      }
+  }
+
+  if (tunnelUrl) {
+      console.log(`✅ Using ngrok tunnel for PUBLIC_WEBSOCKET_URL (ignoring env placeholder)`);
+  } else {
+      console.log(`⚠️  No ngrok tunnel - forcing localhost-safe websocket/webhook URLs`);
+  }
+  console.log(`🔗 PUBLIC_WEBSOCKET_URL=${publicWsUrl}`);
+  console.log('---------------------------------------------------');
+
+  // Start the dev server
+  console.log('🚀 Starting Express + Vite dev server...');
+
+  // Use NODE_OPTIONS to preload warning suppression script before anything else
+  const preloadPath = path.resolve(process.cwd(), 'server/preload-suppress.cjs');
+  const existingNodeOptions = process.env.NODE_OPTIONS || '';
+
+  // Escape backslashes for Windows paths in NODE_OPTIONS
+  const escapedPreloadPath = preloadPath.replace(/\\/g, '\\\\');
+
+  const env = {
+      ...process.env,
+      ...mergedEnv,
+      DATABASE_URL: devDatabaseUrl,
+      REDIS_URL: resolveEnv('REDIS_URL_DEV') || '',
+      PUBLIC_WEBSOCKET_URL: publicWsUrl,
+      PUBLIC_WEBHOOK_HOST: publicWebhookHost,
+      TELNYX_WEBHOOK_URL: telnyxWebhookUrl,
+      MAILGUN_WEBHOOK_URL: mailgunWebhookUrl || resolveEnv('MAILGUN_WEBHOOK_BASE_URL') || '',
+      NODE_ENV: 'development',
+      STRICT_ENV_ISOLATION: 'true',
+      ALLOW_SHARED_REDIS_IN_DEV: resolveEnv('ALLOW_SHARED_REDIS_IN_DEV') || 'false',
+      PORT: PORT.toString(),
+      NODE_OPTIONS: `--require "${escapedPreloadPath}" ${existingNodeOptions}`.trim()
+  };
+
+  // We run 'tsx server/index.ts' directly as in the original dev script
+  // Original: "cross-env NODE_ENV=development tsx server/index.ts"
+
+  devProcess = spawn('npx', ['tsx', 'server/index.ts'], {
+    stdio: 'inherit',
+    env: env,
+    shell: true
+  });
+
+  devProcess.on('close', (code: number) => {
+    if (code !== 0) {
+        console.error(`❌ Dev server exited with code ${code}. Check logs above for errors.`);
+    }
+    cleanup();
+    process.exit(code || 0);
+  });
+}
+
+function cleanup() {
+  if (devProcess) {
+    try {
+        // Look for the node process. On windows spawn shell:true might make the pid the shell's usage.
+        // We rely on standard process killing.
+        // On Windows sometimes we need taskkill for tree.
+        if (process.platform === 'win32') {
+             execSync(`taskkill /pid ${devProcess.pid} /T /F`, { stdio: 'ignore' });
+        } else {
+             devProcess.kill();
+        }
+    } catch (e) {}
+  }
+  
+  if (ngrokProcess) {
+    console.log('\n🛑 Stopping ngrok...');
+    try {
+        ngrokProcess.kill();
+    } catch (e) {}
+  }
+}
+
+// Handle exit signals
+process.on('SIGINT', () => {
+    cleanup();
+    process.exit();
+});
+process.on('SIGTERM', () => {
+    cleanup();
+    process.exit();
+});

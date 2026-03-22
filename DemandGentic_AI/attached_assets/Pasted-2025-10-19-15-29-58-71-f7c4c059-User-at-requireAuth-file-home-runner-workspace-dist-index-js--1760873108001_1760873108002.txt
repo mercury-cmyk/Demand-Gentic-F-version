@@ -1,0 +1,80 @@
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at requireAuth (file:///home/runner/workspace/dist/index.js:9211:3)
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at next (/home/runner/workspace/node_modules/express/lib/router/route.js:149:13)
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at Route.dispatch (/home/runner/workspace/node_modules/express/lib/router/route.js:119:3)
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at /home/runner/workspace/node_modules/express/lib/router/index.js:284:15
+2025-10-19 15:29:58.71
+f7c4c059
+User
+at Function.process_params (/home/runner/workspace/node_modules/express/lib/router/index.js:346:12)
+2025-10-19 16:23:14.12
+dd97393f
+User
+Agent dashboard stats error: ReferenceError: callJobs is not defined
+2025-10-19 16:23:14.12
+dd97393f
+User
+at file:///home/runner/workspace/dist/index.js:14527:50
+2025-10-19 16:23:14.12
+dd97393f
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 16:23:14.12
+dd97393f
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 16:23:14.12
+dd97393f
+User
+at next (/home/runner/workspace/node_modules/express/lib/router/route.js:149:13)
+2025-10-19 16:23:14.12
+dd97393f
+User
+at /home/runner/workspace/node_modules/express/lib/router/index.js:284:15
+2025-10-19 16:23:14.12
+dd97393f
+User
+at Function.process_params (/home/runner/workspace/node_modules/express/lib/router/index.js:346:12)
+2025-10-19 16:23:20.50
+dd97393f
+User
+Agent dashboard stats error: ReferenceError: callJobs is not defined
+2025-10-19 16:23:20.50
+dd97393f
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 16:23:20.50
+dd97393f
+User
+at next (/home/runner/workspace/node_modules/express/lib/router/route.js:149:13)
+2025-10-19 16:23:20.50
+dd97393f
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 16:23:20.50
+dd97393f
+User
+at Layer.handle [as handle_request] (/home/runner/workspace/node_modules/express/lib/router/layer.js:95:5)
+2025-10-19 16:23:20.50
+dd97393f
+User
+at /home/runner/workspace/node_modules/express/lib/router/index.js:284:15

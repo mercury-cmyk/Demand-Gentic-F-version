@@ -1,0 +1,44 @@
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+10:00:57 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b 304 in 31m…
+[DB Pool] Client connected | Total: 3, Idle: 1, Waiting: 0
+[DB Pool] Client connected | Total: 3, Idle: 1, Waiting: 0
+10:00:57 PM [express] GET /api/custom-fields 304 in 120ms :: [{"id":"347c52f5-f20b-46d0-917f-c33337bb…
+10:00:57 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 200 …
+10:00:58 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+10:01:08 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 200 …
+10:01:10 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+10:01:16 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 200 …
+10:01:17 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+Error exporting smart template: error: invalid input value for enum verification_email_status: ""
+    at file:///home/runner/workspace/node_modules/@neondatabase/serverless/index.mjs:1087:33
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async  (/home/runner/workspace/server/routes/verification-campaigns.ts:891:20) {
+  length: 114,
+  severity: 'ERROR',
+  code: '22P02',
+  detail: undefined,
+  hint: undefined,
+  position: '1524',
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'enum.c',
+  line: '129',
+  routine: 'enum_in'
+}
+10:01:23 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/export-sma…
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+10:01:26 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 200 …
+10:01:28 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/stats 200 …
+10:01:30 PM [express] GET /api/verification-campaigns/9ed0de24-2e46-4881-958c-2d2e7017f60b/account-ca…

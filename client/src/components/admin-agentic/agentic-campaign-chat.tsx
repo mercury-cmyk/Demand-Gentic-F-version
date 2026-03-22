@@ -262,7 +262,7 @@ export function AgenticCampaignChat({
         </div>
         <div className="flex items-center justify-center gap-2 mt-2 text-xs text-muted-foreground">
           <Sparkles className="h-3 w-3" />
-          <span>Powered by AgentX AI</span>
+          <span>Powered by AgentC AI</span>
         </div>
       </CardContent>
     </Card>

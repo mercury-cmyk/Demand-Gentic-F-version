@@ -5,7 +5,7 @@
  * with optional Vertex AI enrichment for Organization Intelligence context.
  *
  * Used by:
- * - AgentX for research-grade responses
+ * - AgentC for research-grade responses
  * - Agentic reports for deep market analysis
  * - Campaign planning for competitive intelligence
  */

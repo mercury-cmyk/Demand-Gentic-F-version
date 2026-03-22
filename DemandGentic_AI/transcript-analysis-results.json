@@ -1,0 +1,2022 @@
+{
+  "summary": {
+    "totalCalls": 100,
+    "potentialLeads": 3,
+    "notInterested": 0,
+    "voicemails": 23,
+    "unclear": 74
+  },
+  "potentialLeads": [
+    {
+      "id": "0122a9fb-d265-4b29-8bd0-2dfeaf788aaa",
+      "contactName": "Emma Tasker",
+      "company": "Meeting Place",
+      "email": "emmatasker@meeting-place.uk",
+      "phone": "+447941920586",
+      "duration": 125,
+      "transcript": "assistant: Hello, may I please speak with Emma Tasker, the Head of Business Development & Marketing at Meeting Place?",
+      "createdAt": "2026-01-15 09:57:04.731809",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "a95a27f6-86af-4049-8a25-959fe14cf9fe",
+      "contactId": "26157536-4e30-40aa-9677-6043c1597ed8",
+      "analysis": {
+        "likelyDisposition": "qualified_lead",
+        "confidence": 0.6,
+        "positiveMatches": [
+          "meeting"
+        ],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "1ce72c91-bd0a-4ec9-88d5-7bb71b09c584",
+      "contactName": "Steven Meyer",
+      "company": "Allegis Corporation",
+      "email": "steven@allegiscorp.com",
+      "phone": "+14252426680",
+      "duration": 120,
+      "transcript": "assistant: Hello, may I please speak with Steven Jay Meyer, the Executive Vice President Sales and Marketing at Allegis Corporation?\nuser: To place, change or check on an order, press 1. For price and availability, press 2. For application or design assistance, press 3. To speak to someone at our corporate office, press 4. For all other inquiries, press 5.\nassistant: I've selected the option to speak to someone at the corporate office. Let's see who responds.It seems we’ve reached\nuser: You have reached the Allegis Corporate Offices. Please choose from one of the following options.\nassistant: It looks like there was\nuser: For Finance, press 1. For Purchasing, press 2. For Expediting, press 3. For Marketing, press 4. For the Allegis Resource Center, press 5. For Human Resources, press 6. For IT, press 7. For Engineering, press 8. For Supply Chain Services, press 9. For a Dial-by-Name Directory, press 0.\nassistant:  an issue sending that input. Let’s try again. Could you let me know which department or option you believe would best connect\nuser: For Finance, press 1. For Purchasing, press 2. For Expediting, press 3. For Marketing, press 4. For the Allegis Resource Center, press 5. For Human Resources, press 6. For IT, press 7. For Engineering, press 8. For Supply Chain Services, press 9. For a Dial-by-Name Directory, press 0.\nassistant: I'm having trouble sending the input to navigate the directory. It might be a technical\nuser: For Finance, press 1. For Purchasing, press 2. For Expediting, press 3. For Marketing, press 4. For the Allegis Resource Center, press 5. For Human Resources, press 6. For IT, press 7. For Engineering, press 8. For Supply Chain Services, press 9. For a Dial-by-Name Directory, press 0.",
+      "createdAt": "2026-01-15 15:28:04.730157",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "a91c547c-7275-4053-aedd-f65ff7b9ebe7",
+      "contactId": "53abee37-57a3-4b67-92b9-7e35cad19192",
+      "analysis": {
+        "likelyDisposition": "engaged_conversation",
+        "confidence": 0.5,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c44ce994-f2d8-4d4a-8957-d8e9db241ca1",
+      "contactName": "Steven Meyer",
+      "company": "Allegis Corporation",
+      "email": "steven@allegiscorp.com",
+      "phone": "+14252426680",
+      "duration": 94,
+      "transcript": "assistant: Hello, may I please speak with Steven Jay Meyer, the Executive Vice\nuser: To place, change or check on an order, press 1. For price and availability, press 2. For application or design assistance, press 3. To speak to someone at our corporate office, press 4. For all other inquiries, press 5.\nassistant: I've selected the option to connect to someone at the corporate office. Let's wait and see who answers.\nuser: You have reached the Allegis Corporate Offices. Please choose from one of the following options.\nuser: For Finance, press 1. For Purchasing, press 2. For Expediting, press 3. For Marketing, press 4. For the Allegis Resource Center, press 5. For Human Resources, press 6. For IT, press 7. For Engineering, press 8. For Supply Chain Services, press 9. For a Dial-by-Name Directory, press 0.\nuser: For Finance, press 1. For Purchasing, press 2. For Expediting, press 3. For Marketing, press 4. For the Allegis Resource Center, press 5. For Human Resources, press 6. For IT, press 7. For Engineering, press 8. For Supply Chain Services, press 9. For a Dial-by-Name Directory, press 0.",
+      "createdAt": "2026-01-15 15:28:49.702154",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "a91c547c-7275-4053-aedd-f65ff7b9ebe7",
+      "contactId": "53abee37-57a3-4b67-92b9-7e35cad19192",
+      "analysis": {
+        "likelyDisposition": "engaged_conversation",
+        "confidence": 0.5,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    }
+  ],
+  "notInterested": [],
+  "voicemails": [
+    {
+      "id": "d83c16d2-adb7-4ad5-9cdd-675801d09c3b",
+      "contactName": "Matthew Smith",
+      "company": "Bad Cat Amplifiers",
+      "email": "matthew@badcatamps.com",
+      "phone": "+447711718625",
+      "duration": 142,
+      "transcript": "assistant: Hey there! Sounds like you just blew a whistle or maybe let out a big breath. What’s going on? Need a hand with something or just feeling playful?Hello, may I please speak with Matthew Smith, the Director of International Business Development at Bad Cat Amplifiers?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message press 1, to re-record your message press 2, to continue recording your message press 3, if you are happy with your message press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:59:39.933762",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "5f1058e9-89dc-4067-88a8-e22e6830eea4",
+      "contactId": "139efd9a-3844-4a01-947d-c28174d6eccd",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "232630c6-a31b-46fb-8d47-292fd7c61430",
+      "contactName": "Mark Halling",
+      "company": "SightGlass Vision Inc.",
+      "email": "mhalling@sightglassvision.com",
+      "phone": "+447966747639",
+      "duration": 141,
+      "transcript": "assistant: Hey there! That’s quite a lively sound! How’s it going? Are you working on something fun or just testing things out?Hello, may I please speak with Mark Halling, the Senior Director - Global Business Development at SightGlass Vision Inc.?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message press 1, to re-record your message press 2, to continue recording your message press 3, if you are happy with your message press 4. To specify a number for your message recipient to call you back on, that is different to the number you are calling from, press 5.",
+      "createdAt": "2026-01-15 09:57:32.706921",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "efbc6299-131e-42e1-9568-bf79290d0010",
+      "contactId": "4ddcdada-8de6-4e70-a11e-25e655affe12",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "ec2c4f05-9051-475d-b8a1-cfaa8c4c4f61",
+      "contactName": "Jerry Barras",
+      "company": "Reed Smith Llp.",
+      "email": "jbarras@reedsmith.com",
+      "phone": "+447951588602",
+      "duration": 140,
+      "transcript": "assistant: ¡Hola, hola! ¡Te oigo fuerte y claro! ¿Qué tal, cómo andas? ¿En qué te puedo ayudar hoy?Hello, may I please speak with Jerry Barras, the Director Of Business Development, Industries at Reed Smith Llp.?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:58:01.027356",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "edd4b32d-2dba-4fb0-b2dd-26e78cf07460",
+      "contactId": "142010b7-4809-4a37-a50f-656088980569",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "ca037848-02d1-4efc-9245-6b64507e0405",
+      "contactName": "Lee Derrick",
+      "company": "Garmany Golf",
+      "email": "lee@garmanygolf.com",
+      "phone": "+447949078827",
+      "duration": 139,
+      "transcript": "assistant: Hey! That was a pretty loud sound. Everything okay over there? Need any help or just testing something out?Hello, may I please speak with Lee Derrick, the Director of International Business Development at Garmany Golf?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:57:30.171357",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "fc05ef01-e17f-4ea8-8955-fb7e7dbe002c",
+      "contactId": "927c4216-0a43-43c7-b042-22b354bd6fcf",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "43ba2f63-f1e0-4a1f-bc2f-1cb0fcd71bbb",
+      "contactName": "Amanda Nassar",
+      "company": "Morgan, Lewis & Bockius Llp.",
+      "email": "amanda.nassar@morganlewis.com",
+      "phone": "+447970664115",
+      "duration": 137,
+      "transcript": "assistant: Hey there! Sounds like you're in a great mood—what’s going on? Anything fun you want to share or talk about?Hello, may I please speak with Amanda Nassar, the Business Development Director, Strategic Initiatives & Task Forces at Morgan, Lewis & Bockius Llp.?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:00:04.024754",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "73228446-3b26-4aa2-a5eb-5ff6c9d96ad2",
+      "contactId": "820af0f8-4bcd-4c4a-9555-7620088e5e04",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [
+          "great"
+        ],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "2f9188cc-3328-47d0-87c6-9c3ce56fc6f7",
+      "contactName": "Katherine Pitcher",
+      "company": "Mastercard",
+      "email": "katherine.pitcher@mastercard.com",
+      "phone": "+447779664545",
+      "duration": 125,
+      "transcript": "assistant: Hey, that was a pretty loud sound! Everything okay over there? Let me know if you need help with something, or if you just felt like making some noise!Hello, may I please speak with Katherine Pitcher, the Director of Business Development at Mastercard?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:56:46.438157",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "7777d250-7894-43cd-a405-5d400a702b26",
+      "contactId": "7a7c8089-1dcf-40b6-806f-e4d4cb0169a0",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "c5459227-4dab-4bf2-b3b2-0222c3db5fc1",
+      "contactName": "James Cox",
+      "company": "Network Optix",
+      "email": "jcox@networkoptix.com",
+      "phone": "+447497899419",
+      "duration": 125,
+      "transcript": "assistant: Whoa, that sounded pretty intense! Everything okay over there? What’s going on?That was quite a loud noise! Sounds like something might have fallen or there's some sudden movement. Are you okay?Hello, may I please speak with James Cox, the Vice President Of Business Development at Network Optix?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:58:18.233668",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ba0d08e4-6ea6-44cb-9b33-c61b626b8aa4",
+      "contactId": "9a1ce770-9944-4e05-96d8-a105b824dd1f",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "ae6b6209-0411-4fa5-8a21-126bf21f0332",
+      "contactName": "Louise French",
+      "company": "Beanstalk",
+      "email": "louise.french@beanstalk.com",
+      "phone": "+447720880102",
+      "duration": 125,
+      "transcript": "assistant: Hey there! I noticed that loud noise. Sounds like something just popped or maybe you’re working with some equipment. Everything okay over there? I’m here to help if you need anything.Hello, may I please speak with Louise French, the SVP Business Development & Operations at Beanstalk?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:02:55.81334",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "686de47f-52a3-4532-898f-d75027173b2a",
+      "contactId": "c5a3db3a-8bfa-4944-8414-ade022c389ea",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "d5ce5a07-4be1-46c7-af07-5563021c4d56",
+      "contactName": "Louise French",
+      "company": "Beanstalk",
+      "email": "louise.french@beanstalk.com",
+      "phone": "+447720880102",
+      "duration": 116,
+      "transcript": "assistant: Hello, may I please speak with Louise French, the SVP Business Development & Operations at Beanstalk?\nuser: Sorry, but I couldn't hear anything. Please re-record your message after the tone.\nassistant: I'm having trouble sending the tones right now. It seems the call system isn't responding to those keypad inputs. If you're able to navigate the menu or need help with something specific, feel free to guide me.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nassistant: It looks like the\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:02:54.581708",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "686de47f-52a3-4532-898f-d75027173b2a",
+      "contactId": "c5a3db3a-8bfa-4944-8414-ade022c389ea",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "ec8263a3-d487-4ea7-8e55-1a1abd1dd65f",
+      "contactName": "Graham Dallas",
+      "company": "TMX Group",
+      "email": "graham.dallas@tmx.com",
+      "phone": "+447717768879",
+      "duration": 108,
+      "transcript": "assistant: Hello, may I please speak with Graham Dallas, the Head of Business Development, Europe, Middle East and Africa at TMX Group?I’m\nuser: After the tone.\nassistant:  sorry, I didn’t quite catch that. Am I speaking with Graham Dallas?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:00:06.423242",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "f0187703-11fd-49b6-bf3b-11a3c2819e49",
+      "contactId": "8c6ab087-e617-49a7-b0d6-5ee9f90f92dd",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "68335149-3a09-490d-9a04-3d7d8922bae4",
+      "contactName": "Gandharv Verma",
+      "company": "Hughes Systique Corporation",
+      "email": "gandharv.verma@hsc.com",
+      "phone": "+447425609076",
+      "duration": 108,
+      "transcript": "assistant: Hello, may I please speak with Gandharv Verma, the Director of Business Development at Hughes Systique Corporation?I'm calling on behalf of Pivotal B2B.\nuser: Off to the tone.\nassistant:  Just to confirm, am I speaking with Gandharv Verma?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:57:39.648921",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "761411f5-d758-4172-8fcf-9c9dee150a64",
+      "contactId": "d714efd3-f07f-410e-8844-9411df18be0f",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "540a7b9d-c2ca-485c-8beb-5e883fe4eb3f",
+      "contactName": "Rhiannon Blackwell",
+      "company": "PwC",
+      "email": "rhiannon.blackwell@pwc.com",
+      "phone": "+447854766863",
+      "duration": 108,
+      "transcript": "assistant: Hello, may I please speak with Rhiannon Blackwell, the Account-Based Marketing (ABM) Director, Global Marketing Organisation at PwC?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:56:40.283011",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "8aa0fd98-3016-4445-ac0e-44135bf7cad6",
+      "contactId": "265a44ec-57c3-4323-b7ed-c8c8616f6e32",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "f019e714-ce38-428d-bdcd-f1a32764bbe7",
+      "contactName": "Erin Waugh",
+      "company": "Bocci",
+      "email": "erin@bocci.com",
+      "phone": "+447794587325",
+      "duration": 106,
+      "transcript": "assistant: Hey there! That was quite the entrance with that sound! What can I do forHello, may I please speak with Erin Challoner Waugh, the Vice President Sales and Marketing at Bocci?\nuser: We record your message after the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:00:50.59417",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "4e6a3ee1-9da1-40d1-8b9d-48479da885c7",
+      "contactId": "9118eb53-62f7-49f6-a956-3417b6ae78c2",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "35f41cf8-6efa-4e5f-90e1-baff82070b75",
+      "contactName": "Michael Metson",
+      "company": "Komatsu",
+      "email": "michael.metson@global.komatsu",
+      "phone": "+447736295169",
+      "duration": 106,
+      "transcript": "assistant: Hello, may I please speak with Michael Metson, the Global Director - Sales,Sorry, I didn't catch that—could you say it again?\nuser: After the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nassistant: It seems there was an issue sending that input.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nassistant: It sounds like we're dealing with a voicemail system. I'll go ahead and handle that.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:56:27.807046",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "2f523b60-ff9e-468c-b3a1-a8d889cd5962",
+      "contactId": "a46efe6e-469e-46a4-845b-38f405fb5c13",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [
+          "go ahead"
+        ],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "c8fb1703-bd0a-47be-901a-f99ab7a983f8",
+      "contactName": "Peter Clarke",
+      "company": "Invnt",
+      "email": "pclarke@invnt.com",
+      "phone": "+447949809715",
+      "duration": 106,
+      "transcript": "assistant: Hello, may I please speak with Peter Clarke, the Vice President of Global Business Development at InvSorry, I didn't catch that—could you say it again?\nuser: Over the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:58:34.789783",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "7b302c44-b2f1-4a73-96b8-f843062bec45",
+      "contactId": "e960cda7-f56e-4186-bb15-edd254c68010",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "7b2da9f0-af98-41aa-a9de-a3357bc217d2",
+      "contactName": "Gary Sullivan",
+      "company": "Maltman International",
+      "email": "gsullivan@maltmans.com",
+      "phone": "+447930322429",
+      "duration": 103,
+      "transcript": "assistant: Hello, may I please speak with Gary F Sullivan, the Director of Business Development at Maltman International?\nuser: Sorry, but I couldn't hear anything. Please re-record your message after the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:59:39.929246",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "8c2431f7-1871-4c8b-988b-a621b0424def",
+      "contactId": "bbcf72f4-32d3-41f8-9b01-156632c4a0c4",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "2b9edd30-7613-45b8-8482-1696bae0ccc5",
+      "contactName": "Osama Zaghloul",
+      "company": "Intapp",
+      "email": "osamaz@intapp.com",
+      "phone": "+447555070666",
+      "duration": 102,
+      "transcript": "assistant: Hello, may I please speak with Osama Zaghloul, the Director, Head of EMEA & APAC Client & Business Development at Intapp?\nuser: Please re-record your message after the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:56:27.819962",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "cf32c20c-4347-46ff-9498-9092aef80c95",
+      "contactId": "7818ca17-08bb-4dca-832e-fde480dc14aa",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "7fc6deb4-5bca-4a9f-9a33-bdfc447a33d3",
+      "contactName": "Tim Elliott",
+      "company": "L3Harris",
+      "email": "tim.elliott@l3harris.com",
+      "phone": "+447443185136",
+      "duration": 101,
+      "transcript": "assistant: Hello, may I please speak with Tim Elliott, the Director of Sales and\nuser: After the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:00:35.578381",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "b8e1062f-d263-484b-9da6-03099e3db584",
+      "contactId": "415be9e2-4cce-4cd9-a054-50f174291b84",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "687ad247-ab3b-4f8e-9410-9135931c6f64",
+      "contactName": "Karishma Pattni",
+      "company": "FTI Consulting",
+      "email": "karishma.pattni@fticonsulting.com",
+      "phone": "+447807298218",
+      "duration": 100,
+      "transcript": "assistant: Hello, may I please speak with Karishma Pattni, the Business Development Director EMEA at FTI Consulting?\nuser: Sorry, but I couldn't hear anything. Please re-record your message after the tone.\nuser: To listen to your message press 1, to re-record your message press 2, to continue recording your message press 3, if you are happy with your message press 4. To specify a number for your message recipient to call you back on, that is different to the number you are calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:56:40.282748",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "f812faaa-a4c4-46fa-ab32-7a9904ba1694",
+      "contactId": "f76cc809-4c83-4067-bc73-58cf50ce8915",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "7afd61ef-63a7-4a97-b933-99a72b9b7960",
+      "contactName": "Daniel Marshall",
+      "company": "MSD",
+      "email": "daniel.marshall@msd.com",
+      "phone": "+447812737552",
+      "duration": 100,
+      "transcript": "assistant: Hello, may I please speak with Daniel Marshall, the Director Oncology Business Development at MSD?\nuser: We record your message after the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 09:56:27.819797",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "5d9b1b3d-7caf-447a-8a5c-fe68089f7d97",
+      "contactId": "8e5232be-3680-45d8-9724-1c080f1a077b",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "628d2c82-7be1-4b6a-a91b-83caa4fda991",
+      "contactName": "Sheila McKell",
+      "company": "Premia Relocation Mortgage",
+      "email": "sheila.mckell@premia-rm.com",
+      "phone": "+447546866011",
+      "duration": 97,
+      "transcript": "assistant: Hello, may I please speak with Sheila McKell, the Vice President, Marketing at Premia Relocation Mortgage?\nuser: Press 1\nassistant: I’m sorry, it seems there’s an issue sending the selection. Could you provide more details on the next step or the option you’d like to choose?\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:03:47.951685",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "71029b64-ce91-4437-a24c-f9020319cdb9",
+      "contactId": "a6abc7e3-c343-4b2d-977d-bfe8bc1e6801",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "5bc03bd6-53d1-4a27-b6ba-b35be0906ab9",
+      "contactName": "John Anderson",
+      "company": "SRI Brands",
+      "email": "j.anderson@sri-brands.com",
+      "phone": "+447985332270",
+      "duration": 95,
+      "transcript": "assistant: Hello, may I please speak with John Anderson, the International Sales Director and Worldwide Brand Owners Representitive at SRI Brands?\nuser: Try after the tone.",
+      "createdAt": "2026-01-15 09:59:39.933257",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "eb95c5d7-fcd8-4cba-b807-ac98a8c36a53",
+      "contactId": "d2d0bc46-359d-4a57-bf13-d941a775d245",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    },
+    {
+      "id": "92e0a28a-467f-4b4d-a288-8ea39dde35c9",
+      "contactName": "Louise French",
+      "company": "Beanstalk",
+      "email": "louise.french@beanstalk.com",
+      "phone": "+447720880102",
+      "duration": 92,
+      "transcript": "assistant: Hello, may I please speak with Louise French, the SVP Business Development & Operations at Beanstalk?\nuser: or anything. Please re-record your message after the tone.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.\nuser: To listen to your message, press 1. To re-record your message, press 2. To continue recording your message, press 3. If you are happy with your message, press 4. To specify a number for your message recipient to call you back on that is different to the number you're calling from, press 5.",
+      "createdAt": "2026-01-15 10:03:47.953307",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "686de47f-52a3-4532-898f-d75027173b2a",
+      "contactId": "c5a3db3a-8bfa-4944-8414-ade022c389ea",
+      "analysis": {
+        "likelyDisposition": "voicemail",
+        "confidence": 0.9,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": true
+      }
+    }
+  ],
+  "unclear": [
+    {
+      "id": "7fa0b1e9-1656-4fe0-985f-70d965869766",
+      "contactName": "Greg Hile",
+      "company": "Teneo",
+      "email": "greg.hile@teneo.com",
+      "phone": "+447823511172",
+      "duration": 245,
+      "transcript": "assistant: Hello, may I please speak with Greg Hile, the Business Development Lead at Teneo?",
+      "createdAt": "2026-01-15 10:03:42.260614",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "9c630a14-bae1-42a2-9afc-6bca99c93316",
+      "contactId": "5efe93f4-4e1c-4109-a826-f6711c0c8e12",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "52b60855-b3bd-4387-95b4-c685ccf6ee05",
+      "contactName": "Madeleine Sykes",
+      "company": "Proofpoint",
+      "email": "msykes@proofpoint.com",
+      "phone": "+447557338989",
+      "duration": 245,
+      "transcript": "assistant: Hello, may I please speak with Madeleine Sykes, the EMEA Business Development Director at Proofpoint?",
+      "createdAt": "2026-01-15 10:00:04.026115",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c93dfa9b-3538-46a4-9de1-6798cb6469b4",
+      "contactId": "645c2b54-50fa-4e98-87e9-eb457577e906",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "d1375cc3-cda1-42a1-a3d5-d6aa21fa75e3",
+      "contactName": "Madeleine Sykes",
+      "company": "Proofpoint",
+      "email": "msykes@proofpoint.com",
+      "phone": "+447557338989",
+      "duration": 245,
+      "transcript": "assistant: Hello, may I please speak with Madeleine Sykes, the EMEA Business Development Director at Proofpoint?",
+      "createdAt": "2026-01-15 10:03:42.258292",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c93dfa9b-3538-46a4-9de1-6798cb6469b4",
+      "contactId": "645c2b54-50fa-4e98-87e9-eb457577e906",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "bd1fc53a-9caf-4702-a4f7-5ab3862335ba",
+      "contactName": "James Petrie",
+      "company": "Sitecore",
+      "email": "james.petrie@sitecore.com",
+      "phone": "+447568395835",
+      "duration": 245,
+      "transcript": "assistant: Hello, may I please speak with James Petrie, the Director - Global Head of Sales Development at Sitecore?",
+      "createdAt": "2026-01-15 10:00:35.572648",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "27a6c032-b2c6-4ed3-84f8-b9c91d609dd4",
+      "contactId": "59c2ffd8-dcd2-4141-8176-94925b03f90f",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "0745d63b-a702-4c8c-9a48-18760e12adee",
+      "contactName": "Marcela Geri",
+      "company": "Bristol Myers Squibb",
+      "email": "mgeri@bms.com",
+      "phone": "+447342152204",
+      "duration": 244,
+      "transcript": "assistant: Hello, may I please speak with Marcela Amorim A Geri, the Associate Director, Worldwide Media and Influencer Marketing Lead (HCP & DTC) at Bristol Myers Squibb?",
+      "createdAt": "2026-01-15 09:56:22.126139",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "4752693a-f9f2-446d-8631-605a8828d59a",
+      "contactId": "5923ff39-2915-4b1b-bd7a-98502876bab7",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "7f3923ce-0cb7-482b-ac1a-4a8780592e01",
+      "contactName": "Nick Harwood",
+      "company": "Frontline Performance Group",
+      "email": "nharwood@frontlinepg.com",
+      "phone": "+447836727806",
+      "duration": 244,
+      "transcript": "assistant: Hello, may I please speak with Nick Harwood, the Executive Vice President - Business Development at Frontline Performance Group?",
+      "createdAt": "2026-01-15 09:58:44.075909",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "2340e266-1455-4ec5-ad36-03de4cee2277",
+      "contactId": "8bff66a9-d5cc-46e4-9161-3bc8b8837a1f",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "9c2246bf-86c9-4992-bc06-09763301204a",
+      "contactName": "Kent Stone",
+      "company": "Ropes & Gray Llp.",
+      "email": "kent.stone@ropesgray.com",
+      "phone": "+447785695247",
+      "duration": 243,
+      "transcript": "assistant: Hello, may I please speak with Kent Stone, the Director of Marketing & Business Development - Europe and Asia at Ropes & Gray Llp.?",
+      "createdAt": "2026-01-15 10:03:45.350745",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "b8051b7b-f606-4da9-bb9d-bc4995a2e837",
+      "contactId": "30accb4e-2213-4590-9c2f-4060e71f4088",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "f92e85ac-be57-438d-91df-4a4d273e26a6",
+      "contactName": "Andrea Hazlewood",
+      "company": "Pfizer",
+      "email": "andrea.hazlewood@pfizer.com",
+      "phone": "+447810636665",
+      "duration": 243,
+      "transcript": "assistant: Hello, may I please speak with Andrea Hazlewood, the Senior Director Global Marketing Team Leader at Pfizer?",
+      "createdAt": "2026-01-15 09:56:53.748854",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "73e083ba-6fd1-441b-b225-011c517f0e16",
+      "contactId": "580da497-8e0b-49ea-8fc5-7af10065ba70",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "aaa89eda-efde-4046-bf9a-929f801fc1f0",
+      "contactName": "Joni Merwin",
+      "company": "Automated Business Technologies",
+      "email": "jmerwin@yourabt.com",
+      "phone": "+13034786666",
+      "duration": 243,
+      "transcript": "assistant: Hello, may I please speak with Joni Merwin, the Vice President Business Development at Automated Business Technologies?",
+      "createdAt": "2026-01-15 16:13:31.833157",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "92bd5f5d-ecec-4bbd-99b3-61d433c6313e",
+      "contactId": "09d8b458-3548-4029-b366-58a51d2a4212",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "2c1e530b-57e6-4910-99a5-e196ceecfda1",
+      "contactName": "Pal Mayuranathan",
+      "company": "Syneos Health",
+      "email": "umaipalan.mayuranathan@syneoshealth.com",
+      "phone": "+447468565218",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Pal Mayuranathan, the Senior Director Business Development at Syneos Health?",
+      "createdAt": "2026-01-15 09:56:51.342435",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "5c1f4ebf-52f9-4d03-9d05-37e6e3bc445e",
+      "contactId": "ec2a375f-18ec-48e6-8979-0973818be970",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c241e08f-04f1-4085-9224-4a4831a0f2e7",
+      "contactName": "Ian Willox",
+      "company": "Eurofins Discovery",
+      "email": "ianwillox@eurofins.com",
+      "phone": "+447557393979",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Ian Willox, the Vice President Business Development & Commercial Discovery Europe at Eurofins Discovery?",
+      "createdAt": "2026-01-15 10:08:21.235586",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "df5fa980-de13-40f6-88d9-f9ac5de2d6cf",
+      "contactId": "4188d38a-9983-4ca3-a2f0-8e045e03cf97",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "e41d9b9b-d9a0-4c44-85ba-24bf62a8c515",
+      "contactName": "Nicholas Bryan",
+      "company": "Siemens Nederland N V",
+      "email": "nicholas.bryan@siemens.com",
+      "phone": "+447921741401",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Nicholas Bryan, the Business Development Director at Siemens Nederland N V?",
+      "createdAt": "2026-01-15 09:56:22.117515",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "7aeafc1b-3688-494b-bd5f-dbfcb5c44a84",
+      "contactId": "cc5629bd-0dd6-4215-a7a7-a0d7181e37e2",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "0f7500da-7a5c-47ab-91f8-267587daf742",
+      "contactName": "Arun Shenoy",
+      "company": "Serverfarm",
+      "email": "arun@sfrdc.com",
+      "phone": "+447880787937",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Arun Shenoy, the CMO & SVP Sales at Serverfarm?",
+      "createdAt": "2026-01-15 10:02:54.580877",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ff25c7a8-0360-41be-8261-ea60860607e1",
+      "contactId": "5a9b5957-1277-4606-9c6e-7f2921bbd388",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "f6d4f8cd-1bbe-41db-99cd-2c49fd6b208c",
+      "contactName": "Graham Moore",
+      "company": "ORO Labs",
+      "email": "graham.moore@orolabs.ai",
+      "phone": "+447866431904",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Graham I Moore, the Senior Vice President - Customer Growth & Business Development at ORO Labs?",
+      "createdAt": "2026-01-15 09:58:18.238219",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "6627066d-aab7-4790-8bbc-88d6b78e3033",
+      "contactId": "c2c5921f-d7d8-4ca8-bf82-a5902b44ddbc",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c4cb5539-0c2e-4725-999b-c7d7f8a39b26",
+      "contactName": "Paul Riley",
+      "company": "IPC Systems Inc.",
+      "email": "paul.riley@ipc.com",
+      "phone": "+442075508890",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Paul Riley, the Business Development Director at IPC Systems Inc.?",
+      "createdAt": "2026-01-15 09:59:06.110603",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c9c23dd5-d936-45f9-b03d-2a81311e33d9",
+      "contactId": "0caf0812-294a-4e9d-bc48-6ef8261e769f",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "5839886a-db6d-4db0-a518-fde32656b547",
+      "contactName": "Arun Shenoy",
+      "company": "Serverfarm",
+      "email": "arun@sfrdc.com",
+      "phone": "+447880787937",
+      "duration": 242,
+      "transcript": "assistant: Hello, may I please speak with Arun Shenoy, the CMO & SVP Sales at Serverfarm?",
+      "createdAt": "2026-01-15 10:03:47.952521",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ff25c7a8-0360-41be-8261-ea60860607e1",
+      "contactId": "5a9b5957-1277-4606-9c6e-7f2921bbd388",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "511f4cca-7ab0-453d-9ff9-74e941a57817",
+      "contactName": "Christian Moger",
+      "company": "Enverus",
+      "email": "christian.moger@enverus.com",
+      "phone": "+447900248361",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with Christian Moger, the Business Development Director, Enverus Trading & Risk at Enverus?",
+      "createdAt": "2026-01-15 09:57:42.713821",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "084a3522-9ce2-46ac-bec7-d978827b4276",
+      "contactId": "ed420be9-cac6-44dd-9b2f-a54a7846ee6f",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "0b654973-3205-46f0-90c3-b5f672825370",
+      "contactName": "Brandon Lancaster",
+      "company": "RideWrap",
+      "email": "brandon@ridewrap.ca",
+      "phone": "+447570162215",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with Brandon Lancaster, the Global Head of Brand Partnerships & Business Development at RideWrap?",
+      "createdAt": "2026-01-15 09:56:56.151636",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "7c8bd1e7-2b52-45d2-ba3e-66ab957e5570",
+      "contactId": "c456fc57-82d9-4ca4-8824-fb58280bceeb",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "260b4dc4-bfe3-4fc2-be74-0e3011e3cb06",
+      "contactName": "Greg Hile",
+      "company": "Teneo",
+      "email": "greg.hile@teneo.com",
+      "phone": "+447823511172",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with Greg Hile, the Business Development Lead at Teneo?",
+      "createdAt": "2026-01-15 10:06:28.012774",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "9c630a14-bae1-42a2-9afc-6bca99c93316",
+      "contactId": "5efe93f4-4e1c-4109-a826-f6711c0c8e12",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "0f924ea8-42ef-400f-bd99-3506b697fd67",
+      "contactName": "Monica Visconti-Patel",
+      "company": "Ardoq",
+      "email": "monica.patel@ardoq.com",
+      "phone": "+447767351445",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with Monica Visconti-Patel, the Chief Marketing Officer at Ardoq?",
+      "createdAt": "2026-01-15 10:01:09.211984",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "1f3f8114-7a49-430b-9bcf-b1cf302a05a8",
+      "contactId": "3e076ff2-eb5d-42ea-9dbf-25745df80245",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "9c59d92a-e238-49ed-b528-3aea2ef48575",
+      "contactName": "David Abel",
+      "company": "Maerospace Corporation",
+      "email": "mala.abel@maerospace.com",
+      "phone": "+447825236654",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with David Abel, the Regional Director of Business Development EMEA at Maerospace Corporation?",
+      "createdAt": "2026-01-15 09:57:09.881161",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "6a99b001-1434-4ba5-a32d-e1c460a91edf",
+      "contactId": "e58776de-43cd-4e82-9c6d-38f60cedbbf3",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "0c77f881-b146-4073-b73c-906bf270e431",
+      "contactName": "Dave Mayer",
+      "company": "DDI",
+      "email": "dave.mayer@ddiworld.com",
+      "phone": "+447384897611",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with Dave Mayer, the Director, Business Development at DDI?",
+      "createdAt": "2026-01-15 10:00:13.721703",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "e6405d4e-72d7-4cdc-9096-3cd54ab30612",
+      "contactId": "d3530536-0ae7-4473-9a59-5bb716e37ac8",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "730d3fc9-a26c-4774-9f58-e08b9ff71203",
+      "contactName": "Tom Gregson",
+      "company": "Myonex",
+      "email": "tgregson@myonex.com",
+      "phone": "+447900782363",
+      "duration": 241,
+      "transcript": "assistant: Hello, may I please speak with Tom Gregson, the Vice President Business Development at Myonex?",
+      "createdAt": "2026-01-15 09:58:18.239046",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "a7b11579-b741-4410-baa7-dcb4d33b7e43",
+      "contactId": "d244542d-be78-40c6-bf45-e1c815cfc9cb",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "34432cfe-1675-442d-a383-65dea43443c6",
+      "contactName": "Arun Shenoy",
+      "company": "Serverfarm",
+      "email": "arun@sfrdc.com",
+      "phone": "+447880787937",
+      "duration": 240,
+      "transcript": "assistant: Hello, may I please speak with Arun Shenoy, the CMO & SVP Sales at Serverfarm?",
+      "createdAt": "2026-01-15 10:06:30.987304",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ff25c7a8-0360-41be-8261-ea60860607e1",
+      "contactId": "5a9b5957-1277-4606-9c6e-7f2921bbd388",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c52e8f24-4f29-402c-b16b-f5b06849ff28",
+      "contactName": "Arun Shenoy",
+      "company": "Serverfarm",
+      "email": "arun@sfrdc.com",
+      "phone": "+447880787937",
+      "duration": 240,
+      "transcript": "assistant: Hello, may I please speak with Arun Shenoy, the CMO & SVP Sales at Serverfarm?",
+      "createdAt": "2026-01-15 10:02:58.265597",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ff25c7a8-0360-41be-8261-ea60860607e1",
+      "contactId": "5a9b5957-1277-4606-9c6e-7f2921bbd388",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "85d4498b-526a-4e45-82dc-39713980b549",
+      "contactName": "Dave Mayer",
+      "company": "DDI",
+      "email": "dave.mayer@ddiworld.com",
+      "phone": "+447384897611",
+      "duration": 240,
+      "transcript": "assistant: Hello, may I please speak with Dave Mayer, the Director, Business Development at DDI?",
+      "createdAt": "2026-01-15 10:03:45.346471",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "e6405d4e-72d7-4cdc-9096-3cd54ab30612",
+      "contactId": "d3530536-0ae7-4473-9a59-5bb716e37ac8",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "b7ebf3b0-313e-4fbe-abae-1fb94186e040",
+      "contactName": "Darren Ballard",
+      "company": "Dense Air",
+      "email": "dballard@denseair.net",
+      "phone": "+447801028115",
+      "duration": 240,
+      "transcript": "assistant: Hello, may I please speak with Darren Ballard, the Vice President Of Business Development at Dense Air?",
+      "createdAt": "2026-01-15 09:58:29.538994",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c6d1f822-e9fe-4361-ac26-afc3c328ee50",
+      "contactId": "a42ce918-a39a-44a4-b946-fb25b702e92a",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "1c6cada1-e115-4568-a124-52693bd90d30",
+      "contactName": "Monica Visconti-Patel",
+      "company": "Ardoq",
+      "email": "monica.patel@ardoq.com",
+      "phone": "+447767351445",
+      "duration": 240,
+      "transcript": "assistant: Hello, may I please speak with Monica Visconti-Patel, the Chief Marketing Officer at Ardoq?",
+      "createdAt": "2026-01-15 10:03:59.830922",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "1f3f8114-7a49-430b-9bcf-b1cf302a05a8",
+      "contactId": "3e076ff2-eb5d-42ea-9dbf-25745df80245",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "3caa3b9f-b073-41fe-ac30-66322e8a4019",
+      "contactName": "Ian Willox",
+      "company": "Eurofins Discovery",
+      "email": "ianwillox@eurofins.com",
+      "phone": "+447557393979",
+      "duration": 240,
+      "transcript": "assistant: Hello, may I please speak with Ian Willox, the Vice President Business Development & Commercial Discovery Europe at Eurofins Discovery?",
+      "createdAt": "2026-01-15 10:06:30.991798",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "df5fa980-de13-40f6-88d9-f9ac5de2d6cf",
+      "contactId": "4188d38a-9983-4ca3-a2f0-8e045e03cf97",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "4bc0e2cc-8287-4375-92e3-9ca8b56c3b58",
+      "contactName": "Andrea Harmon",
+      "company": "Burns Delivery",
+      "email": "andrea@burnsexpress.co.uk",
+      "phone": "+441618174572",
+      "duration": 212,
+      "transcript": "assistant: Hello, may I please speak with Andrea Harmon, the Head Of Sales And Business Development at Burns Delivery?",
+      "createdAt": "2026-01-15 10:01:13.928266",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "bf0b4542-480c-42a6-9fc6-6ddd86bf14ac",
+      "contactId": "01dc3b86-9241-40ee-9b80-5c86e7ff7db0",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "d405e697-c018-4c13-9f4f-e72c317dcac3",
+      "contactName": "Richard Colombo",
+      "company": "Ultra Electronics Precision Air & Land Systems",
+      "email": "richard.colombo@ultra-pcs.com",
+      "phone": "+447989345716",
+      "duration": 146,
+      "transcript": "assistant: Hey there! Sounds like you're working with something noisy. Maybe some tools or machinery? Let me know how I can help. Need advice on a project or some tips? I’m all ears!Hello, may I please speak with Richard Colombo, the Business Development Director UK at Ultra Electronics Precision Air & Land Systems?",
+      "createdAt": "2026-01-15 09:57:01.657943",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "2491f7b3-781e-498f-90ea-c7e46f6322fc",
+      "contactId": "779c821e-5497-4e8f-a466-0abf3671eaaa",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "fbaafa7c-e539-49f8-8340-39d6c4bf4cfd",
+      "contactName": "Marcus Gault",
+      "company": "Onclusive",
+      "email": "marcus.gault@onclusive.com",
+      "phone": "+447872377610",
+      "duration": 140,
+      "transcript": "assistant: Hello, may I please speak with Marcus Gault, the Senior Business Development Director at Onclusive?",
+      "createdAt": "2026-01-15 09:57:01.66031",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "12196198-114b-4b80-a83a-8acb8d7f6ab7",
+      "contactId": "a5f994d0-fae1-4921-b89a-a876c03db99c",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "f53eb302-00d4-44f5-9ec6-ac5e61e41faf",
+      "contactName": "Richard Goodman",
+      "company": "Algemetric",
+      "email": "rgoodman@algemetric.com",
+      "phone": "+447456007456",
+      "duration": 135,
+      "transcript": "assistant: Hey there! Sounds like we’ve got a bit of noise going on. How can I help you today?Whoa, that was a loud sound, almost like a pop or a bang! Are you okay? Let me know what's going on and how I can assist you.Hello, may I please speak with Richard Goodman, the Head of Business Development, Sales and Marketing at Algemetric?",
+      "createdAt": "2026-01-15 09:57:04.733184",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "7e5dc3b8-5518-41ec-a4d8-4b0e97d51d86",
+      "contactId": "1c7f29b0-2e81-4785-98f4-e2d173a67321",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "9edd8bd2-c284-43a1-9b69-688f902b7495",
+      "contactName": "Sophie Rayers",
+      "company": "Ataccama",
+      "email": "sophie.rayers@ataccama.com",
+      "phone": "+447446146056",
+      "duration": 133,
+      "transcript": "assistant: Hey there! Sounds like you're in a good mood, or maybe you’ve got some excitement going on. What's up? You need help with somethingWhoa, that was an unexpected sound! It almost caught me off guard. Is everything all right? Let me know how I can help or if you're just testing things out.Hello, may I please speak with Sophie Rayers, the Vice President of Growth and Digital Marketing at Ataccama?",
+      "createdAt": "2026-01-15 10:08:21.234535",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ae772908-4abb-4aca-8afb-85f8e9aa32ee",
+      "contactId": "7c979912-235e-417a-b94e-fee92291aca5",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "27b2a1be-04bc-4f03-8fad-a98c0abbe401",
+      "contactName": "Sophie Rayers",
+      "company": "Ataccama",
+      "email": "sophie.rayers@ataccama.com",
+      "phone": "+447446146056",
+      "duration": 130,
+      "transcript": "assistant: ¡Hola, hola! ¿Qué tal? ¿En qué te puedo ayudar hoy? Aquí estoy listo para charlar o resolver lo que necesites.Hello, may I please speak with Sophie Rayers, the Vice President of Growth and Digital Marketing at Ataccama?",
+      "createdAt": "2026-01-15 10:06:30.995082",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ae772908-4abb-4aca-8afb-85f8e9aa32ee",
+      "contactId": "7c979912-235e-417a-b94e-fee92291aca5",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "bd118037-b620-45e8-b154-02dba5858e00",
+      "contactName": "Suheljeet Sandhu",
+      "company": "Epicor",
+      "email": "suheljeet.sandhu@epicor.com",
+      "phone": "+447896022636",
+      "duration": 129,
+      "transcript": "assistant: 哎哟，这声音有点大啊！你是在调试什么音响设备吗？还是有什么突然响起的东西？要不要我帮你想办法调整一下音量，或者解决一下问题？Hello, may I please speak with Suheljeet Sandhu, the Director International Business Development at Epicor?",
+      "createdAt": "2026-01-15 09:56:46.43782",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "bdc808dd-2d12-422b-b6e0-2308034515f9",
+      "contactId": "d9373ca7-fa67-494b-8946-0b5114b84447",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "dea2507e-e8f1-4820-b472-030a5d59e875",
+      "contactName": "Alvin Williston-Davis",
+      "company": "Syndigo",
+      "email": "alvin.williston-davis@syndigo.com",
+      "phone": "+447983527273",
+      "duration": 127,
+      "transcript": "assistant: Ouch! That sounded pretty loud. Are you okay? What just happened? Did something fall or did you bump into something?Hello, may I please speak with Alvin Williston-Davis, the Enterprise Business Development Director at Syndigo?",
+      "createdAt": "2026-01-15 10:00:37.931291",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "5870db54-548d-47a8-85f5-7d04b8c39d23",
+      "contactId": "989b05a8-2973-48a9-8f7b-3366c6a105a0",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "b1c8780c-5556-42de-8dfe-a05f884f545c",
+      "contactName": "Amit Kotecha",
+      "company": "Quantcast",
+      "email": "akotecha@quantcast.com",
+      "phone": "+447870591823",
+      "duration": 126,
+      "transcript": "assistant: Hello, may I please speak with Amit Kotecha, the Chief Marketing Officer at Quantcast?",
+      "createdAt": "2026-01-15 10:03:50.391344",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "37bda6cd-265c-481e-be06-9dfcb8a0e010",
+      "contactId": "0a7e2e43-9529-4cd9-9092-5941d80c82b3",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "ed1aaf15-3106-498f-9fc7-210fbafb323e",
+      "contactName": "Jenny McGowan",
+      "company": "CGI IT UK Limited",
+      "email": "jenny.mcgowan@cgi.com",
+      "phone": "+447771815428",
+      "duration": 126,
+      "transcript": "assistant: Hello, may I please speak with Jenny McGowan, the Strategic Marketing Director - Space, Defence & Intelligence at CGI IT UK Limited?",
+      "createdAt": "2026-01-15 09:56:27.806978",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "f4c4503b-181f-4b28-81b0-c02f4260d647",
+      "contactId": "1d2bbb8d-fccd-4391-b224-a2117d5d2123",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "4e32687e-458e-41a9-a973-93a4e8fc93cf",
+      "contactName": "David Cozens",
+      "company": "Vertex Inc.",
+      "email": "david.cozens@vertexinc.com",
+      "phone": "+447834665798",
+      "duration": 125,
+      "transcript": "assistant: Hello, may I please speak with David Cozens, the Business Development Director at Vertex Inc.?",
+      "createdAt": "2026-01-15 10:03:38.924484",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "d3c83fdf-8e24-429f-9762-45761c5fe4b7",
+      "contactId": "5f2a9e43-b6ba-4465-b45e-d809dafdda98",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "fe2ef6bc-62aa-439e-8c06-4f5d2e80a12f",
+      "contactName": "Syed Zaidi",
+      "company": "Uber",
+      "email": "syed.zaidi@uber.com",
+      "phone": "+447795064161",
+      "duration": 125,
+      "transcript": "assistant: Hello, may I please speak with Syed Shuja Zaidi, the Head of Business Development - UK Mobility at Uber?",
+      "createdAt": "2026-01-15 09:58:01.028623",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "aa2e492f-eab9-4fda-8b04-100442ef23c6",
+      "contactId": "3ba6bc58-abfb-4ad5-8d1b-e71ed3abc5ad",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "d211264d-eb45-4086-9c02-b2ef8ee1cdb4",
+      "contactName": "Kelly Mendonça",
+      "company": "Syneos Health",
+      "email": "kelly.mendonca@syneoshealth.com",
+      "phone": "+447971261187",
+      "duration": 125,
+      "transcript": "assistant: Hello, may I please speak with Kelly Mendonça, the Director, Business Development, Clinical Solutions at Syneos Health?",
+      "createdAt": "2026-01-15 10:00:31.920924",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "4c570d8c-d134-4d62-b6bf-6849efcc34ba",
+      "contactId": "d305d6fb-29fc-4747-b214-f35caa05e097",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "9b448a82-4ccf-4b1b-aa83-9a82f9562e17",
+      "contactName": "Robert Bromley",
+      "company": "CCL Design",
+      "email": "rbromley@cclind.com",
+      "phone": "+447894616500",
+      "duration": 125,
+      "transcript": "assistant: Hello, may I please speak with Robert Bromley, the Business Development Director at CCL Design?",
+      "createdAt": "2026-01-15 10:00:04.027216",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "f53a88fb-6b58-46aa-9dc1-0dc08d86f86e",
+      "contactId": "c94b8021-98d7-4a29-8b03-319d68afbc80",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c5683a3f-344d-4443-ae4b-57f4ab97c8cd",
+      "contactName": "Simon Hamilton",
+      "company": "Almac Group",
+      "email": "simon.hamilton@almacgroup.com",
+      "phone": "+447725200021",
+      "duration": 125,
+      "transcript": "assistant: Hello, may I please speak with Simon Hamilton, the Head of Global Business Development - Almac Sciences at Almac Group?",
+      "createdAt": "2026-01-15 10:00:35.576516",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "9a8ad388-3a6d-4499-9713-fc847b39311f",
+      "contactId": "181eafe7-37df-4d9e-9f82-2f6387379b56",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "4745c402-4b39-439a-b7a7-dd3445bf49fc",
+      "contactName": "Cameron Day",
+      "company": "Robosoft Technologies",
+      "email": "cameron.day@robosoftin.com",
+      "phone": "+447788140806",
+      "duration": 124,
+      "transcript": "assistant: Hello, may I please speak with Cameron Day, the Senior Director Business Development at Robosoft Technologies?",
+      "createdAt": "2026-01-15 09:57:15.94361",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ac7bc189-49e8-4447-84cf-020384a0f1d5",
+      "contactId": "f887ec12-c91f-4012-ad08-b55c1ca62dc7",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "d08a46a3-f5f5-4346-b9de-df57ac73f5f7",
+      "contactName": "Stuart Way",
+      "company": "Planet",
+      "email": "stuart.way@planetpayment.com",
+      "phone": "+447776146005",
+      "duration": 124,
+      "transcript": "assistant: Hello, may I please speak with Stuart Way, the Business Development Director at Planet?",
+      "createdAt": "2026-01-15 09:56:18.651939",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "7d1668e8-a324-4a1b-8a47-d6c113674829",
+      "contactId": "43a5b334-26b2-4de5-8d7c-9e65c70527cc",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "b6ddf105-ce3f-4c48-98b2-2041e72d515a",
+      "contactName": "Victoria Harrison",
+      "company": "HCAT",
+      "email": "v.harrison@hcacademytrust.education",
+      "phone": "+447834560884",
+      "duration": 124,
+      "transcript": "assistant: Hello, may I please speak with Victoria Harrison, the Deputy CEO at HCAT?",
+      "createdAt": "2026-01-15 09:58:44.066802",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ba4aac25-f26b-457b-8781-d3cee896f28b",
+      "contactId": "1041b652-e796-4f1f-996e-04797058c574",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c7ceb8e8-1eea-41ce-baca-6f9bc048b8ae",
+      "contactName": "Ram Ganger",
+      "company": "Ss&c Blue Prism",
+      "email": "ram.ganger@blueprism.com",
+      "phone": "+447961127711",
+      "duration": 124,
+      "transcript": "assistant: Hello, may I please speak with Ram Ganger, the Head of Marketing - UK/I/BENELUX & Emerging Markets at Ss&c Blue Prism?",
+      "createdAt": "2026-01-15 10:00:09.840161",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "662e97fc-4278-4639-834a-b81db894649b",
+      "contactId": "53ae6ade-c7d3-4be5-b734-438a8bbb62c1",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "7e4b1f34-65e3-4dbf-9851-d3a5eda73220",
+      "contactName": "Emily Malpas-Coker",
+      "company": "World Wide Technology",
+      "email": "emily.malpas-coker@wwt.com",
+      "phone": "+447707952660",
+      "duration": 123,
+      "transcript": "assistant: Hello, may I please speak with Emily Malpas-Coker, the Area Director - Inside Sales - GSP EMEA at World Wide Technology?",
+      "createdAt": "2026-01-15 09:56:51.343296",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "1e6428c6-a9f7-4661-ad94-9071dc497968",
+      "contactId": "2460a198-2eb1-4d25-a06a-cbcb3fcbbccb",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "07906eea-81d8-439f-889a-71b977f725d9",
+      "contactName": "Cathy Calver",
+      "company": "Global Relay",
+      "email": "cathy.calver@globalrelay.net",
+      "phone": "+447736780668",
+      "duration": 121,
+      "transcript": "assistant: Hello, may I please speak with Cathy Calver, the Chief Marketing Officer at Global Relay?",
+      "createdAt": "2026-01-15 10:01:02.386444",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "fde1716f-7985-412d-8766-f2f63f0725b1",
+      "contactId": "fde5e30d-fa1d-4150-8d5b-e72d09588946",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "672aa770-a949-4bd6-8ec4-8f5b4c99797a",
+      "contactName": "Stan Friedman",
+      "company": "Haemonetics",
+      "email": "sfriedman@haemonetics.com",
+      "phone": "+447768265433",
+      "duration": 121,
+      "transcript": "assistant: Hello, may I please speak with Stan Friedman, the Director of European Business Development at Haemonetics?",
+      "createdAt": "2026-01-15 09:57:13.106584",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "9d2d5548-cc2a-435d-8bbd-409e67098de6",
+      "contactId": "69eedad1-7e87-48bb-94e0-57c33b6d9cda",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "f7836894-e575-456f-8dfe-efcba92fb968",
+      "contactName": "Adina Muguti",
+      "company": "Stryker",
+      "email": "adina.muguti@stryker.com",
+      "phone": "+447739035965",
+      "duration": 121,
+      "transcript": "assistant: Hello, may I please speak with Adina Muguti, the Global Business Development and Strategy Director ICM at Stryker?",
+      "createdAt": "2026-01-15 10:03:39.605498",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "765ff303-f520-40ce-b679-6ae4c6a1d512",
+      "contactId": "2e068cb3-0435-4dd3-9a04-e191fdb69e65",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "8833fb04-7451-4da2-8999-006dee5a92bf",
+      "contactName": "Stef Lim",
+      "company": "S&P Global",
+      "email": "stef.lim2@spglobal.com",
+      "phone": "+447951736235",
+      "duration": 121,
+      "transcript": "assistant: Hello, may I please speak with Stef Lim, the Head of Marketing - Global Sell Side at S&P Global?",
+      "createdAt": "2026-01-15 10:00:40.301649",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "79723027-839b-432f-a75b-045ff70ba3db",
+      "contactId": "8c8d20dc-e702-485a-9f01-cbe395b2cd24",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "02664cd1-9f99-4c89-b17c-2b46d89e5dbc",
+      "contactName": "Paul Hayward",
+      "company": "Engaging Networks",
+      "email": "paul@engagingnetworks.net",
+      "phone": "+447455014223",
+      "duration": 120,
+      "transcript": "assistant: Hello, may I please speak with Paul Hayward, the Strategic Director of Business Development at Engaging Networks?",
+      "createdAt": "2026-01-15 09:56:59.068375",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "d5e4c0cf-ff9a-4549-bf50-4675550d2b36",
+      "contactId": "8c5747a1-09fa-4963-90ed-e33080bb650f",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c0dd0051-4974-402e-862b-80b46fdc0b67",
+      "contactName": "Guy Koster",
+      "company": "Sios Technology Corp.",
+      "email": "guy.koster@us.sios.com",
+      "phone": "+447798624200",
+      "duration": 120,
+      "transcript": "assistant: Hello, may I please speak with Guy Koster, the Sales & Business Development Director, EMEA at Sios Technology Corp.?",
+      "createdAt": "2026-01-15 09:57:30.167494",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "e65432f8-9041-42c1-9d03-69bdf76e837e",
+      "contactId": "808c7090-592b-4fc2-be39-0128000e7502",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "40372b14-9213-46f2-a643-4ab7e7f616a8",
+      "contactName": "David Blamire-Brown",
+      "company": "Thoughtworks",
+      "email": "db@thoughtworks.com",
+      "phone": "+447795161492",
+      "duration": 120,
+      "transcript": "assistant: Hello, may I please speak with David Blamire-Brown, the Business Development Director - Public Sector at Thoughtworks?",
+      "createdAt": "2026-01-15 09:56:42.848103",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "1803d1b1-1f2f-4c3d-8206-cea1f93b09a3",
+      "contactId": "827477ae-f52d-4f38-b87d-a7571b23ed85",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "22774164-c276-4a6f-962e-c510c2a37c79",
+      "contactName": "Suzad Masters",
+      "company": "Masters Speciality Pharma",
+      "email": "suzad.masters@masters-sp.com",
+      "phone": "+447799664290",
+      "duration": 119,
+      "transcript": "assistant: Hello, may I please speak with Suzad Masters, the Business Development Director at Masters Speciality Pharma?",
+      "createdAt": "2026-01-15 09:59:45.669374",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c28a1f78-4d44-42e0-a4de-696145535366",
+      "contactId": "9abc39da-abce-4116-96b9-e3cc337d69cd",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "fc719dcd-043c-4763-b8e4-9ae4135e242c",
+      "contactName": "Steve Goldspink",
+      "company": "Siemens Nederland N V",
+      "email": "stephen.goldspink@siemens.com",
+      "phone": "+447808827865",
+      "duration": 119,
+      "transcript": "assistant: Hello, may I please speak with Steve Goldspink, the Head of Business Development at Siemens Nederland N V?",
+      "createdAt": "2026-01-15 09:56:53.741305",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "cf3c92b9-9940-4a3c-8120-f294be7d3bde",
+      "contactId": "b1578205-066c-4ccd-832d-d4bccb32cddc",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "cdf61110-e518-4877-a1ab-c87f05465fb9",
+      "contactName": "Joseph Bedford",
+      "company": "ACI Worldwide",
+      "email": "joseph.bedford@aciworldwide.com",
+      "phone": "+447828970705",
+      "duration": 119,
+      "transcript": "assistant: Hello, may I please speak with Joseph Bedford, the Snr Business Development Director at ACI Worldwide?",
+      "createdAt": "2026-01-15 10:00:37.930423",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "4be92902-2523-4654-a9c5-c47b13cc9e40",
+      "contactId": "2526e735-b4c3-412d-a0be-764104b92215",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "fda0710a-686f-4ad9-ae87-6a8dc5cac27f",
+      "contactName": "Penta Stanley",
+      "company": "MongoDB",
+      "email": "penta.stanley@mongodb.com",
+      "phone": "+447718120184",
+      "duration": 119,
+      "transcript": "assistant: Hello, may I please speak with Penta Stanley, the Vice President International Marketing at MongoDB?",
+      "createdAt": "2026-01-15 10:01:09.213493",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "9c2ac919-8376-48f0-97e5-69893a508952",
+      "contactId": "611a76e7-e786-483b-a458-87aa50ee1479",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "88c37e5e-cc44-410b-8a96-68b54e1f1154",
+      "contactName": "Sam Parnell",
+      "company": "eClinical Solutions",
+      "email": "sparnell@eclinicalsol.com",
+      "phone": "+447917522140",
+      "duration": 119,
+      "transcript": "assistant: Hello, may I please speak with Sam Parnell, the Vice President Of Business Development at eClinical Solutions?",
+      "createdAt": "2026-01-15 10:03:59.833491",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c4e1988b-16aa-4c93-a512-f4a38c9ef828",
+      "contactId": "45fec3da-672f-4b11-861a-4274d05e905b",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "4088e62f-0f05-483a-aa98-c307613ce7c1",
+      "contactName": "Sumit Pal",
+      "company": "Fintech Meetup",
+      "email": "sumit@fintechmeetup.com",
+      "phone": "+447590621844",
+      "duration": 119,
+      "transcript": "assistant: Hello, may I please speak with Sumit Pal, the Snr Director, Business Development at Fintech Meetup?",
+      "createdAt": "2026-01-15 09:56:59.067491",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "8bc788ea-f9f9-40e2-9363-3a4525f600fc",
+      "contactId": "daa59467-06d9-437c-a369-a46e3e894677",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "996a42f5-dc71-46c8-9c8e-4ce24b359f51",
+      "contactName": "Mohamed Hasham",
+      "company": "Icon",
+      "email": "mohamed.hasham@iconplc.com",
+      "phone": "+447811666007",
+      "duration": 118,
+      "transcript": "assistant: Hello, may I please speak with Mohamed Hasham, the Executive Director & Global Head, Business Development, Site and Patient Solutions at Icon?",
+      "createdAt": "2026-01-15 09:56:22.125767",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "8f7316d8-e946-4bb1-80a6-390273cb217b",
+      "contactId": "7d1fc2dd-cc0d-43ce-bf09-5cb2d7ad2fcd",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "efd0947a-2f21-4985-8b21-ac52a8a69b8b",
+      "contactName": "Pete Johnson",
+      "company": "INDY",
+      "email": "pete@indycinemagroup.com",
+      "phone": "+447881550106",
+      "duration": 118,
+      "transcript": "assistant: Hello, may I please speak with Pete Johnson, the Head Of Business Development (International) at INDY?",
+      "createdAt": "2026-01-15 09:57:07.260433",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "6f557e38-f0a4-434d-905c-169a8dbddbea",
+      "contactId": "ea04d2f1-acb7-4a56-a558-ac54009f34e6",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "94849cc5-2b6b-45d4-a7eb-a872bd72bf3c",
+      "contactName": "Sheila McKell",
+      "company": "Premia Relocation Mortgage",
+      "email": "sheila.mckell@premia-rm.com",
+      "phone": "+447546866011",
+      "duration": 118,
+      "transcript": "assistant: Hello, may I please speak with Sheila McKell, the Vice President, Marketing at Premia Relocation Mortgage?",
+      "createdAt": "2026-01-15 10:02:55.81074",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "71029b64-ce91-4437-a24c-f9020319cdb9",
+      "contactId": "a6abc7e3-c343-4b2d-977d-bfe8bc1e6801",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "3db7129d-302b-43fc-9265-2ffe15c6ca8f",
+      "contactName": "Jonathan Campbell",
+      "company": "Kroll",
+      "email": "jonathan.campbell@kroll.com",
+      "phone": "+447590561294",
+      "duration": 118,
+      "transcript": "assistant: Hello, may I please speak with Jonathan Campbell, the Global Head of Business Development GRA at Kroll?",
+      "createdAt": "2026-01-15 10:00:09.837752",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "3588fc94-061a-4c00-8332-357a81bbd5bc",
+      "contactId": "67f54b7f-fd84-40e7-ae5a-abbc0c533e5b",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "574f7b28-1546-472d-a605-3a87d0796de7",
+      "contactName": "Konrad Empacher",
+      "company": "Rackspace Technology",
+      "email": "konrad.empacher@rackspace.com",
+      "phone": "+447961583235",
+      "duration": 115,
+      "transcript": "assistant: Hello, may I please speak with Konrad Empacher, the Director of Commercial Business Development - Europe at Rackspace Technology?",
+      "createdAt": "2026-01-15 09:56:53.740937",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "c2fb601d-bfc5-4443-a1ee-2b1a05604442",
+      "contactId": "d4a3d0ec-3bd2-420d-8e6b-a1e31e5c0837",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "e42ab61a-7b4a-4c8e-b070-4a58bd39feb9",
+      "contactName": "Heidi Burns",
+      "company": "Wish",
+      "email": "hburns@wish.com",
+      "phone": "+447834694143",
+      "duration": 109,
+      "transcript": "assistant: Hello, may I please speak with Heidi Burns, the Head of Business Development and Partnerships at Wish?\nuser: This message hasn't been saved. Recording now. Press hash when you're done.",
+      "createdAt": "2026-01-15 10:00:40.295661",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "ce14ba81-2815-4f80-bbce-6364cc3520ae",
+      "contactId": "de004044-f30d-4d23-bec0-683529928c36",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "c6491262-38c0-4256-86fe-5b0b921610a0",
+      "contactName": "Michael Hornkamp",
+      "company": "Power Integrations",
+      "email": "michael.hornkamp@power.com",
+      "phone": "+4929386439999",
+      "duration": 99,
+      "transcript": "assistant: Hello, may I please speak with Michael Hornkamp, the Senior Director Business Development Automotive at Power Integrations?\nuser: Beginnen Sie mit der Aufzeichnung der Nachricht nach dem Signalton.",
+      "createdAt": "2026-01-15 10:02:30.327658",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "0cb76b18-c6f5-423d-bd84-c3ef885ea3eb",
+      "contactId": "3beeee65-73d9-450e-9d05-47440430e802",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "1fbe836f-690b-4fcf-8538-f96f2be73670",
+      "contactName": "Noor Mohammed",
+      "company": "Tradepoint Systems",
+      "email": "noor.mohammed@trdpnt.com",
+      "phone": "+447947733366",
+      "duration": 97,
+      "transcript": "user: You\nassistant: Hello, may I speak with Noor Mohammed?",
+      "createdAt": "2026-01-15 09:57:04.734008",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "bd0c88d6-e2d2-4c24-8944-69d45816e6dd",
+      "contactId": "2bc9928d-800f-4134-a8a3-0cd1f0620541",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "6ba6d3a3-cd40-43a6-a032-6532e1dc9002",
+      "contactName": "Huw Treasure",
+      "company": "VikingCloud",
+      "email": "huwtreasure@vikingcloud.com",
+      "phone": "+447792155419",
+      "duration": 97,
+      "transcript": "assistant: Hey there! Sounds like you’re ready to get something rolling.Whoa, that was a loud noise! Is everything all right over there? It sounded like something might have fallen or maybe a door slammed. Let me know if you need any help.Whoa, that was another big bang! It sounds like something's really noisy on your end. Is everything okay? IfHello, may I please speak with Huw Treasure, the Business Development Director EMEA at VikingCloud?",
+      "createdAt": "2026-01-15 09:59:45.666683",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "1c7c71c8-4018-4592-844c-94a1fefc4b80",
+      "contactId": "e3fc9e3e-d307-4402-b07f-49ada62eb80e",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "f3206fc3-3adb-4fdb-aab1-42ddcee31249",
+      "contactName": "Michael Hornkamp",
+      "company": "Power Integrations",
+      "email": "michael.hornkamp@power.com",
+      "phone": "+4929386439999",
+      "duration": 96,
+      "transcript": "assistant: Hello, may I please speak with Michael Hornkamp, the Senior Director Business Development Automotive at Power Integrations?\nuser: Nicht nach dem Signalton!",
+      "createdAt": "2026-01-15 10:02:31.925297",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "0cb76b18-c6f5-423d-bd84-c3ef885ea3eb",
+      "contactId": "3beeee65-73d9-450e-9d05-47440430e802",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "fce357eb-da65-4668-aa10-cd1e5fd052e6",
+      "contactName": "Thiru Thangarajah",
+      "company": "Genoskin",
+      "email": "thiru.thangarajah@genoskin.com",
+      "phone": "+447808147984",
+      "duration": 91,
+      "transcript": "assistant: Hey there! ThatWoah, that sounded really loud! Is everything okay over there? Sounds like something just made a big noise. Let me know what’s going on and how I can help.Hello, may I please speak with Thiru Thangarajah, the Director of Business Development at Genoskin?",
+      "createdAt": "2026-01-15 09:59:42.565302",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "8b48a191-5b19-41b7-a06b-2d25c7d3975b",
+      "contactId": "914a91af-21cc-4436-a788-1df36b6900f4",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    },
+    {
+      "id": "0ae769b1-0f71-4f65-88ac-1db100f4d12f",
+      "contactName": "Christopher Smith",
+      "company": "Green Hills Software",
+      "email": "chriss@ghs.com",
+      "phone": "+447801334700",
+      "duration": 91,
+      "transcript": "assistant: Whoa, that was a loud sound! Are you working on a project or something noisy? Let me know how I can help or if you need any advice with what you're doing.Hello, may I please speak with Christopher Smith, the Vice President, Marketing at Green Hills Software?",
+      "createdAt": "2026-01-15 10:00:59.539545",
+      "campaignId": "ff475cfd-2af3-4821-8d91-c62535cde2b1",
+      "queueItemId": "87fc3127-f681-4bf3-bd44-e785fe46aa68",
+      "contactId": "bcee2034-5bef-41f8-ac96-c59bdb18d2e8",
+      "analysis": {
+        "likelyDisposition": "unclear",
+        "confidence": 0.3,
+        "positiveMatches": [],
+        "negativeMatches": [],
+        "isVoicemail": false
+      }
+    }
+  ]
+}

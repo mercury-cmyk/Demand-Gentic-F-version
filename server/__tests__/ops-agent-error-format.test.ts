@@ -30,7 +30,7 @@ describe("formatOpsAgentErrorMessage", () => {
       "All configured coding agent providers failed. Codex: authentication failed | Claude: authentication failed | Gemini: endpoint or model configuration returned 404";
     expect(formatOpsAgentErrorMessage(new Error(message), "fallback")).toBe(
       [
-        "AgentX could not reach any configured coding provider.",
+        "AgentC could not reach any configured coding provider.",
         "- Codex authentication failed. Check AI_INTEGRATIONS_OPENAI_API_KEY / OPENAI_API_KEY, or switch OPS_HUB_CODEX_TRANSPORT to github_models and set GITHUB_MODELS_TOKEN.",
         "- Claude authentication failed. Check AI_INTEGRATIONS_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY.",
         "- Gemini returned 404. Check AI_INTEGRATIONS_GEMINI_BASE_URL and OPS_HUB_GEMINI_MODEL. If you did not override them, verify the Gemini API key and project access.",
@@ -45,7 +45,7 @@ describe("formatOpsAgentErrorMessage", () => {
         "fallback",
       ),
     ).toBe(
-      "AgentX could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.",
+      "AgentC could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.",
     );
   });
 
@@ -54,7 +54,7 @@ describe("formatOpsAgentErrorMessage", () => {
       "All configured coding agent providers failed. Kimi: not configured | DeepSeek: authentication failed";
     expect(formatOpsAgentErrorMessage(new Error(message), "fallback")).toBe(
       [
-        "AgentX could not reach any configured coding provider.",
+        "AgentC could not reach any configured coding provider.",
         "- Kimi is not configured. Add KIMI_API_KEY or MOONSHOT_API_KEY.",
         "- DeepSeek authentication failed. Check DEEPSEEK_API_KEY.",
       ].join("\n"),

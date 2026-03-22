@@ -1,0 +1,920 @@
+/**
+ * Argyle Events API Routes
+ * 
+ * All routes are gated behind:
+ * 1. Feature flag: argyle_event_drafts (default OFF)
+ * 2. Hard client gate: only client "Argyle" can access
+ * 
+ * Routes:
+ * - GET /api/client-portal/argyle-events/events         — List synced events + draft status
+ * - GET /api/client-portal/argyle-events/drafts/:id      — Get a specific draft
+ * - PUT /api/client-portal/argyle-events/drafts/:id      — Update draft fields
+ * - POST /api/client-portal/argyle-events/drafts/:id/submit — Submit draft as work order
+ * - POST /api/client-portal/argyle-events/sync           — Admin: trigger sync
+ */
+
+import { Router, Request, Response, NextFunction } from 'express';
+import { db } from '../../db';
+import { eq, and, desc, asc, isNotNull, sql, inArray } from 'drizzle-orm';
+import { externalEvents, workOrderDrafts, clientAccounts, workOrders, clientProjects } from '@shared/schema';
+import { isFeatureEnabled, requireFeatureFlag } from '../../feature-flags';
+import { isArgyleClient, runArgyleEventSync } from './sync-runner';
+import { submitDraftAsWorkOrder } from './work-order-adapter';
+import { createProjectFromDraft, getProjectForEvent } from './project-bridge';
+import { requireAuth, requireRole } from '../../auth';
+
+const router = Router();
+
+function toStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') {
+        const candidate = (item as any).value || (item as any).label;
+        return typeof candidate === 'string' ? candidate.trim() : '';
+      }
+      return '';
+    })
+    .filter(Boolean);
+}
+
+function toIsoDate(input: unknown): string {
+  if (!input) return '';
+  const d = input instanceof Date ? input : new Date(String(input));
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function buildArgylePrefillPayload(event: any, draft: any) {
+  const sourceFields = (draft?.sourceFields || {}) as Record;
+  const draftFields = (draft?.draftFields || {}) as Record;
+  const eventTitle = String(event?.title || 'Argyle Event').trim();
+  const eventType = event?.eventType ? String(event.eventType) : '';
+  const eventDate = event?.startAtHuman || toIsoDate(event?.startAtIso);
+  const eventLocation = event?.location ? String(event.location) : '';
+  const overview = event?.overviewExcerpt ? String(event.overviewExcerpt).trim() : '';
+
+  const objective =
+    (draftFields.objective && String(draftFields.objective).trim()) ||
+    (sourceFields.objective && String(sourceFields.objective).trim()) ||
+    `Generate qualified leads for ${eventTitle} attendees, sponsors, and partners.`;
+
+  const descriptionParts = [
+    overview ? `Overview: ${overview}` : '',
+    eventType ? `Type: ${eventType}` : '',
+    eventDate ? `Date: ${eventDate}` : '',
+    eventLocation ? `Location: ${eventLocation}` : '',
+  ].filter(Boolean);
+
+  const draftAudienceTitles = toStringArray(draftFields.targetAudience);
+  const sourceAudienceTitles = toStringArray(sourceFields.targetAudience);
+  const targetTitles = draftAudienceTitles.length > 0 ? draftAudienceTitles : sourceAudienceTitles;
+
+  const draftIndustryValues = toStringArray(draftFields.targetIndustries);
+  const sourceIndustryValues = toStringArray(sourceFields.targetIndustries);
+  const targetIndustries = draftIndustryValues.length > 0 ? draftIndustryValues : sourceIndustryValues;
+
+  return {
+    channel: 'email',
+    name:
+      (draftFields.title && String(draftFields.title).trim()) ||
+      `${eventTitle} - Email Outreach`,
+    objective,
+    description:
+      (draftFields.description && String(draftFields.description).trim()) ||
+      descriptionParts.join('\n'),
+    landingPageUrl: event?.sourceUrl || '',
+    targetAudience:
+      (Array.isArray(targetTitles) && targetTitles.length > 0)
+        ? targetTitles.join(', ')
+        : '',
+    targetTitles: targetTitles || [],
+    targetIndustries: targetIndustries || [],
+    targetRegions: eventLocation ? [eventLocation] : [],
+    startDate: toIsoDate(event?.startAtIso),
+    targetLeadCount: draft?.leadCount || undefined,
+    eventSummary: {
+      title: eventTitle,
+      type: eventType || null,
+      date: eventDate || null,
+      location: eventLocation || null,
+      sourceUrl: event?.sourceUrl || null,
+    },
+  };
+}
+
+type EventDraftStatus = 'not_created' | 'draft' | 'pending_review' | 'rejected' | 'approved';
+
+function mapProjectStatusToEventStatus(status: string | null | undefined): EventDraftStatus | null {
+  if (!status) return null;
+  if (status === 'rejected') return 'rejected';
+  if (status === 'pending' || status === 'draft') return 'pending_review';
+  if (status === 'active' || status === 'paused' || status === 'completed' || status === 'archived') {
+    return 'approved';
+  }
+  return null;
+}
+
+/**
+ * Middleware: Require Argyle client gate.
+ * Checks that the authenticated client portal user belongs to the Argyle account.
+ */
+function requireArgyleClient(req: Request, res: Response, next: NextFunction) {
+  const clientAccountId = (req as any).clientUser?.clientAccountId;
+  if (!clientAccountId) {
+    return res.status(401).json({ error: 'Client authentication required' });
+  }
+
+  // Async client name check
+  isArgyleClient(clientAccountId).then(isArgyle => {
+    if (!isArgyle) {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: 'This feature is only available for Argyle',
+      });
+    }
+    next();
+  }).catch(err => {
+    console.error('[ArgyleEventsRoutes] Client gate error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  });
+}
+
+// ==================== CLIENT PORTAL ROUTES (Argyle-gated) ====================
+
+/**
+ * GET /events — List upcoming events with draft status
+ */
+router.get('/events',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  async (req: Request, res: Response) => {
+    try {
+      const clientAccountId = (req as any).clientUser.clientAccountId;
+
+      // Fetch all events for this client
+      const events = await db
+        .select({
+          event: externalEvents,
+        })
+        .from(externalEvents)
+        .where(
+          and(
+            eq(externalEvents.clientId, clientAccountId),
+            eq(externalEvents.sourceProvider, 'argyle'),
+          )
+        )
+        .orderBy(asc(externalEvents.startAtIso));
+
+      // Fetch all drafts for this client
+      const drafts = await db
+        .select({
+          id: workOrderDrafts.id,
+          externalEventId: workOrderDrafts.externalEventId,
+          status: workOrderDrafts.status,
+          leadCount: workOrderDrafts.leadCount,
+          editedFields: workOrderDrafts.editedFields,
+          workOrderId: workOrderDrafts.workOrderId,
+          updatedAt: workOrderDrafts.updatedAt,
+        })
+        .from(workOrderDrafts)
+        .where(eq(workOrderDrafts.clientAccountId, clientAccountId))
+        .orderBy(desc(workOrderDrafts.updatedAt));
+
+      const eventIds = events.map(({ event }) => event.id);
+      const projectRows = eventIds.length > 0
+        ? await db
+            .select({
+              id: clientProjects.id,
+              externalEventId: clientProjects.externalEventId,
+              status: clientProjects.status,
+              rejectionReason: clientProjects.rejectionReason,
+              updatedAt: clientProjects.updatedAt,
+            })
+            .from(clientProjects)
+            .where(
+              and(
+                eq(clientProjects.clientAccountId, clientAccountId),
+                inArray(clientProjects.externalEventId, eventIds),
+              )
+            )
+            .orderBy(desc(clientProjects.updatedAt))
+        : [];
+
+      // Build a map of event ID -> draft
+      const draftMap = new Map();
+      for (const d of drafts) {
+        if (!d.externalEventId) continue;
+        if (!draftMap.has(d.externalEventId)) {
+          draftMap.set(d.externalEventId, d);
+        }
+      }
+
+      const projectMap = new Map();
+      for (const p of projectRows) {
+        if (!p.externalEventId) continue;
+        if (!projectMap.has(p.externalEventId)) {
+          projectMap.set(p.externalEventId, p);
+        }
+      }
+
+      // Combine events with draft status
+      const results = events.map(({ event }) => {
+        const draft = draftMap.get(event.id);
+        const linkedProject = projectMap.get(event.id);
+        const mappedProjectStatus = mapProjectStatusToEventStatus(linkedProject?.status);
+        const normalizedDraftStatus: EventDraftStatus = mappedProjectStatus
+          ? mappedProjectStatus
+          : draft
+            ? 'draft'
+            : 'not_created';
+        return {
+          id: event.id,
+          externalId: event.externalId,
+          sourceUrl: event.sourceUrl,
+          title: event.title,
+          community: event.community,
+          eventType: event.eventType,
+          location: event.location,
+          startAtIso: event.startAtIso,
+          startAtHuman: event.startAtHuman,
+          needsDateReview: event.needsDateReview,
+          lastSyncedAt: event.lastSyncedAt,
+          // Draft status
+          draftId: draft?.id || null,
+          draftStatus: normalizedDraftStatus,
+          draftLeadCount: draft?.leadCount || null,
+          draftHasEdits: (draft?.editedFields as string[] || []).length > 0,
+          draftWorkOrderId: draft?.workOrderId || null,
+          draftUpdatedAt: draft?.updatedAt || null,
+          draftRejectionReason:
+            normalizedDraftStatus === 'rejected'
+              ? linkedProject?.rejectionReason || null
+              : null,
+        };
+      });
+
+      res.json({
+        events: results,
+        total: results.length,
+        featureEnabled: true,
+      });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Error listing events:', error);
+      res.status(500).json({ error: 'Failed to list events' });
+    }
+  }
+);
+
+async function accessDraftForEvent(req: Request, res: Response) {
+  try {
+    const clientAccountId = (req as any).clientUser.clientAccountId;
+    const clientUserId = (req as any).clientUser.clientUserId;
+    const { eventId } = req.params;
+
+    // Verify event belongs to this client
+    const [event] = await db
+      .select()
+      .from(externalEvents)
+      .where(
+        and(
+          eq(externalEvents.id, eventId),
+          eq(externalEvents.clientId, clientAccountId),
+        )
+      )
+      .limit(1);
+
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    // Primary idempotency key: (clientAccountId, externalEventId)
+    let [draft] = await db
+      .select({
+        id: workOrderDrafts.id,
+        status: workOrderDrafts.status,
+        workOrderId: workOrderDrafts.workOrderId,
+        leadCount: workOrderDrafts.leadCount,
+        sourceFields: workOrderDrafts.sourceFields,
+        draftFields: workOrderDrafts.draftFields,
+        externalEventId: workOrderDrafts.externalEventId,
+      })
+      .from(workOrderDrafts)
+      .where(
+        and(
+          eq(workOrderDrafts.clientAccountId, clientAccountId),
+          eq(workOrderDrafts.externalEventId, eventId),
+        )
+      )
+      .limit(1);
+
+    // Secondary key fallback: same client + event source URL
+    if (!draft) {
+      const [urlMatched] = await db
+        .select({
+          id: workOrderDrafts.id,
+          status: workOrderDrafts.status,
+          workOrderId: workOrderDrafts.workOrderId,
+          leadCount: workOrderDrafts.leadCount,
+          sourceFields: workOrderDrafts.sourceFields,
+          draftFields: workOrderDrafts.draftFields,
+          externalEventId: workOrderDrafts.externalEventId,
+        })
+        .from(workOrderDrafts)
+        .innerJoin(externalEvents, eq(workOrderDrafts.externalEventId, externalEvents.id))
+        .where(
+          and(
+            eq(workOrderDrafts.clientAccountId, clientAccountId),
+            eq(externalEvents.sourceUrl, event.sourceUrl),
+          )
+        )
+        .limit(1);
+
+      draft = urlMatched;
+
+      if (draft && draft.externalEventId !== eventId) {
+        await db
+          .update(workOrderDrafts)
+          .set({
+            externalEventId: eventId,
+            updatedAt: new Date(),
+          })
+          .where(eq(workOrderDrafts.id, draft.id));
+      }
+    }
+
+    const hadExistingDraft = !!draft;
+
+    if (!draft) {
+      const { generateSourceFields } = await import('./draft-generator');
+      const sourceFields = generateSourceFields({
+        externalId: event.externalId,
+        sourceUrl: event.sourceUrl,
+        title: event.title,
+        community: event.community || undefined,
+        eventType: event.eventType || undefined,
+        location: event.location || undefined,
+        dateHuman: event.startAtHuman || undefined,
+        dateIso: event.startAtIso?.toISOString() || null,
+        overviewExcerpt: event.overviewExcerpt || undefined,
+        agendaExcerpt: event.agendaExcerpt || undefined,
+        speakersExcerpt: event.speakersExcerpt || undefined,
+      });
+
+      [draft] = await db
+        .insert(workOrderDrafts)
+        .values({
+          clientAccountId,
+          clientUserId,
+          externalEventId: eventId,
+          status: 'draft',
+          sourceFields: sourceFields as any,
+          draftFields: sourceFields as any,
+          editedFields: [],
+        })
+        .returning({
+          id: workOrderDrafts.id,
+          status: workOrderDrafts.status,
+          workOrderId: workOrderDrafts.workOrderId,
+          leadCount: workOrderDrafts.leadCount,
+          sourceFields: workOrderDrafts.sourceFields,
+          draftFields: workOrderDrafts.draftFields,
+          externalEventId: workOrderDrafts.externalEventId,
+        });
+    }
+
+    let rejectionReason: string | null = null;
+    let resolvedStatus: EventDraftStatus = 'draft';
+    if (draft.externalEventId) {
+      const [project] = await db
+        .select({
+          status: clientProjects.status,
+          rejectionReason: clientProjects.rejectionReason,
+        })
+        .from(clientProjects)
+        .where(
+          and(
+            eq(clientProjects.clientAccountId, clientAccountId),
+            eq(clientProjects.externalEventId, draft.externalEventId),
+          )
+        )
+        .orderBy(desc(clientProjects.updatedAt))
+        .limit(1);
+
+      const mappedProjectStatus = mapProjectStatusToEventStatus(project?.status);
+      if (mappedProjectStatus) {
+        resolvedStatus = mappedProjectStatus;
+      }
+      if (mappedProjectStatus === 'rejected') {
+        rejectionReason = project?.rejectionReason || null;
+      }
+    }
+
+    return res.json({
+      draftId: draft.id,
+      status: resolvedStatus,
+      workOrderId: draft.workOrderId || null,
+      alreadyExists: hadExistingDraft,
+      prefill: buildArgylePrefillPayload(event, draft),
+      rejectionReason,
+    });
+  } catch (error: any) {
+    console.error('[ArgyleEventsRoutes] Error accessing draft:', error);
+    return res.status(500).json({ error: 'Failed to access draft' });
+  }
+}
+
+/**
+ * POST /events/:eventId/draft — Get existing draft or create one idempotently.
+ */
+router.post('/events/:eventId/draft',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  accessDraftForEvent
+);
+
+/**
+ * Backward-compatible alias of /events/:eventId/draft
+ */
+router.post('/events/:eventId/create-draft',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  accessDraftForEvent
+);
+
+/**
+ * GET /drafts/:id — Get a specific draft with full details
+ */
+router.get('/drafts/:id',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  async (req: Request, res: Response) => {
+    try {
+      const clientAccountId = (req as any).clientUser.clientAccountId;
+      const { id } = req.params;
+
+      const [draft] = await db
+        .select()
+        .from(workOrderDrafts)
+        .where(
+          and(
+            eq(workOrderDrafts.id, id),
+            eq(workOrderDrafts.clientAccountId, clientAccountId),
+          )
+        )
+        .limit(1);
+
+      if (!draft) {
+        return res.status(404).json({ error: 'Draft not found' });
+      }
+
+      // Fetch linked event
+      let event = null;
+      let rejectionReason: string | null = null;
+      if (draft.externalEventId) {
+        const [evt] = await db
+          .select()
+          .from(externalEvents)
+          .where(eq(externalEvents.id, draft.externalEventId))
+          .limit(1);
+        event = evt || null;
+      }
+
+      if (draft.workOrderId) {
+        const [order] = await db
+          .select({
+            rejectionReason: workOrders.rejectionReason,
+            status: workOrders.status,
+          })
+          .from(workOrders)
+          .where(eq(workOrders.id, draft.workOrderId))
+          .limit(1);
+        if (order?.status === 'rejected') {
+          rejectionReason = order.rejectionReason || null;
+        }
+      }
+
+      if (draft.externalEventId) {
+        const [project] = await db
+          .select({
+            status: clientProjects.status,
+            rejectionReason: clientProjects.rejectionReason,
+          })
+          .from(clientProjects)
+          .where(
+            and(
+              eq(clientProjects.clientAccountId, clientAccountId),
+              eq(clientProjects.externalEventId, draft.externalEventId),
+            )
+          )
+          .orderBy(desc(clientProjects.updatedAt))
+          .limit(1);
+
+        if (project?.status === 'rejected') {
+          rejectionReason = project.rejectionReason || null;
+        }
+      }
+
+      res.json({
+        draft: {
+          id: draft.id,
+          status: draft.status,
+          sourceFields: draft.sourceFields,
+          draftFields: draft.draftFields,
+          editedFields: draft.editedFields,
+          leadCount: draft.leadCount,
+          workOrderId: draft.workOrderId,
+          submittedAt: draft.submittedAt,
+          createdAt: draft.createdAt,
+          updatedAt: draft.updatedAt,
+          rejectionReason,
+        },
+        event: event ? {
+          id: event.id,
+          externalId: event.externalId,
+          sourceUrl: event.sourceUrl,
+          title: event.title,
+          community: event.community,
+          eventType: event.eventType,
+          location: event.location,
+          startAtIso: event.startAtIso,
+          startAtHuman: event.startAtHuman,
+          lastSyncedAt: event.lastSyncedAt,
+        } : null,
+      });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Error fetching draft:', error);
+      res.status(500).json({ error: 'Failed to fetch draft' });
+    }
+  }
+);
+
+/**
+ * PUT /drafts/:id — Update draft fields (client edits)
+ * Tracks which fields the client has edited.
+ */
+router.put('/drafts/:id',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  async (req: Request, res: Response) => {
+    try {
+      const clientAccountId = (req as any).clientUser.clientAccountId;
+      const { id } = req.params;
+      const { draftFields: newDraftFields, leadCount } = req.body;
+
+      // Fetch existing draft
+      const [draft] = await db
+        .select()
+        .from(workOrderDrafts)
+        .where(
+          and(
+            eq(workOrderDrafts.id, id),
+            eq(workOrderDrafts.clientAccountId, clientAccountId),
+          )
+        )
+        .limit(1);
+
+      if (!draft) {
+        return res.status(404).json({ error: 'Draft not found' });
+      }
+
+      if (draft.status === 'submitted') {
+        return res.status(400).json({ error: 'Cannot edit a submitted draft' });
+      }
+
+      // Track which fields were edited
+      const existingEdited = new Set((draft.editedFields as string[]) || []);
+      const currentDraftFields = draft.draftFields as Record;
+
+      if (newDraftFields && typeof newDraftFields === 'object') {
+        for (const key of Object.keys(newDraftFields)) {
+          // Skip non-editable fields
+          if (key === 'sourceUrl' || key === 'externalId') continue;
+          
+          // Mark as edited if value differs from source
+          const sourceFields = draft.sourceFields as Record;
+          if (JSON.stringify(newDraftFields[key]) !== JSON.stringify(sourceFields[key])) {
+            existingEdited.add(key);
+          }
+        }
+      }
+
+      const mergedDraftFields = {
+        ...currentDraftFields,
+        ...(newDraftFields || {}),
+      };
+
+      // Preserve non-editable source fields
+      const sourceFields = draft.sourceFields as Record;
+      mergedDraftFields.sourceUrl = sourceFields.sourceUrl;
+
+      const updateData: any = {
+        draftFields: mergedDraftFields,
+        editedFields: Array.from(existingEdited),
+        updatedAt: new Date(),
+      };
+
+      // Update lead count if provided
+      if (leadCount !== undefined) {
+        const parsedLeadCount = parseInt(leadCount, 10);
+        if (isNaN(parsedLeadCount) || parsedLeadCount  {
+    try {
+      const clientAccountId = (req as any).clientUser.clientAccountId;
+      const clientUserId = (req as any).clientUser.clientUserId;
+      const { id } = req.params;
+
+      const result = await submitDraftAsWorkOrder(id, clientAccountId, clientUserId);
+
+      // Bridge: also create a clientProject for admin visibility (if argyle_event_orders flag is on)
+      let projectResult = null;
+      if (isFeatureEnabled('argyle_event_orders')) {
+        try {
+          projectResult = await createProjectFromDraft(id, clientAccountId, clientUserId);
+        } catch (bridgeErr: any) {
+          console.error('[ArgyleEventsRoutes] Project bridge error (non-blocking):', bridgeErr.message);
+        }
+      }
+
+      res.json({
+        success: true,
+        workOrderId: result.workOrderId,
+        orderNumber: result.orderNumber,
+        projectId: projectResult?.projectId || null,
+      });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Error submitting draft:', error);
+      const status = error.message.includes('not found') ? 404
+        : error.message.includes('Unauthorized') ? 403
+        : error.message.includes('already been submitted') ? 409
+        : error.message.includes('Lead count') ? 400
+        : 500;
+      res.status(status).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * POST /events/:eventId/request-leads — One-step: create draft (if needed) + submit + create project
+ * Client can specify leadCount. Idempotent — if already submitted, returns existing.
+ */
+router.post('/events/:eventId/request-leads',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  async (req: Request, res: Response) => {
+    try {
+      const clientAccountId = (req as any).clientUser.clientAccountId;
+      const clientUserId = (req as any).clientUser.clientUserId;
+      const { eventId } = req.params;
+      const { leadCount } = req.body;
+
+      if (!leadCount || parseInt(leadCount, 10)  0' });
+      }
+
+      // Check if event exists
+      const [event] = await db
+        .select()
+        .from(externalEvents)
+        .where(eq(externalEvents.id, eventId))
+        .limit(1);
+
+      if (!event) {
+        return res.status(404).json({ error: 'Event not found' });
+      }
+
+      // Check if draft already exists for this event
+      let [draft] = await db
+        .select()
+        .from(workOrderDrafts)
+        .where(
+          and(
+            eq(workOrderDrafts.externalEventId, eventId),
+            eq(workOrderDrafts.clientAccountId, clientAccountId),
+          )
+        )
+        .limit(1);
+
+      if (draft?.status === 'submitted') {
+        // Already submitted — check if project exists too
+        let projectResult = null;
+        if (isFeatureEnabled('argyle_event_orders')) {
+          projectResult = await getProjectForEvent(clientAccountId, eventId);
+        }
+        return res.json({
+          success: true,
+          alreadySubmitted: true,
+          draftId: draft.id,
+          workOrderId: draft.workOrderId,
+          projectId: projectResult?.projectId || null,
+        });
+      }
+
+      // Create draft if it doesn't exist
+      if (!draft) {
+        const [newDraft] = await db
+          .insert(workOrderDrafts)
+          .values({
+            clientAccountId,
+            clientUserId: clientUserId || null,
+            externalEventId: eventId,
+            status: 'draft',
+            sourceFields: {
+              title: event.title,
+              community: event.community,
+              eventType: event.eventType,
+              location: event.location,
+              sourceUrl: event.sourceUrl,
+              startDate: event.startAtHuman || event.startAtIso,
+            },
+            draftFields: {
+              title: event.title,
+              context: event.overviewExcerpt || '',
+              eventLocation: event.location,
+              sourceUrl: event.sourceUrl,
+            },
+            editedFields: [],
+            leadCount: parseInt(leadCount, 10),
+          })
+          .returning();
+        draft = newDraft;
+      } else {
+        // Update lead count on existing draft
+        await db
+          .update(workOrderDrafts)
+          .set({
+            leadCount: parseInt(leadCount, 10),
+            updatedAt: new Date(),
+          })
+          .where(eq(workOrderDrafts.id, draft.id));
+        draft = { ...draft, leadCount: parseInt(leadCount, 10) };
+      }
+
+      // Submit the draft as work order
+      const result = await submitDraftAsWorkOrder(draft.id, clientAccountId, clientUserId);
+
+      // Bridge to project (for admin visibility)
+      let projectResult = null;
+      if (isFeatureEnabled('argyle_event_orders')) {
+        try {
+          projectResult = await createProjectFromDraft(draft.id, clientAccountId, clientUserId);
+        } catch (bridgeErr: any) {
+          console.error('[ArgyleEventsRoutes] Project bridge error (non-blocking):', bridgeErr.message);
+        }
+      }
+
+      res.json({
+        success: true,
+        draftId: draft.id,
+        workOrderId: result.workOrderId,
+        orderNumber: result.orderNumber,
+        projectId: projectResult?.projectId || null,
+      });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Error requesting leads:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+/**
+ * GET /events/:eventId/project-status — Check project status for an event
+ */
+router.get('/events/:eventId/project-status',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  async (req: Request, res: Response) => {
+    try {
+      const clientAccountId = (req as any).clientUser.clientAccountId;
+      const { eventId } = req.params;
+
+      const projectInfo = await getProjectForEvent(clientAccountId, eventId);
+      res.json({ project: projectInfo });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Error checking project status:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// ==================== ADMIN ROUTES (for sync/management) ====================
+
+/**
+ * POST /sync — Trigger event sync (client-facing or admin)
+ * Client users can trigger sync for their own account.
+ * Admin users can trigger with useLLM flag.
+ */
+router.post('/sync',
+  requireFeatureFlag('argyle_event_drafts'),
+  requireArgyleClient,
+  async (req: Request, res: Response) => {
+    try {
+      const clientAccountId = (req as any).clientUser?.clientAccountId;
+      const useLLM = false; // LLM enrichment disabled for client-triggered syncs
+
+      console.log(`[ArgyleEventsRoutes] Sync triggered by client user, clientAccount=${clientAccountId}`);
+      const result = await runArgyleEventSync(useLLM);
+
+      res.json({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Sync error:', error);
+      res.status(500).json({ error: 'Sync failed', message: error.message });
+    }
+  }
+);
+
+/**
+ * POST /admin/sync — Admin-only sync (can use LLM enrichment)
+ */
+router.post('/admin/sync',
+  requireAuth,
+  requireRole('admin'),
+  requireFeatureFlag('argyle_event_drafts'),
+  async (req: Request, res: Response) => {
+    try {
+      const { useLLM = false } = req.body;
+
+      console.log(`[ArgyleEventsRoutes] Sync triggered by admin ${(req as any).user?.username}, useLLM=${useLLM}`);
+      const result = await runArgyleEventSync(useLLM);
+
+      res.json({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Admin sync error:', error);
+      res.status(500).json({ error: 'Sync failed', message: error.message });
+    }
+  }
+);
+
+/**
+ * GET /admin/events — Admin: list all synced events (no client gate)
+ */
+router.get('/admin/events',
+  requireAuth,
+  requireRole('admin'),
+  requireFeatureFlag('argyle_event_drafts'),
+  async (req: Request, res: Response) => {
+    try {
+      const events = await db
+        .select()
+        .from(externalEvents)
+        .where(eq(externalEvents.sourceProvider, 'argyle'))
+        .orderBy(asc(externalEvents.startAtIso));
+
+      const drafts = await db
+        .select({
+          id: workOrderDrafts.id,
+          externalEventId: workOrderDrafts.externalEventId,
+          status: workOrderDrafts.status,
+          leadCount: workOrderDrafts.leadCount,
+          workOrderId: workOrderDrafts.workOrderId,
+        })
+        .from(workOrderDrafts);
+
+      const draftMap = new Map(drafts.map(d => [d.externalEventId, d]));
+
+      const results = events.map(event => ({
+        ...event,
+        draft: draftMap.get(event.id) || null,
+      }));
+
+      res.json({ events: results, total: results.length });
+    } catch (error: any) {
+      console.error('[ArgyleEventsRoutes] Admin list error:', error);
+      res.status(500).json({ error: 'Failed to list events' });
+    }
+  }
+);
+
+/**
+ * GET /feature-status — Check if the feature is available for a client
+ * Used by the frontend to conditionally show the Argyle events UI.
+ */
+router.get('/feature-status', async (req: Request, res: Response) => {
+  try {
+    const clientAccountId = (req as any).clientUser?.clientAccountId;
+
+    if (!clientAccountId) {
+      return res.json({ enabled: false, reason: 'not_authenticated' });
+    }
+
+    if (!isFeatureEnabled('argyle_event_drafts')) {
+      return res.json({ enabled: false, reason: 'feature_flag_off' });
+    }
+
+    const isArgyle = await isArgyleClient(clientAccountId);
+    if (!isArgyle) {
+      return res.json({ enabled: false, reason: 'client_not_eligible' });
+    }
+
+    return res.json({ enabled: true });
+  } catch (error) {
+    return res.json({ enabled: false, reason: 'error' });
+  }
+});
+
+export default router;

@@ -19,7 +19,6 @@ import {
   Settings,
   ChevronRight,
   Crown,
-  Eye,
   GitBranch,
   Bot,
 } from 'lucide-react';
@@ -93,27 +92,11 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     category: 'infrastructure',
   },
   {
-    id: 'agent-defaults',
-    label: 'Agent Defaults',
-    href: ROUTES.SETTINGS_AGENT_DEFAULTS,
-    icon: Settings,
-    description: 'Global agent configuration',
-    category: 'infrastructure',
-  },
-  {
     id: 'ai-governance',
     label: 'AI Governance',
     href: ROUTES.SETTINGS_AI_GOVERNANCE,
     icon: Bot,
     description: 'Task-based model routing',
-    category: 'infrastructure',
-  },
-  {
-    id: 'prompt-inspector',
-    label: 'Prompt Inspector',
-    href: ROUTES.SETTINGS_PROMPT_INSPECTOR,
-    icon: Eye,
-    description: 'View all knowledge layers',
     category: 'infrastructure',
   },
   {

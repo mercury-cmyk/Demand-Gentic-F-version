@@ -1,0 +1,15 @@
+{
+  "executedAt": "2026-02-18T15:41:35.003Z",
+  "campaignId": "70434f6e-3ab6-49e4-acf7-350b81f60ea2",
+  "reason": "autoclean_scinotation_phone_artifact_2026_02_18",
+  "before": {
+    "queued_total": 52268,
+    "queued_scinotation_matches": 1649
+  },
+  "updatedRows": 1649,
+  "after": {
+    "queued_total": 50619,
+    "queued_scinotation_remaining": 0,
+    "removed_by_this_job": 1649
+  }
+}

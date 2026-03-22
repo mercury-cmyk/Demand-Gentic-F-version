@@ -1,0 +1,413 @@
+/**
+ * Learning Aggregator Service
+ * Aggregates call outcomes to detect patterns across campaigns
+ * Generates insights for role patterns, industry patterns, objection patterns
+ */
+
+import { db } from '../../../db';
+import {
+  callOutcomeLearnings,
+  learningInsights,
+  jobRoleTaxonomy,
+  industryTaxonomy,
+} from '@shared/schema';
+import { eq, and, sql, gte, lte, desc, inArray } from 'drizzle-orm';
+import type {
+  LearningPattern,
+  LearningAggregationRequest,
+  InsightType,
+  InsightScope,
+  ILearningAggregator,
+} from '../types';
+
+const MIN_SAMPLE_SIZE = 10;
+const MIN_CONFIDENCE = 0.6;
+
+/**
+ * Aggregate learnings and detect patterns
+ */
+export async function aggregateLearnings(
+  request: LearningAggregationRequest
+): Promise {
+  const {
+    scope,
+    scopeId,
+    timeWindow = { start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), end: new Date() },
+    minSampleSize = MIN_SAMPLE_SIZE,
+    minConfidence = MIN_CONFIDENCE,
+  } = request;
+
+  // Build query conditions
+  const conditions = [
+    gte(callOutcomeLearnings.callTimestamp, timeWindow.start),
+    lte(callOutcomeLearnings.callTimestamp, timeWindow.end),
+  ];
+
+  if (scope === 'campaign' && scopeId) {
+    conditions.push(eq(callOutcomeLearnings.campaignId, scopeId));
+  } else if (scope === 'organization' && scopeId) {
+    // Would need to join with campaigns to filter by org
+    // For now, skip organization filtering at DB level
+  }
+
+  // Fetch outcomes
+  const outcomes = await db
+    .select()
+    .from(callOutcomeLearnings)
+    .where(and(...conditions))
+    .orderBy(desc(callOutcomeLearnings.callTimestamp));
+
+  if (outcomes.length  p.confidence >= minConfidence);
+}
+
+/**
+ * Get stored learning insights
+ */
+export async function getLearningInsights(
+  scope: InsightScope,
+  scopeId?: string,
+  type?: InsightType
+): Promise {
+  const conditions = [
+    eq(learningInsights.isActive, true),
+    eq(learningInsights.insightScope, scope),
+  ];
+
+  if (scopeId) {
+    conditions.push(eq(learningInsights.scopeId, scopeId));
+  }
+  if (type) {
+    conditions.push(eq(learningInsights.insightType, type));
+  }
+
+  const insights = await db
+    .select()
+    .from(learningInsights)
+    .where(and(...conditions))
+    .orderBy(desc(learningInsights.confidence));
+
+  return insights.map(i => ({
+    patternType: i.insightType as InsightType,
+    patternKey: i.patternKey,
+    patternName: i.patternName,
+    patternDescription: i.patternDescription,
+    patternData: i.patternData as Record,
+    statistics: {
+      sampleSize: i.sampleSize,
+      successRate: i.successRate ? parseFloat(i.successRate as string) : 0,
+      avgEngagementScore: i.avgEngagementScore ? parseFloat(i.avgEngagementScore as string) : 0,
+      avgQualificationScore: i.avgQualificationScore ? parseFloat(i.avgQualificationScore as string) : 0,
+    },
+    segmentation: {
+      roleIds: i.appliesToRoles || [],
+      industryIds: i.appliesToIndustries || [],
+      seniorities: i.appliesToSeniority || [],
+      departments: i.appliesToDepartments || [],
+    },
+    recommendations: {
+      adjustments: (i.recommendedAdjustments as Record) || {},
+      messagingAngles: i.recommendedMessaging || [],
+      approachModifications: i.recommendedApproaches || [],
+      antiPatterns: i.antiPatterns || [],
+    },
+    confidence: parseFloat(i.confidence as string),
+    statisticalSignificance: i.statisticalSignificance ? parseFloat(i.statisticalSignificance as string) : 0,
+  }));
+}
+
+/**
+ * Detect role-based patterns
+ */
+async function detectRolePatterns(
+  outcomes: any[],
+  minSampleSize: number,
+  minConfidence: number
+): Promise {
+  // Group outcomes by role
+  const roleGroups = new Map();
+  for (const outcome of outcomes) {
+    if (outcome.contactRoleId) {
+      const existing = roleGroups.get(outcome.contactRoleId) || [];
+      existing.push(outcome);
+      roleGroups.set(outcome.contactRoleId, existing);
+    }
+  }
+
+  const patterns: LearningPattern[] = [];
+
+  for (const [roleId, roleOutcomes] of roleGroups) {
+    if (roleOutcomes.length  {
+  // Group outcomes by industry
+  const industryGroups = new Map();
+  for (const outcome of outcomes) {
+    if (outcome.industryId) {
+      const existing = industryGroups.get(outcome.industryId) || [];
+      existing.push(outcome);
+      industryGroups.set(outcome.industryId, existing);
+    }
+  }
+
+  const patterns: LearningPattern[] = [];
+
+  for (const [industryId, industryOutcomes] of industryGroups) {
+    if (industryOutcomes.length ();
+  for (const outcome of outcomes) {
+    const objectionSignals = outcome.objectionSignals as any;
+    if (objectionSignals?.objectionType) {
+      const existing = objectionGroups.get(objectionSignals.objectionType) || [];
+      existing.push(outcome);
+      objectionGroups.set(objectionSignals.objectionType, existing);
+    }
+  }
+
+  const patterns: LearningPattern[] = [];
+
+  for (const [objectionType, objectionOutcomes] of objectionGroups) {
+    if (objectionOutcomes.length 
+      (o.objectionSignals as any)?.wasResolved === true
+    ).length;
+    const resolutionRate = resolved / objectionOutcomes.length;
+
+    const confidence = calculateConfidence(objectionOutcomes.length, resolutionRate);
+    if (confidence  (o.objectionSignals as any)?.wasResolved)
+      .map(o => (o.objectionSignals as any)?.resolutionMethod)
+      .filter(Boolean);
+
+    const methodCounts = countOccurrences(successfulMethods);
+    const topMethods = Object.entries(methodCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([method]) => method);
+
+    patterns.push({
+      patternType: 'objection_pattern',
+      patternKey: `objection_${objectionType.replace(/\s+/g, '_').toLowerCase()}`,
+      patternName: `${objectionType} Handling Pattern`,
+      patternDescription: `Pattern for handling "${objectionType}" objection with ${(resolutionRate * 100).toFixed(1)}% resolution rate`,
+      patternData: {
+        objectionType,
+        resolutionRate,
+        topResolutionMethods: topMethods,
+      },
+      statistics: {
+        sampleSize: objectionOutcomes.length,
+        successRate: resolutionRate * 100,
+        avgEngagementScore: 0,
+        avgQualificationScore: 0,
+      },
+      segmentation: {},
+      recommendations: {
+        adjustments: { objectionHandling: topMethods[0] },
+        messagingAngles: [],
+        approachModifications: topMethods,
+        antiPatterns: [],
+      },
+      confidence,
+      statisticalSignificance: calculateSignificance(objectionOutcomes.length, resolutionRate),
+    });
+  }
+
+  return patterns;
+}
+
+/**
+ * Detect approach-based patterns
+ */
+function detectApproachPatterns(
+  outcomes: any[],
+  minSampleSize: number,
+  minConfidence: number
+): LearningPattern[] {
+  // Group by approach
+  const approachGroups = new Map();
+  for (const outcome of outcomes) {
+    if (outcome.approachUsed) {
+      const existing = approachGroups.get(outcome.approachUsed) || [];
+      existing.push(outcome);
+      approachGroups.set(outcome.approachUsed, existing);
+    }
+  }
+
+  const patterns: LearningPattern[] = [];
+
+  for (const [approach, approachOutcomes] of approachGroups) {
+    if (approachOutcomes.length  o.outcomeCategory === 'positive').length;
+  const successRate = (positive / outcomes.length) * 100;
+
+  let totalEngagement = 0;
+  let engagementCount = 0;
+  let totalDuration = 0;
+  let durationCount = 0;
+  const approaches: string[] = [];
+  const angles: string[] = [];
+  const objections: string[] = [];
+  const failedApproaches: string[] = [];
+
+  for (const outcome of outcomes) {
+    const engagementSignals = outcome.engagementSignals as any;
+    if (engagementSignals?.interestLevel !== undefined) {
+      totalEngagement += engagementSignals.interestLevel;
+      engagementCount++;
+    }
+
+    if (outcome.callDurationSeconds) {
+      totalDuration += outcome.callDurationSeconds;
+      durationCount++;
+    }
+
+    if (outcome.approachUsed) {
+      if (outcome.outcomeCategory === 'positive') {
+        approaches.push(outcome.approachUsed);
+      } else if (outcome.outcomeCategory === 'negative') {
+        failedApproaches.push(outcome.approachUsed);
+      }
+    }
+
+    if (outcome.messagingAngleUsed) {
+      angles.push(outcome.messagingAngleUsed);
+    }
+
+    const objectionSignals = outcome.objectionSignals as any;
+    if (objectionSignals?.objectionType) {
+      objections.push(objectionSignals.objectionType);
+    }
+  }
+
+  return {
+    successRate,
+    avgEngagement: engagementCount > 0 ? totalEngagement / engagementCount : 0.5,
+    avgQualification: 0, // Would need to calculate from qualification signals
+    avgDuration: durationCount > 0 ? totalDuration / durationCount : 0,
+    topApproaches: getTopItems(approaches, 3),
+    topAngles: getTopItems(angles, 3),
+    commonObjections: getTopItems(objections, 3),
+    failedApproaches: getTopItems(failedApproaches, 2),
+  };
+}
+
+/**
+ * Calculate confidence score
+ */
+function calculateConfidence(sampleSize: number, successRate: number): number {
+  // Base confidence from sample size (logarithmic scaling)
+  const sizeConfidence = Math.min(1, Math.log10(sampleSize + 1) / 2);
+
+  // Confidence boost/penalty based on success rate deviation from baseline (50%)
+  const rateDeviation = Math.abs(successRate / 100 - 0.5);
+  const rateConfidence = 0.5 + rateDeviation;
+
+  return sizeConfidence * rateConfidence;
+}
+
+/**
+ * Calculate statistical significance
+ */
+function calculateSignificance(sampleSize: number, rate: number): number {
+  // Simplified significance calculation
+  // In production, use proper statistical tests
+  if (sampleSize  {
+  return {
+    preferredApproach: stats.topApproaches[0],
+    avoidApproaches: stats.failedApproaches,
+    messagingFocus: stats.topAngles[0],
+  };
+}
+
+/**
+ * Count occurrences of items
+ */
+function countOccurrences(items: string[]): Record {
+  return items.reduce((acc, item) => {
+    acc[item] = (acc[item] || 0) + 1;
+    return acc;
+  }, {} as Record);
+}
+
+/**
+ * Get top N items by frequency
+ */
+function getTopItems(items: string[], n: number): string[] {
+  const counts = countOccurrences(items);
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([item]) => item);
+}
+
+/**
+ * Store learning insights in database
+ */
+async function storeLearningInsights(
+  patterns: LearningPattern[],
+  scope: InsightScope,
+  scopeId?: string
+): Promise {
+  for (const pattern of patterns) {
+    await db
+      .insert(learningInsights)
+      .values({
+        insightType: pattern.patternType,
+        insightScope: scope,
+        scopeId: scopeId || null,
+        patternKey: pattern.patternKey,
+        patternName: pattern.patternName,
+        patternDescription: pattern.patternDescription,
+        patternData: pattern.patternData,
+        appliesToRoles: pattern.segmentation.roleIds || [],
+        appliesToIndustries: pattern.segmentation.industryIds || [],
+        appliesToSeniority: pattern.segmentation.seniorities || [],
+        appliesToDepartments: pattern.segmentation.departments || [],
+        sampleSize: pattern.statistics.sampleSize,
+        successRate: pattern.statistics.successRate.toFixed(4),
+        avgEngagementScore: pattern.statistics.avgEngagementScore.toFixed(4),
+        avgQualificationScore: pattern.statistics.avgQualificationScore.toFixed(4),
+        confidence: pattern.confidence.toFixed(4),
+        statisticalSignificance: pattern.statisticalSignificance.toFixed(4),
+        recommendedAdjustments: pattern.recommendations.adjustments,
+        recommendedMessaging: pattern.recommendations.messagingAngles,
+        recommendedApproaches: pattern.recommendations.approachModifications,
+        antiPatterns: pattern.recommendations.antiPatterns,
+        generationModel: 'aggregation',
+        isActive: true,
+      })
+      .onConflictDoUpdate({
+        target: [learningInsights.patternKey, learningInsights.insightScope],
+        set: {
+          patternName: pattern.patternName,
+          patternDescription: pattern.patternDescription,
+          patternData: pattern.patternData,
+          sampleSize: pattern.statistics.sampleSize,
+          successRate: pattern.statistics.successRate.toFixed(4),
+          avgEngagementScore: pattern.statistics.avgEngagementScore.toFixed(4),
+          confidence: pattern.confidence.toFixed(4),
+          recommendedAdjustments: pattern.recommendations.adjustments,
+          recommendedMessaging: pattern.recommendations.messagingAngles,
+          recommendedApproaches: pattern.recommendations.approachModifications,
+          antiPatterns: pattern.recommendations.antiPatterns,
+          updatedAt: new Date(),
+          version: sql`${learningInsights.version} + 1`,
+        },
+      });
+  }
+}
+
+/**
+ * Learning Aggregator class for dependency injection
+ */
+export class LearningAggregator implements ILearningAggregator {
+  async recordLearningOutcome(): Promise {
+    // Implemented in feedback-processor
+  }
+
+  async aggregateLearnings(request: LearningAggregationRequest): Promise {
+    return aggregateLearnings(request);
+  }
+
+  async getLearningInsights(
+    scope: InsightScope,
+    scopeId?: string,
+    type?: InsightType
+  ): Promise {
+    return getLearningInsights(scope, scopeId, type);
+  }
+}

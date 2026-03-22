@@ -1,0 +1,1562 @@
+/**
+ * Disposition Engine - Centralized disposition enforcement service
+ * 
+ * This service enforces all outcomes based on canonical dispositions:
+ * - QUALIFIED_LEAD: Route to QA, suppress from dialing, enforce leads cap
+ * - NOT_INTERESTED: Suppress from this campaign permanently
+ * - DO_NOT_CALL: Add to global DNC, suppress from ALL campaigns
+ * - VOICEMAIL: Schedule retry (3-7 days), increment attempts
+ * - NO_ANSWER: Same as VOICEMAIL, tracked separately
+ * - INVALID_DATA: Suppress from campaign, mark phone as invalid
+ */
+
+import { db } from "../db";
+import {
+  dialerCallAttempts,
+  dialerRuns,
+  campaignQueue,
+  leads,
+  globalDnc,
+  contacts,
+  accounts,
+  campaigns,
+  governanceActionsLog,
+  qcWorkQueue,
+  recycleJobs,
+  activityLog,
+  campaignAccountStats,
+  type CanonicalDisposition,
+  type CampaignContactState
+} from "@shared/schema";
+import { eq, and, sql, inArray } from "drizzle-orm";
+import {
+  shouldTriggerSuppression,
+  calculateNextEligibleDate,
+  getSuppressionReason
+} from "../lib/contact-suppression";
+import { transcribeLeadCall } from "./telnyx-transcription";
+import { analyzeCall } from "./call-quality-analyzer";
+import { analyzeLeadQualification } from "./ai-qa-analyzer";
+import { downloadAndStoreRecording, isRecordingStorageEnabled } from "./recording-storage";
+import callQualityTracker from "./call-quality-tracker";
+import { telnyxNumbers } from "@shared/number-pool-schema";
+import { processEmailEngagement, type EngagementSignal } from "./campaign-pipeline-orchestrator";
+import { processEngagementEvent } from "./engagement-trigger-service";
+
+// Campaign rules interface (stored in campaign.config)
+interface CampaignRules {
+  maxAttemptsPerContact: number;
+  minHoursBetweenAttempts: number;
+  retryWindowDaysMin: number;
+  retryWindowDaysMax: number;
+  voicemailRetryWindowDaysMin: number;
+  voicemailRetryWindowDaysMax: number;
+  noAnswerRetryWindowDaysMin: number;
+  noAnswerRetryWindowDaysMax: number;
+  needsReviewRetryWindowDaysMin: number;
+  needsReviewRetryWindowDaysMax: number;
+  leadsCapPerCampaign: number | null;
+  businessHoursStart: string; // "09:00"
+  businessHoursEnd: string; // "17:00"
+  timezone: string;
+}
+
+const DEFAULT_CAMPAIGN_RULES: CampaignRules = {
+  maxAttemptsPerContact: 3,
+  minHoursBetweenAttempts: 24,
+  retryWindowDaysMin: 3,
+  retryWindowDaysMax: 7,
+  voicemailRetryWindowDaysMin: 3,
+  voicemailRetryWindowDaysMax: 7,
+  noAnswerRetryWindowDaysMin: 1,
+  noAnswerRetryWindowDaysMax: 3,
+  needsReviewRetryWindowDaysMin: 1,
+  needsReviewRetryWindowDaysMax: 2,
+  leadsCapPerCampaign: null,
+  businessHoursStart: "09:00",
+  businessHoursEnd: "17:00",
+  timezone: "America/New_York"
+};
+
+function toPositiveInt(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  const rounded = Math.floor(parsed);
+  return rounded > 0 ? rounded : undefined;
+}
+
+function resolveRetryWindowDays(
+  candidate: unknown,
+  fallbackMin: number,
+  fallbackMax: number
+): { minDays: number; maxDays: number } {
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    const days = Math.max(1, Math.floor(candidate));
+    return { minDays: days, maxDays: days };
+  }
+
+  if (candidate && typeof candidate === "object") {
+    const c = candidate as Record;
+    const exactDays = toPositiveInt(c.days ?? c.retryDays ?? c.windowDays);
+    if (exactDays) {
+      return { minDays: exactDays, maxDays: exactDays };
+    }
+
+    const minDays = toPositiveInt(c.minDays ?? c.min_days ?? c.min);
+    const maxDays = toPositiveInt(c.maxDays ?? c.max_days ?? c.max);
+    const resolvedMin = minDays ?? fallbackMin;
+    const resolvedMax = Math.max(maxDays ?? fallbackMax, resolvedMin);
+    return { minDays: resolvedMin, maxDays: resolvedMax };
+  }
+
+  return { minDays: fallbackMin, maxDays: Math.max(fallbackMax, fallbackMin) };
+}
+
+function deriveCampaignRules(campaign: typeof campaigns.$inferSelect | undefined): CampaignRules {
+  const retryRulesRaw = (campaign?.retryRules && typeof campaign.retryRules === "object")
+    ? (campaign.retryRules as Record)
+    : {};
+  const businessHoursRaw = (retryRulesRaw.business_hours && typeof retryRulesRaw.business_hours === "object")
+    ? (retryRulesRaw.business_hours as Record)
+    : {};
+  const businessHoursConfigRaw = (campaign?.businessHoursConfig && typeof campaign.businessHoursConfig === "object")
+    ? (campaign.businessHoursConfig as Record)
+    : {};
+
+  const maxAttemptsPerContact =
+    toPositiveInt(retryRulesRaw.maxAttemptsPerContact ?? retryRulesRaw.maxAttempts) ??
+    DEFAULT_CAMPAIGN_RULES.maxAttemptsPerContact;
+
+  const minHoursBetweenAttempts =
+    toPositiveInt(retryRulesRaw.minHoursBetweenAttempts ?? retryRulesRaw.min_hours_between_attempts) ??
+    DEFAULT_CAMPAIGN_RULES.minHoursBetweenAttempts;
+
+  const retryWindowDaysMin =
+    toPositiveInt(retryRulesRaw.retryWindowDaysMin ?? retryRulesRaw.retry_window_days_min) ??
+    DEFAULT_CAMPAIGN_RULES.retryWindowDaysMin;
+  const retryWindowDaysMax = Math.max(
+    toPositiveInt(retryRulesRaw.retryWindowDaysMax ?? retryRulesRaw.retry_window_days_max) ??
+      DEFAULT_CAMPAIGN_RULES.retryWindowDaysMax,
+    retryWindowDaysMin
+  );
+
+  const voicemailWindow = resolveRetryWindowDays(
+    retryRulesRaw.voicemail,
+    retryWindowDaysMin,
+    retryWindowDaysMax
+  );
+  const noAnswerWindow = resolveRetryWindowDays(
+    retryRulesRaw.no_answer ?? retryRulesRaw.noAnswer,
+    Math.max(1, retryWindowDaysMin),
+    retryWindowDaysMax
+  );
+  const needsReviewWindow = resolveRetryWindowDays(
+    retryRulesRaw.needs_review ?? retryRulesRaw.needsReview,
+    DEFAULT_CAMPAIGN_RULES.needsReviewRetryWindowDaysMin,
+    DEFAULT_CAMPAIGN_RULES.needsReviewRetryWindowDaysMax
+  );
+
+  return {
+    ...DEFAULT_CAMPAIGN_RULES,
+    maxAttemptsPerContact,
+    minHoursBetweenAttempts,
+    retryWindowDaysMin,
+    retryWindowDaysMax,
+    voicemailRetryWindowDaysMin: voicemailWindow.minDays,
+    voicemailRetryWindowDaysMax: voicemailWindow.maxDays,
+    noAnswerRetryWindowDaysMin: noAnswerWindow.minDays,
+    noAnswerRetryWindowDaysMax: noAnswerWindow.maxDays,
+    needsReviewRetryWindowDaysMin: needsReviewWindow.minDays,
+    needsReviewRetryWindowDaysMax: needsReviewWindow.maxDays,
+    leadsCapPerCampaign: campaign?.targetQualifiedLeads ?? DEFAULT_CAMPAIGN_RULES.leadsCapPerCampaign,
+    businessHoursStart:
+      String(businessHoursRaw.start ?? businessHoursConfigRaw.startTime ?? DEFAULT_CAMPAIGN_RULES.businessHoursStart),
+    businessHoursEnd:
+      String(businessHoursRaw.end ?? businessHoursConfigRaw.endTime ?? DEFAULT_CAMPAIGN_RULES.businessHoursEnd),
+    timezone:
+      String(campaign?.timezone ?? businessHoursRaw.timezone ?? businessHoursConfigRaw.timezone ?? DEFAULT_CAMPAIGN_RULES.timezone),
+  };
+}
+
+// Disposition engine result
+interface DispositionResult {
+  success: boolean;
+  actions: string[];
+  errors: string[];
+  leadId?: string;
+  nextAttemptAt?: Date;
+  queueState?: CampaignContactState;
+}
+
+// Optional call data from source system
+export interface DispositionCallData {
+  transcript?: string;
+  recordingUrl?: string;
+  structuredTranscript?: any;
+  callbackDate?: string | Date | null;
+}
+
+function parseRequestedCallbackAt(input: string | Date | null | undefined): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) {
+    return Number.isNaN(input.getTime()) ? null : input;
+  }
+
+  const raw = String(input).trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function resolveCallbackAtForDisposition(callData?: DispositionCallData): Date {
+  const requested = parseRequestedCallbackAt(callData?.callbackDate);
+  if (requested) {
+    return requested;
+  }
+  return new Date(Date.now() + 60 * 60 * 1000);
+}
+
+function extractTranscriptFromCallData(callData?: DispositionCallData): string | undefined {
+  const directTranscript = typeof callData?.transcript === 'string' ? callData.transcript.trim() : '';
+  if (directTranscript) {
+    return directTranscript;
+  }
+
+  const structured = callData?.structuredTranscript as any;
+  if (!structured) {
+    return undefined;
+  }
+
+  const turns = Array.isArray(structured)
+    ? structured
+    : Array.isArray(structured?.turns)
+      ? structured.turns
+      : Array.isArray(structured?.utterances)
+        ? structured.utterances
+        : [];
+
+  if (!turns.length) {
+    return undefined;
+  }
+
+  const lines = turns
+    .map((turn: any) => {
+      const text = String(turn?.text ?? '').trim();
+      if (!text) return null;
+
+      const rawSpeaker = String(turn?.speaker ?? turn?.role ?? '').toLowerCase();
+      const speakerLabel =
+        rawSpeaker.includes('agent') || rawSpeaker.includes('assistant')
+          ? 'Agent'
+          : rawSpeaker.includes('contact') || rawSpeaker.includes('user') || rawSpeaker.includes('prospect')
+            ? 'Contact'
+            : 'Speaker';
+
+      return `${speakerLabel}: ${text}`;
+    })
+    .filter(Boolean) as string[];
+
+  const normalized = lines.join('\n').trim();
+  return normalized || undefined;
+}
+
+function schedulePostCallAnalyzerForAttempt(
+  callAttemptId: string,
+  disposition: CanonicalDisposition,
+  fallbackTranscript?: string,
+): void {
+  const retryDelaysMs = [0, 15_000, 45_000, 120_000];
+
+  const trySchedule = async (attemptIndex: number): Promise => {
+    try {
+      const [attempt] = await db
+        .select({
+          callSessionId: dialerCallAttempts.callSessionId,
+          fullTranscript: dialerCallAttempts.fullTranscript,
+          aiTranscript: dialerCallAttempts.aiTranscript,
+          campaignId: dialerCallAttempts.campaignId,
+          contactId: dialerCallAttempts.contactId,
+          callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+          disposition: dialerCallAttempts.disposition,
+        })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttemptId))
+        .limit(1);
+
+      if (!attempt) {
+        console.warn(`[DispositionEngine] Cannot schedule post-call analyzer: call attempt not found (${callAttemptId})`);
+        return;
+      }
+
+      if (attempt.callSessionId) {
+        const { schedulePostCallAnalysis } = await import('./post-call-analyzer');
+        const transcriptForFallback = (attempt.fullTranscript || attempt.aiTranscript || fallbackTranscript || '').trim();
+
+        schedulePostCallAnalysis(attempt.callSessionId, {
+          callAttemptId,
+          campaignId: attempt.campaignId || undefined,
+          contactId: attempt.contactId || undefined,
+          callDurationSec: attempt.callDurationSeconds || undefined,
+          disposition: (attempt.disposition || disposition) as string | undefined,
+          geminiTranscript: transcriptForFallback || undefined,
+        });
+
+        console.log(`[DispositionEngine] 📊 Scheduled post-call analyzer for attempt ${callAttemptId} (session ${attempt.callSessionId})`);
+        return;
+      }
+
+      if (attemptIndex + 1  {
+          void trySchedule(attemptIndex + 1);
+        }, retryDelay);
+        return;
+      }
+
+      console.warn(`[DispositionEngine] ⚠️ Skipping post-call analyzer for ${callAttemptId}: callSessionId unavailable after retries`);
+    } catch (scheduleError) {
+      console.error(`[DispositionEngine] Failed scheduling post-call analyzer for ${callAttemptId}:`, scheduleError);
+
+      if (attemptIndex + 1  {
+          void trySchedule(attemptIndex + 1);
+        }, retryDelay);
+      }
+    }
+  };
+
+  setTimeout(() => {
+    void trySchedule(0);
+  }, retryDelaysMs[0]);
+}
+
+/**
+ * Process a disposition for a call attempt
+ * This is the SINGLE entry point for all disposition processing
+ */
+export async function processDisposition(
+  callAttemptId: string,
+  disposition: CanonicalDisposition,
+  processedBy: string = 'system',
+  callData?: DispositionCallData
+): Promise {
+  const result: DispositionResult = {
+    success: false,
+    actions: [],
+    errors: []
+  };
+
+  try {
+    // Atomically claim this disposition using a conditional UPDATE.
+    // This prevents the race condition where multiple async handlers
+    // (webhook, polling, WebSocket close) all read dispositionProcessed=false
+    // before any of them write true.
+    const claimResult = await db
+      .update(dialerCallAttempts)
+      .set({ dispositionProcessed: true, dispositionProcessedAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(dialerCallAttempts.id, callAttemptId),
+        eq(dialerCallAttempts.dispositionProcessed, false)
+      ));
+
+    const claimedRows = (claimResult as any).rowCount ?? (claimResult as any).count ?? 0;
+
+    if (claimedRows === 0) {
+      // Either the call attempt doesn't exist, or it was already processed.
+      const [existing] = await db
+        .select({ id: dialerCallAttempts.id, dispositionProcessed: dialerCallAttempts.dispositionProcessed })
+        .from(dialerCallAttempts)
+        .where(eq(dialerCallAttempts.id, callAttemptId))
+        .limit(1);
+
+      if (!existing) {
+        result.errors.push(`Call attempt ${callAttemptId} not found`);
+      } else {
+        result.errors.push(`Call attempt ${callAttemptId} already processed`);
+      }
+      return result;
+    }
+
+    // Now read the full call attempt data for processing
+    const [callAttempt] = await db
+      .select()
+      .from(dialerCallAttempts)
+      .where(eq(dialerCallAttempts.id, callAttemptId))
+      .limit(1);
+
+    if (!callAttempt) {
+      result.errors.push(`Call attempt ${callAttemptId} not found after claim`);
+      return result;
+    }
+
+    // Get campaign rules
+    const [campaign] = await db
+      .select()
+      .from(campaigns)
+      .where(eq(campaigns.id, callAttempt.campaignId))
+      .limit(1);
+
+    const rules = deriveCampaignRules(campaign);
+
+    let finalDisposition = disposition;
+
+    // SAFETY: Downgrade ghost/IVR AI calls to prevent false positives.
+    // Calls  = {
+      voicemail: 'call_voicemail',
+      no_answer: 'call_no_answer',
+      callback_requested: 'call_callback_requested',
+      qualified_lead: 'call_positive_response',
+      needs_review: 'call_answered',
+    };
+    const engagementSignal = dispositionToSignal[finalDisposition];
+    if (engagementSignal) {
+      setImmediate(async () => {
+        try {
+          await processEmailEngagement({
+            signal: engagementSignal,
+            campaignId: callAttempt.campaignId,
+            contactId: callAttempt.contactId,
+            metadata: {
+              callAttemptId,
+              disposition: finalDisposition,
+              callDurationSeconds: callAttempt.callDurationSeconds,
+              agentType: callAttempt.agentType,
+              callSessionId: callAttempt.callSessionId,
+            },
+          });
+        } catch (pipelineErr) {
+          console.warn(`[DispositionEngine] Pipeline orchestrator signal failed:`, pipelineErr);
+        }
+      });
+      result.actions.push(`Pipeline engagement signal emitted: ${engagementSignal}`);
+    }
+
+    // ── Engagement Trigger: auto-create cross-channel follow-up ──
+    // After a call disposition, create an email follow-up trigger.
+    // This runs async to avoid blocking disposition processing.
+    if (callAttempt.contactId && callAttempt.campaignId) {
+      setImmediate(async () => {
+        try {
+          // Look up the contact's accountId
+          const [contact] = await db
+            .select({ accountId: contacts.accountId })
+            .from(contacts)
+            .where(eq(contacts.id, callAttempt.contactId!))
+            .limit(1);
+
+          if (contact?.accountId) {
+            const triggerResult = await processEngagementEvent({
+              accountId: contact.accountId,
+              contactId: callAttempt.contactId!,
+              campaignId: callAttempt.campaignId!,
+              channel: 'call',
+              entityId: callAttemptId,
+              engagedAt: new Date(),
+              metadata: {
+                disposition: finalDisposition,
+                callDuration: callAttempt.callDurationSeconds ?? undefined,
+              },
+            });
+            if (triggerResult) {
+              console.log(`[DispositionEngine] Engagement trigger created: ${triggerResult.triggerId} (${triggerResult.targetChannel} scheduled at ${triggerResult.scheduledAt?.toISOString()})`);
+            }
+          }
+        } catch (triggerErr) {
+          console.warn(`[DispositionEngine] Engagement trigger creation failed:`, triggerErr);
+        }
+      });
+      result.actions.push(`Engagement trigger queued: call→email follow-up`);
+    }
+
+    result.success = result.errors.length === 0;
+    return result;
+
+  } catch (error) {
+    result.errors.push(`Processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    return result;
+  }
+}
+
+/**
+ * QUALIFIED_LEAD processing
+ * - Update queue state to QUALIFIED
+ * - Create lead record with status = IN_QA
+ * - Route to QA queue
+ * - Suppress from further dialing
+ * - Enforce campaign leads cap
+ * 
+ * IMPORTANT: Enforces minimum call duration to prevent false positives
+ * from short calls being marked as qualified.
+ */
+async function processQualifiedLead(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  rules: CampaignRules,
+  result: DispositionResult,
+  callData?: DispositionCallData
+): Promise {
+  console.log(`[DispositionEngine] ==> Starting processQualifiedLead for call attempt: ${callAttempt.id}`);
+  console.log(`[DispositionEngine] Call Data Received: ${JSON.stringify(callData, null, 2)}`);
+
+  // QUALITY GATE: Block ghost calls, flag short calls for QA review.
+  // AI calls  {
+      try {
+        let transcriptForAnalysis = (transcript || '').trim();
+
+        // SIP/native transcript fallback: if transcript wasn't passed through callData,
+        // pull in-session transcript already stored on the call attempt.
+        if (!transcriptForAnalysis) {
+          const [attemptTranscript] = await db
+            .select({
+              fullTranscript: dialerCallAttempts.fullTranscript,
+              aiTranscript: dialerCallAttempts.aiTranscript,
+            })
+            .from(dialerCallAttempts)
+            .where(eq(dialerCallAttempts.id, callAttempt.id))
+            .limit(1);
+
+          transcriptForAnalysis = (attemptTranscript?.fullTranscript || attemptTranscript?.aiTranscript || '').trim();
+
+          if (transcriptForAnalysis) {
+            await db.update(leads)
+              .set({
+                transcript: transcriptForAnalysis,
+                updatedAt: new Date(),
+              })
+              .where(eq(leads.id, leadIdForAsync));
+
+            console.log(`[DispositionEngine] 📝 Using in-session transcript fallback for lead ${leadIdForAsync} (${transcriptForAnalysis.length} chars)`);
+          }
+        }
+
+        // Step 1: Download recording to GCS IMMEDIATELY to prevent URL expiration
+        // Telnyx presigned URLs expire in ~10 minutes
+        if (isRecordingStorageEnabled() && recordingUrlForAsync) {
+          try {
+            console.log(`[DispositionEngine] 📥 Downloading recording to GCS for lead ${leadIdForAsync}...`);
+            const s3Key = await downloadAndStoreRecording(recordingUrlForAsync, leadIdForAsync);
+
+            if (s3Key) {
+              await db.update(leads)
+                .set({ recordingS3Key: s3Key, recordingStatus: 'completed' })
+                .where(eq(leads.id, leadIdForAsync));
+              console.log(`[DispositionEngine] ✅ Recording stored in GCS: ${s3Key}`);
+            } else {
+              console.log(`[DispositionEngine] ⚠️ Failed to store recording in GCS for lead ${leadIdForAsync}`);
+              await db.update(leads)
+                .set({ recordingStatus: 'failed', updatedAt: new Date() })
+                .where(eq(leads.id, leadIdForAsync));
+            }
+          } catch (recErr) {
+            console.error(`[DispositionEngine] Recording download failed for lead ${leadIdForAsync}:`, recErr);
+            await db.update(leads)
+              .set({ recordingStatus: 'failed', updatedAt: new Date() })
+              .where(eq(leads.id, leadIdForAsync));
+            // Continue — transcription may still work from a different source
+          }
+        }
+
+        // Step 2: Transcribe the call IF NOT PROVIDED
+        try {
+          if (!transcriptForAnalysis) {
+              console.log(`[DispositionEngine] 🎙️ Auto-triggering transcription for lead ${leadIdForAsync}`);
+              await db.update(leads)
+                .set({ transcriptionStatus: 'processing', updatedAt: new Date() })
+                .where(eq(leads.id, leadIdForAsync));
+
+              const transcribed = await transcribeLeadCall(leadIdForAsync);
+
+              if (transcribed) {
+                  await db.update(leads)
+                    .set({ transcriptionStatus: 'completed', updatedAt: new Date() })
+                    .where(eq(leads.id, leadIdForAsync));
+                  console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync}`);
+                  await analyzeCall(leadIdForAsync);
+                  console.log(`[DispositionEngine] ✅ Transcription + Analysis complete for lead ${leadIdForAsync}`);
+              } else {
+                  console.log(`[DispositionEngine] ⚠️ Transcription failed for lead ${leadIdForAsync} — marking status`);
+                  await db.update(leads)
+                    .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+                    .where(eq(leads.id, leadIdForAsync));
+              }
+          } else {
+              console.log(`[DispositionEngine] 📊 Auto-triggering quality analysis for lead ${leadIdForAsync} (using in-session transcript)`);
+              await analyzeCall(leadIdForAsync);
+          }
+        } catch (txErr) {
+          console.error(`[DispositionEngine] Transcription/analysis failed for lead ${leadIdForAsync}:`, txErr);
+          await db.update(leads)
+            .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+            .where(eq(leads.id, leadIdForAsync));
+          // Continue to Step 3 — quality analysis might still work if transcript exists
+        }
+
+        // Step 3: Run AI-powered lead quality analysis
+        try {
+          const [updatedLead] = await db
+            .select({ transcript: leads.transcript, aiScore: leads.aiScore })
+            .from(leads)
+            .where(eq(leads.id, leadIdForAsync))
+            .limit(1);
+
+          if (updatedLead?.transcript && !updatedLead.aiScore) {
+            console.log(`[DispositionEngine] 🔍 Auto-triggering lead quality analysis for lead ${leadIdForAsync}`);
+            const qaResult = await analyzeLeadQualification(leadIdForAsync);
+            if (qaResult) {
+              console.log(`[DispositionEngine] ✅ Lead quality analysis complete for lead ${leadIdForAsync}: score=${qaResult.score}, status=${qaResult.qualification_status}`);
+            } else {
+              console.log(`[DispositionEngine] ⚠️ Lead quality analysis returned null for lead ${leadIdForAsync} (may need transcript)`);
+            }
+          }
+        } catch (qaErr) {
+          console.error(`[DispositionEngine] Failed lead quality analysis for lead ${leadIdForAsync}:`, qaErr);
+        }
+      } catch (err) {
+        console.error(`[DispositionEngine] Failed to auto-process lead ${leadIdForAsync}:`, err);
+        // Mark lead so background sweep can recover it
+        try {
+          await db.update(leads)
+            .set({ transcriptionStatus: 'failed', updatedAt: new Date() })
+            .where(eq(leads.id, leadIdForAsync));
+        } catch (_) { /* best-effort */ }
+      }
+    });
+    result.actions.push('Queued automatic GCS storage, transcription and quality analysis');
+  }
+
+  result.queueState = 'qualified';
+}
+
+/**
+ * NOT_INTERESTED processing
+ * - Update queue state to REMOVED
+ * - Suppress from this campaign permanently
+ */
+async function processNotInterested(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  result: DispositionResult
+): Promise {
+  // Remove from queue and clear lock
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({
+        status: 'removed',
+        removedReason: 'not_interested',
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push('Removed from campaign queue (not interested)');
+  }
+
+  // Log disposition for monitoring
+  console.log(`[DispositionEngine] 📵 NOT INTERESTED: Contact ${callAttempt.contactId} | Campaign: ${callAttempt.campaignId} | Removed from queue`);
+
+  // Insert activity log entry
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: 'disposition_not_interested',
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        phoneDialed: callAttempt.phoneDialed,
+        callDuration: callAttempt.callDurationSeconds,
+        agentType: callAttempt.agentType,
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error('[DispositionEngine] Failed to log disposition_not_interested activity:', logErr);
+  }
+
+  result.queueState = 'removed';
+}
+
+/**
+ * DO_NOT_CALL processing
+ * - Insert into global DNC (idempotent)
+ * - Update queue state to REMOVED
+ * - Suppress from ALL campaigns globally
+ */
+async function processDoNotCall(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  result: DispositionResult
+): Promise {
+  // Get phone number
+  const phone = callAttempt.phoneDialed;
+  
+  // Insert into global DNC (upsert)
+  await db
+    .insert(globalDnc)
+    .values({
+      phoneE164: phone,
+      source: `call_disposition_${callAttempt.agentType}`,
+      contactId: callAttempt.contactId,
+      reason: 'Agent disposition: Do Not Call'
+    })
+    .onConflictDoNothing();
+  result.actions.push(`Added ${phone} to global DNC`);
+
+  // Remove from current campaign queue and clear lock
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({ 
+        status: 'removed',
+        removedReason: 'dnc',
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push('Removed from campaign queue (DNC)');
+  }
+
+  // Remove from ALL campaign queues for this contact and clear all locks
+  await db
+    .update(campaignQueue)
+    .set({ 
+      status: 'removed',
+      removedReason: 'global_dnc',
+      agentId: null,
+      virtualAgentId: null,
+      lockExpiresAt: null,
+      updatedAt: new Date()
+    })
+    .where(
+      and(
+        eq(campaignQueue.contactId, callAttempt.contactId),
+        inArray(campaignQueue.status, ['queued', 'in_progress'])
+      )
+    );
+  result.actions.push('Removed from all campaign queues (global DNC)');
+
+  result.queueState = 'removed';
+}
+
+/**
+ * PHASE 4: Count prior AI attempts with no_answer or voicemail disposition
+ * Used for channel escalation - after 2+ AI attempts, escalate to human agent
+ */
+async function countPriorAiNoAnswerAttempts(
+  campaignId: string,
+  contactId: string
+): Promise {
+  const result = await db
+    .select({ count: sql`count(*)::int` })
+    .from(dialerCallAttempts)
+    .where(and(
+      eq(dialerCallAttempts.campaignId, campaignId),
+      eq(dialerCallAttempts.contactId, contactId),
+      eq(dialerCallAttempts.agentType, 'ai'),
+      inArray(dialerCallAttempts.disposition, ['no_answer', 'voicemail', 'needs_review'])
+    ));
+
+  return result[0]?.count || 0;
+}
+
+/**
+ * VOICEMAIL / NO_ANSWER processing
+ * - Update queue state to WAITING_RETRY
+ * - Schedule next attempt (3-7 days)
+ * - Increment attempts count
+ * - Respect max attempts
+ * - PHASE 4: Escalate to human agent after 2+ AI no_answer attempts
+ */
+async function processVoicemailOrNoAnswer(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  rules: CampaignRules,
+  result: DispositionResult,
+  type: 'voicemail' | 'no_answer'
+): Promise {
+  // Check attempt count
+  const currentAttempts = callAttempt.attemptNumber;
+
+  // PHASE 4: Count prior AI no_answer/voicemail attempts for channel escalation
+  const priorAiAttempts = await countPriorAiNoAnswerAttempts(
+    callAttempt.campaignId,
+    callAttempt.contactId
+  );
+
+  // Determine target agent type for retry
+  // Escalate to human after 2+ AI no_answer/voicemail attempts
+  const shouldEscalateToHuman = priorAiAttempts >= 2 && callAttempt.agentType === 'ai';
+  const targetAgentType = shouldEscalateToHuman ? 'human' : 'any';
+
+  if (shouldEscalateToHuman) {
+    console.log(`[DispositionEngine] 🔄 ESCALATING TO HUMAN: Contact ${callAttempt.contactId} has ${priorAiAttempts} prior AI ${type} attempts - routing next attempt to human agent`);
+  }
+
+  if (currentAttempts >= rules.maxAttemptsPerContact) {
+    // Max attempts reached, remove from queue and clear lock
+    if (callAttempt.queueItemId) {
+      await db
+        .update(campaignQueue)
+        .set({
+          status: 'removed',
+          removedReason: `max_attempts_${type}`,
+          agentId: null,
+          virtualAgentId: null,
+          lockExpiresAt: null,
+          updatedAt: new Date()
+        })
+        .where(eq(campaignQueue.id, callAttempt.queueItemId));
+      result.actions.push(`Removed from queue (max attempts reached: ${currentAttempts})`);
+    }
+    result.queueState = 'removed';
+    return;
+  }
+
+  // Calculate next attempt time (random within 3-7 day window)
+  const minDays = type === 'no_answer'
+    ? rules.noAnswerRetryWindowDaysMin
+    : rules.voicemailRetryWindowDaysMin;
+  const maxDays = type === 'no_answer'
+    ? Math.max(rules.noAnswerRetryWindowDaysMax, minDays)
+    : Math.max(rules.voicemailRetryWindowDaysMax, minDays);
+  const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
+  const nextAttemptAt = new Date();
+  nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+
+  // Update queue item with retry scheduling, target agent type, and release lock
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({
+        status: 'queued',
+        nextAttemptAt,
+        targetAgentType, // PHASE 4: Set target agent type for escalation
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push(`Scheduled retry for ${nextAttemptAt.toISOString()} (${type}) - target: ${targetAgentType}`);
+  }
+
+  // Create recycle job for tracking with target agent type
+  await db.insert(recycleJobs).values({
+    campaignId: callAttempt.campaignId,
+    contactId: callAttempt.contactId,
+    originalCallSessionId: callAttempt.callSessionId,
+    status: 'scheduled',
+    attemptNumber: currentAttempts + 1,
+    maxAttempts: rules.maxAttemptsPerContact,
+    scheduledAt: new Date(),
+    eligibleAt: nextAttemptAt,
+    targetAgentType // PHASE 4: Include target agent type in recycle job
+  });
+  result.actions.push(`Created recycle job (target: ${targetAgentType})`);
+
+  // Log voicemail/no_answer for monitoring
+  const eventType = type === 'voicemail' ? 'disposition_voicemail' : 'disposition_no_answer';
+  console.log(`[DispositionEngine] 📞 ${type.toUpperCase()}: Contact ${callAttempt.contactId} | Attempt ${currentAttempts}/${rules.maxAttemptsPerContact} | Retry scheduled: ${nextAttemptAt.toISOString()}`);
+
+  // Insert activity log entry
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: eventType as any,
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        phoneDialed: callAttempt.phoneDialed,
+        attemptNumber: currentAttempts,
+        maxAttempts: rules.maxAttemptsPerContact,
+        nextAttemptAt: nextAttemptAt.toISOString(),
+        retryDays: retryDays,
+        agentType: callAttempt.agentType,
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error(`[DispositionEngine] Failed to log ${eventType} activity:`, logErr);
+  }
+
+  result.nextAttemptAt = nextAttemptAt;
+  result.queueState = 'waiting_retry';
+
+  // Emit engagement signal to unified pipeline for follow-up automation
+  setImmediate(async () => {
+    try {
+      const signal = type === 'voicemail' ? 'call_voicemail' as const : 'call_no_answer' as const;
+      await processEmailEngagement({
+        signal,
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        metadata: {
+          callAttemptId: callAttempt.id,
+          callDurationSeconds: callAttempt.callDurationSeconds,
+          attemptNumber: currentAttempts,
+          nextAttemptAt: nextAttemptAt.toISOString(),
+        },
+      });
+    } catch (err: any) {
+      console.warn(`[DispositionEngine] Pipeline engagement signal failed for ${type}:`, err.message);
+    }
+  });
+}
+
+/**
+ * INVALID_DATA processing
+ * - Update queue state to REMOVED
+ * - Suppress from campaign
+ * - Mark phone as INVALID
+ * - Flag for data hygiene review
+ */
+async function processInvalidData(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  result: DispositionResult
+): Promise {
+  // Remove from queue and clear lock
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({
+        status: 'removed',
+        removedReason: 'invalid_data',
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push('Removed from campaign queue (invalid data)');
+  }
+
+  // Mark phone as invalid in contact record if possible
+  // Note: This would need to update the specific phone field
+  // For now, we log the action
+  result.actions.push(`Flagged phone ${callAttempt.phoneDialed} as invalid`);
+
+  // Log disposition for monitoring
+  console.log(`[DispositionEngine] ❌ INVALID DATA: Phone ${callAttempt.phoneDialed} | Contact: ${callAttempt.contactId} | Campaign: ${callAttempt.campaignId}`);
+
+  // Insert activity log entry
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: 'disposition_invalid_data',
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        phoneDialed: callAttempt.phoneDialed,
+        callDuration: callAttempt.callDurationSeconds,
+        agentType: callAttempt.agentType,
+        reason: 'Phone number invalid or disconnected',
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error('[DispositionEngine] Failed to log disposition_invalid_data activity:', logErr);
+  }
+
+  result.queueState = 'removed';
+}
+
+/**
+ * NEEDS_REVIEW processing (Phase 3)
+ * - Schedule quick retry (1-2 days instead of 3-7)
+ * - Flag for human review after max AI attempts
+ * - Don't suppress contact - may still be viable
+ *
+ * This disposition is for ambiguous calls where:
+ * - Identity wasn't confirmed
+ * - Gatekeeper interaction
+ * - Technical issues
+ * - Call ended before meaningful conversation
+ */
+async function processNeedsReview(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  rules: CampaignRules,
+  result: DispositionResult
+): Promise {
+  const currentAttempts = callAttempt.attemptNumber;
+
+  // Log the needs_review disposition
+  console.log(`[DispositionEngine] 🔍 NEEDS_REVIEW: Contact ${callAttempt.contactId} | Attempt ${currentAttempts}/${rules.maxAttemptsPerContact} | Campaign: ${callAttempt.campaignId}`);
+
+  if (currentAttempts >= rules.maxAttemptsPerContact) {
+    // Max attempts reached - flag for human agent instead of removing
+    if (callAttempt.queueItemId) {
+      await db
+        .update(campaignQueue)
+        .set({
+          status: 'queued',
+          // Flag for human agent by setting targetAgentType
+          targetAgentType: 'human',
+          agentId: null,
+          virtualAgentId: null,
+          lockExpiresAt: null,
+          updatedAt: new Date()
+        })
+        .where(eq(campaignQueue.id, callAttempt.queueItemId));
+      result.actions.push(`Flagged for human review after max AI attempts (${currentAttempts})`);
+    }
+    result.queueState = 'waiting_retry';
+
+    // Insert activity log
+    try {
+      await db.insert(activityLog).values({
+        entityType: 'contact',
+        entityId: callAttempt.contactId,
+        eventType: 'disposition_needs_review',
+        payload: {
+          callAttemptId: callAttempt.id,
+          campaignId: callAttempt.campaignId,
+          attemptNumber: currentAttempts,
+          maxAttempts: rules.maxAttemptsPerContact,
+          escalatedToHuman: true,
+          reason: 'Max AI attempts reached - escalated to human review',
+        },
+        createdBy: callAttempt.humanAgentId || null,
+      });
+    } catch (logErr) {
+      console.error('[DispositionEngine] Failed to log disposition_needs_review activity:', logErr);
+    }
+    return;
+  }
+
+  // Schedule quick retry using campaign-configurable needs_review window
+  const minDays = Math.max(1, rules.needsReviewRetryWindowDaysMin);
+  const maxDays = Math.max(minDays, rules.needsReviewRetryWindowDaysMax);
+  const retryDays = minDays + Math.floor(Math.random() * (maxDays - minDays + 1));
+  const nextAttemptAt = new Date();
+  nextAttemptAt.setDate(nextAttemptAt.getDate() + retryDays);
+
+  if (callAttempt.queueItemId) {
+    await db
+      .update(campaignQueue)
+      .set({
+        status: 'queued',
+        nextAttemptAt,
+        agentId: null,
+        virtualAgentId: null,
+        lockExpiresAt: null,
+        updatedAt: new Date()
+      })
+      .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    result.actions.push(`Scheduled quick retry for ${nextAttemptAt.toISOString()} (needs_review - ${retryDays} days)`);
+  }
+
+  // Create recycle job for this retry
+  await db.insert(recycleJobs).values({
+    campaignId: callAttempt.campaignId,
+    contactId: callAttempt.contactId,
+    originalCallSessionId: callAttempt.callSessionId,
+    status: 'scheduled',
+    attemptNumber: currentAttempts + 1,
+    maxAttempts: rules.maxAttemptsPerContact,
+    scheduledAt: new Date(),
+    eligibleAt: nextAttemptAt,
+    targetAgentType: 'any', // Allow either AI or human to retry
+    notes: 'Ambiguous call outcome - scheduled for quick review retry'
+  });
+
+  // Insert activity log
+  try {
+    await db.insert(activityLog).values({
+      entityType: 'contact',
+      entityId: callAttempt.contactId,
+      eventType: 'disposition_needs_review',
+      payload: {
+        callAttemptId: callAttempt.id,
+        campaignId: callAttempt.campaignId,
+        attemptNumber: currentAttempts,
+        nextAttemptAt: nextAttemptAt.toISOString(),
+        retryDays,
+        reason: 'Ambiguous outcome - quick retry scheduled',
+      },
+      createdBy: callAttempt.humanAgentId || null,
+    });
+  } catch (logErr) {
+    console.error('[DispositionEngine] Failed to log disposition_needs_review activity:', logErr);
+  }
+
+  result.nextAttemptAt = nextAttemptAt;
+  result.queueState = 'waiting_retry';
+
+  // Emit engagement signal to unified pipeline
+  setImmediate(async () => {
+    try {
+      await processEmailEngagement({
+        signal: 'call_no_answer',
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        metadata: {
+          callAttemptId: callAttempt.id,
+          callDurationSeconds: callAttempt.callDurationSeconds,
+          disposition: 'needs_review',
+        },
+      });
+    } catch (err: any) {
+      console.warn(`[DispositionEngine] Journey enrollment failed for needs_review:`, err.message);
+    }
+  });
+}
+
+/**
+ * CALLBACK_REQUESTED processing
+ * - Create a lead record (callback requests indicate interest!)
+ * - Schedule callback at the requested time if provided
+ * - Flag for human agent follow-up
+ * - Route to QA queue for callback scheduling verification
+ */
+async function processCallbackRequested(
+  callAttempt: typeof dialerCallAttempts.$inferSelect,
+  rules: CampaignRules,
+  result: DispositionResult,
+  callData?: DispositionCallData
+): Promise {
+  const callDuration = callAttempt.callDurationSeconds || 0;
+  const requestedCallbackAt = resolveCallbackAtForDisposition(callData);
+
+  console.log(`[DispositionEngine] 📞 CALLBACK REQUESTED: Contact ${callAttempt.contactId} | Duration: ${callDuration}s | Campaign: ${callAttempt.campaignId}`);
+
+  // Appointment campaigns: callback requests are follow-up tasks, not qualified leads.
+  // Re-queue for human follow-up to avoid inflating QA/Leads with non-booked outcomes.
+  const [campaign] = await db
+    .select({ type: campaigns.type })
+    .from(campaigns)
+    .where(eq(campaigns.id, callAttempt.campaignId))
+    .limit(1);
+  const campaignType = String(campaign?.type || '').toLowerCase();
+  const isAppointmentCampaign =
+    campaignType === 'appointment_setting' ||
+    campaignType === 'appointment_generation' ||
+    campaignType === 'demo_request' ||
+    campaignType === 'sql' ||
+    campaignType === 'telemarketing';
+
+  if (isAppointmentCampaign) {
+    const nextAttemptAt = requestedCallbackAt;
+
+    if (callAttempt.queueItemId) {
+      await db
+        .update(campaignQueue)
+        .set({
+          status: 'queued',
+          nextAttemptAt,
+          targetAgentType: 'ai',
+          agentId: null,
+          virtualAgentId: null,
+          lockExpiresAt: null,
+          updatedAt: new Date()
+        })
+        .where(eq(campaignQueue.id, callAttempt.queueItemId));
+    }
+
+    await db.insert(recycleJobs).values({
+      campaignId: callAttempt.campaignId,
+      contactId: callAttempt.contactId,
+      originalCallSessionId: callAttempt.callSessionId,
+      status: 'scheduled',
+      attemptNumber: callAttempt.attemptNumber + 1,
+      maxAttempts: rules.maxAttemptsPerContact,
+      scheduledAt: new Date(),
+      eligibleAt: nextAttemptAt,
+      targetAgentType: 'ai',
+      notes: 'Callback requested in appointment campaign - requeued for AI callback follow-up without lead creation'
+    });
+
+    setImmediate(async () => {
+      try {
+        await processEmailEngagement({
+          signal: 'call_callback_requested',
+          campaignId: callAttempt.campaignId,
+          contactId: callAttempt.contactId,
+          metadata: { callAttemptId: callAttempt.id, callDurationSeconds: callDuration },
+        });
+      } catch (automationError) {
+        console.error('[DispositionEngine] Pipeline signal failed for appointment callback:', automationError);
+      }
+    });
+
+    result.actions.push(`Appointment campaign callback requeued for ${nextAttemptAt.toISOString()} (no lead created)`);
+    result.nextAttemptAt = nextAttemptAt;
+    result.queueState = 'waiting_retry';
+    return;
+  }
+
+  // DURATION GUARD: Block lead creation for impossibly short "callback" calls
+  // Ghost/IVR calls  {
+    try {
+      await processEmailEngagement({
+        signal: 'call_callback_requested',
+        campaignId: callAttempt.campaignId,
+        contactId: callAttempt.contactId,
+        metadata: { callAttemptId: callAttempt.id, callDurationSeconds: callDuration, leadId: result.leadId },
+      });
+    } catch (automationError) {
+      console.error('[DispositionEngine] Pipeline signal failed for callback lead:', automationError);
+    }
+  });
+
+  result.queueState = 'qualified';
+}
+
+/**
+ * Look up a contact's accountId for campaign account stats tracking
+ */
+async function getContactAccountId(contactId: string): Promise {
+  const [contact] = await db
+    .select({ accountId: contacts.accountId })
+    .from(contacts)
+    .where(eq(contacts.id, contactId))
+    .limit(1);
+  return contact?.accountId || null;
+}
+
+/**
+ * Update dialer run statistics based on disposition
+ */
+async function updateDialerRunStats(
+  dialerRunId: string,
+  disposition: CanonicalDisposition
+): Promise {
+  const updateField = dispositionToStatField(disposition);
+  
+  // Dispositions that indicate a live conversation (contact actually picked up)
+  const connectedDispositions: CanonicalDisposition[] = [
+    'qualified_lead', 'not_interested', 'do_not_call',
+    'callback_requested', 'needs_review', 'invalid_data'
+  ];
+  const isConnected = connectedDispositions.includes(disposition);
+
+  await db.execute(sql`
+    UPDATE dialer_runs 
+    SET 
+      ${sql.raw(updateField)} = ${sql.raw(updateField)} + 1,
+      contacts_processed = contacts_processed + 1,
+      ${isConnected ? sql`contacts_connected = contacts_connected + 1,` : sql``}
+      updated_at = NOW()
+    WHERE id = ${dialerRunId}
+  `);
+}
+
+/**
+ * Adjust dialer run statistics when a disposition is corrected post-call.
+ * Decrements the old disposition counter and increments the new one.
+ * Also adjusts contacts_connected if the connected status changed.
+ */
+export async function adjustDialerRunStatsForCorrection(
+  dialerRunId: string,
+  oldDisposition: CanonicalDisposition,
+  newDisposition: CanonicalDisposition
+): Promise {
+  if (oldDisposition === newDisposition) return;
+
+  const oldField = dispositionToStatField(oldDisposition);
+  const newField = dispositionToStatField(newDisposition);
+
+  const connectedDispositions: CanonicalDisposition[] = [
+    'qualified_lead', 'not_interested', 'do_not_call',
+    'callback_requested', 'needs_review', 'invalid_data'
+  ];
+  const wasConnected = connectedDispositions.includes(oldDisposition);
+  const isNowConnected = connectedDispositions.includes(newDisposition);
+
+  let connectedAdjustment = sql``;
+  if (!wasConnected && isNowConnected) {
+    connectedAdjustment = sql`contacts_connected = contacts_connected + 1,`;
+  } else if (wasConnected && !isNowConnected) {
+    connectedAdjustment = sql`contacts_connected = GREATEST(contacts_connected - 1, 0),`;
+  }
+
+  await db.execute(sql`
+    UPDATE dialer_runs
+    SET
+      ${sql.raw(oldField)} = GREATEST(${sql.raw(oldField)} - 1, 0),
+      ${sql.raw(newField)} = ${sql.raw(newField)} + 1,
+      ${connectedAdjustment}
+      updated_at = NOW()
+    WHERE id = ${dialerRunId}
+  `);
+
+  console.log(`[DispositionEngine] Stats adjusted for run ${dialerRunId}: ${oldField} -1, ${newField} +1`);
+}
+
+/**
+ * Map disposition to statistics field name
+ */
+function dispositionToStatField(disposition: CanonicalDisposition): string {
+  const mapping: Record = {
+    'qualified_lead': 'qualified_leads',
+    'not_interested': 'not_interested',
+    'do_not_call': 'dnc_requests',
+    'voicemail': 'voicemails',
+    'no_answer': 'no_answers',
+    'invalid_data': 'invalid_data',
+    'needs_review': 'needs_review',
+    'callback_requested': 'qualified_leads' // Callbacks count as qualified - they showed interest!
+  };
+  return mapping[disposition];
+}
+
+/**
+ * Map disposition to governance action type
+ */
+function dispositionToActionType(disposition: CanonicalDisposition): 'qc_review' | 'auto_suppress' | 'global_dnc' | 'recycle' | 'data_quality_flag' | 'downstream_sales' | 'remove_from_campaign' | 'escalate' {
+  const mapping: Record = {
+    'qualified_lead': 'qc_review',
+    'not_interested': 'remove_from_campaign',
+    'do_not_call': 'global_dnc',
+    'voicemail': 'recycle',
+    'no_answer': 'recycle',
+    'invalid_data': 'data_quality_flag',
+    'needs_review': 'recycle',
+    'callback_requested': 'qc_review' // Route to QA for callback scheduling
+  };
+  return mapping[disposition];
+}
+
+/**
+ * Log governance action
+ */
+async function logGovernanceAction(data: {
+  campaignId: string;
+  contactId: string;
+  callSessionId: string | null;
+  dispositionId: string | null;
+  triggerRuleId: string | null;
+  actionType: 'qc_review' | 'auto_suppress' | 'global_dnc' | 'recycle' | 'data_quality_flag' | 'downstream_sales' | 'remove_from_campaign' | 'escalate';
+  producerType: 'human' | 'ai';
+  actionPayload: unknown;
+  result: string;
+  errorMessage: string | null;
+  executedBy: string;
+}): Promise {
+  await db.insert(governanceActionsLog).values({
+    ...data,
+    actionPayload: data.actionPayload as object
+  });
+}
+
+/**
+ * Validate that a disposition is one of the canonical values (includes needs_review)
+ */
+export function isValidCanonicalDisposition(value: string): value is CanonicalDisposition {
+  return ['qualified_lead', 'not_interested', 'do_not_call', 'voicemail', 'no_answer', 'invalid_data', 'needs_review', 'callback_requested'].includes(value);
+}
+
+/**
+ * Get disposition description for UI
+ */
+export function getDispositionDescription(disposition: CanonicalDisposition): string {
+  const descriptions: Record = {
+    'qualified_lead': 'Contact qualified - routes to QA queue',
+    'not_interested': 'Contact not interested - removes from campaign',
+    'do_not_call': 'DNC request - adds to global DNC list',
+    'voicemail': 'Left voicemail - schedules campaign-configured retry',
+    'no_answer': 'No answer - schedules campaign-configured retry',
+    'invalid_data': 'Invalid data - marks phone as invalid',
+    'needs_review': 'Needs human review - schedules quick retry',
+    'callback_requested': 'Callback requested - routes to QA for scheduling'
+  };
+  return descriptions[disposition];
+}
+
+/**
+ * Update contact-level retry suppression after a call attempt
+ *
+ * This implements the Contact-Level Retry Suppression policy:
+ * - Same-day block: Don't call the same contact again on the same day
+ * - 7-day gap: After trigger outcomes (voicemail, no_answer, busy, rejected, etc.),
+ *   the contact is not eligible for another call until 7 days have passed
+ *
+ * @param contactId - The contact's ID
+ * @param outcome - The call outcome (disposition or hangup cause)
+ */
+export async function updateContactSuppression(
+  contactId: string,
+  outcome: string
+): Promise {
+  const now = new Date();
+  const nextEligibleAt = calculateNextEligibleDate(outcome);
+  const suppressionReason = shouldTriggerSuppression(outcome)
+    ? getSuppressionReason(outcome)
+    : null;
+
+  await db
+    .update(contacts)
+    .set({
+      lastCallAttemptAt: now,
+      lastCallOutcome: outcome,
+      nextCallEligibleAt: nextEligibleAt,
+      suppressionReason: suppressionReason,
+      updatedAt: now,
+    })
+    .where(eq(contacts.id, contactId));
+
+  console.log(
+    `[DispositionEngine] Contact ${contactId} suppression updated: ` +
+    `outcome=${outcome}, nextEligible=${nextEligibleAt.toISOString()}` +
+    (suppressionReason ? `, reason=${suppressionReason}` : '')
+  );
+}
+/**
+ * Fallback Lead Creator - Creates a lead record when processDisposition() is unavailable or fails.
+ *
+ * Used when:
+ * 1. Fallback sessions without a valid callAttemptId (voice-dialer.ts)
+ * 2. processDisposition() throws an error or returns success=false (voice-dialer.ts, telnyx-ai-bridge.ts)
+ *
+ * Includes duplicate prevention via telnyxCallId check.
+ */
+export async function createFallbackLead(params: {
+  campaignId: string;
+  contactId: string;
+  callDuration: number;
+  dialedNumber?: string;
+  recordingUrl?: string;
+  transcript?: string;
+  telnyxCallId?: string | null;
+  callAttemptId?: string | null;
+  source: string;
+}): Promise {
+  const LOG = '[DispositionEngine:FallbackLead]';
+
+  try {
+    // Duplicate check by telnyxCallId
+    if (params.telnyxCallId) {
+      const [existing] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.telnyxCallId, params.telnyxCallId))
+        .limit(1);
+
+      if (existing) {
+        console.log(`${LOG} ⏭️ Lead already exists for telnyxCallId ${params.telnyxCallId} (lead: ${existing.id}), skipping`);
+        return existing.id;
+      }
+    }
+
+    // Duplicate check by callAttemptId
+    if (params.callAttemptId) {
+      const [existing] = await db
+        .select({ id: leads.id })
+        .from(leads)
+        .where(eq(leads.callAttemptId, params.callAttemptId))
+        .limit(1);
+
+      if (existing) {
+        console.log(`${LOG} ⏭️ Lead already exists for callAttemptId ${params.callAttemptId} (lead: ${existing.id}), skipping`);
+        return existing.id;
+      }
+    }
+
+    // Fetch contact info
+    const [contact] = await db
+      .select({
+        accountId: contacts.accountId,
+        fullName: contacts.fullName,
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        companyName: accounts.name,
+        accountIndustry: accounts.industryStandardized,
+      })
+      .from(contacts)
+      .leftJoin(accounts, eq(contacts.accountId, accounts.id))
+      .where(eq(contacts.id, params.contactId))
+      .limit(1);
+
+    const contactName = contact?.fullName ||
+      (contact?.firstName && contact?.lastName ? `${contact.firstName} ${contact.lastName}` :
+       contact?.firstName || contact?.lastName || 'Unknown');
+
+    const MINIMUM_QUALIFIED_CALL_DURATION_SECONDS = 20;
+    const isShortDuration = params.callDuration < MINIMUM_QUALIFIED_CALL_DURATION_SECONDS;
+    const qaStatus = isShortDuration ? 'under_review' : 'approved';
+    const qaDecision = isShortDuration
+      ? `⚠️ SHORT DURATION ALERT: Call was only ${params.callDuration}s (minimum: ${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s). Requires manual verification.`
+      : `✅ Auto-approved: qualified disposition, call duration ${params.callDuration}s meets threshold (${MINIMUM_QUALIFIED_CALL_DURATION_SECONDS}s).`;
+
+    const [newLead] = await db
+      .insert(leads)
+      .values({
+        campaignId: params.campaignId,
+        contactId: params.contactId,
+        callAttemptId: params.callAttemptId || undefined,
+        contactName,
+        contactEmail: contact?.email || undefined,
+        accountId: contact?.accountId || undefined,
+        accountName: contact?.companyName || undefined,
+        accountIndustry: contact?.accountIndustry || undefined,
+        qaStatus: qaStatus as 'new' | 'under_review' | 'approved',
+        qaDecision,
+        dialedNumber: params.dialedNumber,
+        recordingUrl: params.recordingUrl,
+        callDuration: params.callDuration,
+        transcript: params.transcript,
+        telnyxCallId: params.telnyxCallId || undefined,
+        notes: `Source: ${params.source}`,
+      })
+      .returning({ id: leads.id });
+
+    if (newLead) {
+      console.log(`${LOG} ✅ FALLBACK LEAD CREATED: ${newLead.id} | Contact: ${contactName} | Duration: ${params.callDuration}s | QA: ${qaStatus} | Source: ${params.source}`);
+
+      // Log activity
+      try {
+        await db.insert(activityLog).values({
+          entityType: 'lead',
+          entityId: newLead.id,
+          eventType: 'lead_created',
+          payload: {
+            contactId: params.contactId,
+            campaignId: params.campaignId,
+            callAttemptId: params.callAttemptId,
+            contactName,
+            callDuration: params.callDuration,
+            qaStatus,
+            isShortDuration,
+            source: params.source,
+            fallback: true,
+          },
+        });
+      } catch (logErr) {
+        console.error(`${LOG} Failed to log activity:`, logErr);
+      }
+
+      return newLead.id;
+    }
+
+    console.error(`${LOG} ❌ Insert did not return a lead ID`);
+    return null;
+  } catch (err) {
+    console.error(`${LOG} ❌ Failed to create fallback lead:`, err);
+    return null;
+  }
+}
+
+/**
+ * Map disposition to disconnect reason for call quality tracking
+ */
+function mapDispositionToDisconnectReason(disposition: string): 'completed' | 'hangup' | 'no_answer' | 'busy' | 'failed' | 'voicemail' {
+  switch (disposition) {
+    case 'qualified_lead':
+    case 'not_interested':
+    case 'callback_requested': // Callback requests are successful calls
+    case 'needs_review':
+      return 'completed';
+    case 'do_not_call':
+      return 'hangup';
+    case 'voicemail':
+      return 'voicemail';
+    case 'no_answer':
+      return 'no_answer';
+    case 'invalid_data':
+      return 'failed';
+    default:
+      return 'completed';
+  }
+}

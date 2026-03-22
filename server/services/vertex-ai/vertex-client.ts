@@ -20,8 +20,8 @@ export interface VertexAIConfig {
   location: string;
   // Model configurations
   models: {
-    chat: string;          // gemini-2.0-flash or gemini-1.5-pro
-    reasoning: string;     // gemini-2.0-flash-thinking for complex reasoning
+    chat: string;          // gemini-2.5-flash
+    reasoning: string;     // gemini-2.5-flash for complex reasoning
     embedding: string;     // text-embedding-004
     multimodal: string;    // gemini-1.5-pro-vision
     image: string;         // imagen-3.0-generate-001
@@ -49,10 +49,10 @@ const defaultConfig: VertexAIConfig = {
   projectId: getVertexProjectId(),
   location: getGcpLocation(),
   models: {
-    chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.0-flash",
-    reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-2.0-flash",
+    chat: process.env.VERTEX_CHAT_MODEL || "gemini-2.5-flash",
+    reasoning: process.env.VERTEX_REASONING_MODEL || "gemini-2.5-flash",
     embedding: process.env.VERTEX_EMBEDDING_MODEL || "text-embedding-004",
-    multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.0-flash",
+    multimodal: process.env.VERTEX_MULTIMODAL_MODEL || "gemini-2.5-flash",
     image: process.env.VERTEX_IMAGE_MODEL || "imagen-3.0-generate-001",
   },
   safetySettings: {

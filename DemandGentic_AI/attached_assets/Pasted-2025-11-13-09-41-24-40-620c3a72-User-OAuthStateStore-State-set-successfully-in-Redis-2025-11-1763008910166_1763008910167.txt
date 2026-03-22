@@ -1,0 +1,69 @@
+2025-11-13 09:41:24.40
+620c3a72
+User
+[OAuthStateStore] State set successfully in Redis
+
+2025-11-13 09:41:24.40
+620c3a72
+User
+[M365 OAuth] Redirect URI: https://beta-platform.pivotal-b2b.com/api/oauth/microsoft/callback
+2025-11-13 09:41:24.40
+620c3a72
+User
+[M365 OAuth] Generated auth URL: https://login.microsoftonline.com/pivotal-b2b.com/oauth2/v2.0/authorize?client_id=0b5fe2fe-a906-4a1a-87e9-68ed877bad71&response_type=code&redirect_uri=https%3A%2F%2Fbeta-platform.pivotal-b2b.com%2Fapi%2Foauth%2Fmicrosoft%2Fcallback&response_mode=query&scope=offline_access+Mail.Read+Mail.ReadBasic+Mail.ReadWrite+Mail.Send&state=pV-Eayvn0bqFU2P98fNPD9KNH1Fa8sj2&code_challenge=YKgGgM0JV9B9o8Ynss5FJy34jwd9USBUUyanUXofjfQ&code_challenge_method=S256
+2025-11-13 09:41:24.40
+620c3a72
+User
+[M365 OAuth] Returning JSON response
+2025-11-13 09:41:24.40
+620c3a72
+User
+4:41:24 AM [express] GET /api/oauth/microsoft/authorize 200 in 257ms :: {"authUrl":"https://login.mi…
+2025-11-13 09:41:27.67
+e5de94d9
+User
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+2025-11-13 09:41:28.06
+620c3a72
+User
+[OAuthStateStore] Getting state from Redis: { key: 'oauth:m365:pV-Eayvn0bqFU2P98fNPD9KNH1Fa8sj2' }
+2025-11-13 09:41:28.31
+620c3a72
+User
+[OAuthStateStore] State found in Redis
+2025-11-13 09:41:28.31
+620c3a72
+User
+[OAuthStateStore] Deleting state from Redis: { key: 'oauth:m365:pV-Eayvn0bqFU2P98fNPD9KNH1Fa8sj2' }
+2025-11-13 09:41:28.56
+620c3a72
+User
+[OAuthStateStore] State deleted from Redis
+2025-11-13 09:41:29.10
+620c3a72
+User
+OAuth callback error: ReferenceError: CryptoJS is not defined
+2025-11-13 09:41:29.10
+620c3a72
+User
+at file:///home/runner/workspace/dist/index.js:36970:36
+2025-11-13 09:41:29.10
+620c3a72
+User
+at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+2025-11-13 09:41:29.10
+620c3a72
+User
+4:41:29 AM [express] GET /api/oauth/microsoft/callback 200 in 1041ms
+2025-11-13 09:41:33.51
+620c3a72
+User
+[DB Pool] Client removed | Total: 3, Idle: 3, Waiting: 0
+2025-11-13 09:41:33.51
+620c3a72
+User
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+2025-11-13 09:41:33.51
+620c3a72
+User
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0

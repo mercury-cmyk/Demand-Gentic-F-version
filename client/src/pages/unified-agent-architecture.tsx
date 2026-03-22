@@ -237,7 +237,7 @@ export default function UnifiedAgentArchitectureDashboard() {
             <h1 className="text-xl font-semibold tracking-tight">
               {selectedAgentType
                 ? `${selectedAgentType.charAt(0).toUpperCase() + selectedAgentType.slice(1)} Agent`
-                : "AgentX — The Operator"}
+                : "AgentC — The Operator"}
             </h1>
             <p className="text-xs text-muted-foreground">
               One Agent Per Type &bull; Fully Self-Contained &bull; Learning-Integrated

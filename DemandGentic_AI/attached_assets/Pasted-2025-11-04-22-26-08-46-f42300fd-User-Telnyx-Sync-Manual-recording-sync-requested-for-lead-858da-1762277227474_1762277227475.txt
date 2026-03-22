@@ -1,0 +1,84 @@
+2025-11-04 22:26:08.46
+f42300fd
+User
+[Telnyx-Sync] Manual recording sync requested for lead 858dac86-116c-4935-a765-a8dd020c23da by zahidmohammadi
+2025-11-04 22:26:08.49
+f42300fd
+User
+[Telnyx-Sync] Trying Strategy 1b: Fetch by call_control_id (from lead) for lead 858dac86-116c-4935-a765-a8dd020c23da
+2025-11-04 22:26:08.65
+f42300fd
+User
+[Telnyx] Call not found or expired (422): 2c4ee231-ea8c-4db8-bea6-1d7e2ee120e8
+2025-11-04 22:26:08.65
+f42300fd
+User
+[Telnyx-Sync] Strategy 1b failed: No recording found by call_control_id
+2025-11-04 22:26:08.65
+f42300fd
+User
+[Telnyx-Sync] Trying Strategy 2: Search by dialed number for lead 858dac86-116c-4935-a765-a8dd020c23da: +447803045124
+2025-11-04 22:26:08.88
+f42300fd
+User
+[Telnyx-Sync] Found 1 recordings for +447803045124
+2025-11-04 22:26:08.88
+f42300fd
+User
+[Telnyx-Sync] Using completed recording 8e3015a7-6303-4240-b01f-c497f93c057e (status: completed)
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx] Recording download URL not found (404): 8e3015a7-6303-4240-b01f-c497f93c057e
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] Strategy 2 failed: No recordings found for +447803045124
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] ========================================
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] ❌ NO RECORDING FOUND FOR LEAD: 858dac86-116c-4935-a765-a8dd020c23da
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] Diagnosis:
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Has call attempt: NO
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Has Telnyx call ID (attempt): NO
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Has Telnyx call ID (lead): YES
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Has dialed number (lead): YES
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Has dialed number (contact): YES
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Contact phones: Direct=none, Mobile=none
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] - Lead created: 2025-11-04T17:24:40.334Z
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] This lead may have been manually submitted without an actual phone call.
+2025-11-04 22:26:08.93
+f42300fd
+User
+[Telnyx-Sync] ========================================

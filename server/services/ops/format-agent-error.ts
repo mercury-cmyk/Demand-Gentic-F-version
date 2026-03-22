@@ -77,7 +77,7 @@ function formatAggregatedProviderFailureMessage(message: string): string {
   ).trim();
 
   if (!summary) {
-    return "AgentX could not reach any configured coding provider. Check Codex, Claude, Gemini, Kimi, and DeepSeek runtime settings.";
+    return "AgentC could not reach any configured coding provider. Check Codex, Claude, Gemini, Kimi, and DeepSeek runtime settings.";
   }
 
   const providerLines = summary
@@ -133,7 +133,7 @@ function formatAggregatedProviderFailureMessage(message: string): string {
     });
 
   return [
-    "AgentX could not reach any configured coding provider.",
+    "AgentC could not reach any configured coding provider.",
     ...providerLines.map((line) => `- ${line}`),
   ].join("\n");
 }
@@ -169,7 +169,7 @@ export function formatOpsAgentErrorMessage(
     normalized.includes("failed to retrieve access token") ||
     normalized.includes("failed to refresh access token")
   ) {
-    return "AgentX could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.";
+    return "AgentC could not authenticate with Vertex AI. Check GOOGLE_APPLICATION_CREDENTIALS or the runtime service account permissions.";
   }
 
   if (

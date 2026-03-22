@@ -1,0 +1,14 @@
+python.exe : Creating temporary archive of 2889 file(s) 
+totalling 351.4 MiB before compression.
+At C:\Users\Zahid\AppData\Local\Google\Cloud 
+SDK\google-cloud-sdk\bin\gcloud.ps1:114 char:3
++   & "$cloudsdk_python" $run_args_array
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Creatin    
+g tempor...re compression.:String) [], RemoteExc    
+eption
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Uploading tarball of [.] to [gs://pivotalb2b-2026_cloudbu
+ild/source/1767221724.188947-6de19fd32c504bac918eb5a1bd53
+e766.tgz]

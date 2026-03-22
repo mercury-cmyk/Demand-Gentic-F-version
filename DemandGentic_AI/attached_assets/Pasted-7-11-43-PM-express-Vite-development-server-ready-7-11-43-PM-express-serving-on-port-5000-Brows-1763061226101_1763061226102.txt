@@ -1,0 +1,70 @@
+7:11:43 PM [express] Vite development server ready
+7:11:43 PM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[VALIDATION RESUME] Checking for stuck email validation jobs...
+[VALIDATION RESUME] Checking for stuck email validation jobs...
+[UPLOAD JOB RESUME] Checking for stuck upload jobs...
+[UPLOAD JOB RESUME] Checking for stuck upload jobs...
+[VALIDATION RESUME] No stuck jobs found
+[VALIDATION RESUME] Check completed successfully
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+[DB Pool] Client connected | Total: 2, Idle: 1, Waiting: 0
+[UPLOAD JOB RESUME] No stuck jobs found
+[UPLOAD JOB RESUME] Check completed successfully
+7:12:02 PM [vite] hmr update /src/pages/inbox.tsx, /src/index.css?v=7Sw91nq4YCi2YqCsMOnPg
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+7:12:06 PM [vite] hmr update /src/pages/inbox.tsx, /src/index.css?v=7Sw91nq4YCi2YqCsMOnPg (x2)
+7:12:09 PM [vite] hmr update /src/pages/inbox.tsx, /src/index.css?v=7Sw91nq4YCi2YqCsMOnPg (x3)
+[AUTH] requireAuth called for: GET /api/dashboard/stats
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[DB Pool] Client connected | Total: 4, Idle: 0, Waiting: 0
+[DB Pool] Client connected | Total: 4, Idle: 0, Waiting: 0
+[DB Pool] Client connected | Total: 4, Idle: 0, Waiting: 0
+[DB Pool] Client connected | Total: 4, Idle: 0, Waiting: 0
+7:12:15 PM [express] GET /api/dashboard/stats 304 in 140ms :: {"totalAccounts":58752,"totalContacts"…
+[AUTH] requireAuth called for: GET /inbox/stats
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[AUTH] requireAuth called for: GET /stats
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[AUTH] requireAuth called for: GET /inbox/messages
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[AUTH] requireAuth called for: GET /messages
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+7:12:16 PM [express] GET /api/inbox/stats 304 in 27ms :: {"stats":[{"category":"primary","unreadCoun…
+7:12:16 PM [express] GET /api/inbox/messages 304 in 114ms :: {"messages":[{"id":"7f789cb3-1bab-4be4-…
+7:12:24 PM [vite] hmr update /src/pages/inbox.tsx, /src/index.css?v=7Sw91nq4YCi2YqCsMOnPg (x4)
+7:12:30 PM [vite] hmr update /src/pages/inbox.tsx, /src/index.css?v=7Sw91nq4YCi2YqCsMOnPg (x5)
+[DB Pool] Client removed | Total: 3, Idle: 3, Waiting: 0
+[DB Pool] Client removed | Total: 2, Idle: 2, Waiting: 0
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0
+[DB Pool] Client removed | Total: 0, Idle: 0, Waiting: 0
+[DB Pool] Client connected | Total: 1, Idle: 0, Waiting: 0
+[AUTH] requireAuth called for: GET /api/dashboard/stats
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+7:12:56 PM [express] GET /api/dashboard/stats 304 in 2ms :: {"totalAccounts":58752,"totalContacts":6…
+[AUTH] requireAuth called for: GET /inbox/stats
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[AUTH] requireAuth called for: GET /stats
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[AUTH] requireAuth called for: GET /inbox/messages
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+[AUTH] requireAuth called for: GET /messages
+[AUTH] Authorization header present: true
+[AUTH] Authentication successful for user: da0c653b-c853-47b9-82df-de9b7b754378
+7:12:57 PM [express] GET /api/inbox/stats 200 in 34ms :: {"stats":[{"category":"primary","unreadCoun…
+[DB Pool] Client connected | Total: 2, Idle: 1, Waiting: 0
+7:12:57 PM [express] GET /api/inbox/messages 304 in 173ms :: {"messages":[{"id":"7f789cb3-1bab-4be4-…
+[DB Pool] Client removed | Total: 1, Idle: 1, Waiting: 0

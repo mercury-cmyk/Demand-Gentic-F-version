@@ -1,0 +1,132 @@
+2025-12-23 19:57:02.55
+6ef273ed
+User
+[ElevenLabs Webhook] Signature verified successfully
+2025-12-23 19:57:02.55
+6ef273ed
+User
+[ElevenLabs Webhook] Call initiation failed: SIP 403 - unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447367886167 exceeded D66 (SIP 403)
+2025-12-23 19:57:02.55
+6ef273ed
+User
+- Received: v0=12a2c4948700d8d34...
+2025-12-23 19:57:02.55
+6ef273ed
+User
+[ElevenLabs Webhook] Event type: call_initiation_failure, conversation: conv_6601kd5vd9t9fhnbfz8jftgcx0t5
+2025-12-23 19:57:02.61
+6ef273ed
+User
+[ElevenLabs Webhook] Found pending call session 89296d5d-8d3a-4d48-86d6-8440b3596b75 by phone +447367886167
+2025-12-23 19:57:02.68
+6ef273ed
+User
+[ElevenLabs Webhook] Released queue item aa624242-6914-48bb-8183-5c2946aef84a via phone lookup
+2025-12-23 19:57:02.68
+6ef273ed
+User
+2:57:02 PM [express] POST /api/webhooks/elevenlabs 200 in 131ms :: {"status":"ok","message":"Call fa…
+2025-12-23 19:57:04.17
+6ef273ed
+User
+- Agent ID: agent_4701kctbjseeeefakcshzhks3whw
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_phone": "447462891183",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+- To (E.164): +447462891183
+2025-12-23 19:57:04.17
+6ef273ed
+User
+- Phone Number ID: phnum_3601kd38f5gjejyantqszzvsqcvh
+2025-12-23 19:57:04.17
+6ef273ed
+User
+- Dynamic Variables: {
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"account_name": "Gold Vintage London",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_fullName": "Noor Amaryllis",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+[TelnyxAiBridge] Using ElevenLabs native calling (full conversation mode)
+2025-12-23 19:57:04.17
+6ef273ed
+User
+- To (raw): 447462891183
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_email": "namaryllis@google.com",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_jobTitle": "Co-Founder & Head Of Ecommerce",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"agent_fullName": "Emma Willson"
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"campaign_id": "4187fb46-c634-42d1-aeb1-d3833f325856",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_title": "Co-Founder & Head Of Ecommerce",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"company_name": "Gold Vintage London",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"queue_item_id": "e680e674-09e1-40e7-8f44-f059b77563a0",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+[TelnyxAiBridge] Initiating ElevenLabs native call:
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_lastName": "Amaryllis",
+2025-12-23 19:57:04.17
+6ef273ed
+User
+}
+2025-12-23 19:57:04.17
+6ef273ed
+User
+"contact_firstName": "Noor",
+2025-12-23 19:57:04.20
+6ef273ed
+User
+[TelnyxAiBridge] Pre-created call session for queue e680e674-09e1-40e7-8f44-f059b77563a0
+2025-12-23 19:57:06.31
+6ef273ed
+User
+[ElevenLabs Webhook] Received event: {"type": "call_initiation_failure", "event_timestamp": 1766501826, "data": {"agent_id": "agent_4701kctbjseeeefakcshzhks3whw", "conversation_id": "conv_8101kd5vddqvf72tz6dh0k9g26t8", "failure_reason": "unknown", "metadata": {"type": "sip", "body": {"from_number": "+12094571966", "to_number": "+447462891183", "sip_status_code": 403, "error_reason": "unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447462891183 exceeded D66 (SIP 403)", "call_
+2025-12-23 19:57:06.31
+6ef273ed
+User
+[ElevenLabs Webhook] Headers: host, user-agent, content-length, accept, accept-encoding, content-type, elevenlabs-signature, server-timing, traceparent, via, x-cloud-trace-context, x-forwarded-for, x-forwarded-host, x-forwarded-proto, x-replit-user-bio, x-replit-user-id, x-replit-user-name, x-replit-user-profile-image, x-replit-user-roles, x-replit-user-teams, x-replit-user-url
+2025-12-23 19:57:06.31
+6ef273ed
+User
+[ElevenLabs Webhook] Signature verification:
+2025-12-23 19:57:06.31
+6ef273ed
+User
+- Timestamp: 1766501826
+2025-12-23 19:57:06.31
+6ef273ed
+User
+[ElevenLabs Webhook] Call initiation failed: SIP 403 - unexpected status from INVITE response: sip status: 403: Daily calling restriction to Destination Number +447462891183 exceeded D66 (SIP 403)

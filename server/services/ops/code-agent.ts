@@ -383,7 +383,7 @@ async function requestAgentResponse(
   });
 }
 
-function formatAgentXErrorMessage(
+function formatAgentCErrorMessage(
   error: unknown,
   fallbackMessage: string,
 ): string {
@@ -467,7 +467,7 @@ async function collectContextFiles(
   return contextFiles;
 }
 
-async function requestAgentXFileEdit(
+async function requestAgentCFileEdit(
   request: OpsCodeAgentRequest,
   file: { path: string; content: string },
 ): Promise<{
@@ -525,7 +525,7 @@ async function requestAgentXFileEdit(
   };
 }
 
-async function requestAgentXResponse(
+async function requestAgentCResponse(
   request: OpsCodeAgentRequest,
 ): Promise<AgentRuntimeResponse> {
   // Try Kimi first, fall back to Vertex AI
@@ -639,15 +639,15 @@ async function runSingleFileEdit(
 
   let response: AgentRuntimeResponse;
   let payload: SingleFileEditPayload;
-  let agentXFailure: string | null = null;
+  let agentCFailure: string | null = null;
 
   try {
-    const agentXResult = await requestAgentXFileEdit(request, file);
-    response = agentXResult.response;
-    payload = agentXResult.payload;
-  } catch (agentXError) {
-    agentXFailure = formatAgentXErrorMessage(
-      agentXError,
+    const agentCResult = await requestAgentCFileEdit(request, file);
+    response = agentCResult.response;
+    payload = agentCResult.payload;
+  } catch (agentCError) {
+    agentCFailure = formatAgentCErrorMessage(
+      agentCError,
       "AgentC failed to generate an edit.",
     );
 
@@ -678,7 +678,7 @@ async function runSingleFileEdit(
       );
     } catch (providerError) {
       const singleProviderFailure = buildCombinedFailureMessage(
-        agentXFailure,
+        agentCFailure,
         formatOpsAgentErrorMessage(
           providerError,
           "The coding agent failed to generate an edit.",
@@ -955,9 +955,9 @@ export async function runOpsCodeAgent(
     );
   }
 
-  let agentXFailure: string | null = null;
+  let agentCFailure: string | null = null;
   try {
-    const response = await requestAgentXResponse(request);
+    const response = await requestAgentCResponse(request);
 
     return {
       provider: response.provider,
@@ -970,7 +970,7 @@ export async function runOpsCodeAgent(
       orchestrationMode: "single",
     };
   } catch (error) {
-    agentXFailure = formatAgentXErrorMessage(
+    agentCFailure = formatAgentCErrorMessage(
       error,
       "AgentC failed to generate a response.",
     );
@@ -1026,7 +1026,7 @@ export async function runOpsCodeAgent(
     return {
       provider: "system",
       summary: buildCombinedFailureMessage(
-        agentXFailure,
+        agentCFailure,
         formatOpsAgentErrorMessage(
           error,
           "The coding agent failed to generate a response.",

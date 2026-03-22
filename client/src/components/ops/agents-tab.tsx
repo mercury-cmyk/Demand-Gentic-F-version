@@ -162,7 +162,7 @@ export default function AgentsTab() {
         <CardContent className="flex flex-col gap-6 p-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <Badge className="border border-slate-200 bg-white text-slate-600">Collaborative Coding Orchestrator</Badge>
-            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">AgentX Ensemble</h2>
+            <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">AgentC Ensemble</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">
               Ops Hub now routes coding work through a staged ensemble: Kimi for architecture, Claude for reasoning, DeepSeek for security and cost, Gemini for UX and performance, and Codex for final synthesis.
             </p>
@@ -185,7 +185,7 @@ export default function AgentsTab() {
           <CardHeader>
             <CardTitle className="text-slate-900">Collaborative Workflow</CardTitle>
             <CardDescription className="text-slate-500">
-              Default role assignments used when AgentX runs collaborative coding mode.
+              Default role assignments used when AgentC runs collaborative coding mode.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -324,7 +324,7 @@ export default function AgentsTab() {
         <CardHeader>
           <CardTitle className="text-slate-900">Access Model</CardTitle>
           <CardDescription className="text-slate-500">
-            AgentX runs server-side and coordinates the collaborative provider graph. Browser logins do not power this runtime.
+            AgentC runs server-side and coordinates the collaborative provider graph. Browser logins do not power this runtime.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-600">
@@ -335,7 +335,7 @@ export default function AgentsTab() {
             Collaborative mode prefers role-specialized providers first. If a stage is unavailable, Ops Hub routes to the next configured provider rather than failing the whole run immediately.
           </div>
           <div className="rounded-2xl border border-slate-200 bg-[#fbfaf6] px-4 py-3">
-            <p className="font-medium text-slate-700">AgentX / Vertex env</p>
+            <p className="font-medium text-slate-700">AgentC / Vertex env</p>
             <p className="mt-1 text-slate-500">
               <code>GOOGLE_APPLICATION_CREDENTIALS</code>, <code>GOOGLE_CLOUD_PROJECT</code>, <code>GCP_PROJECT_ID</code>, <code>VERTEX_AI_LOCATION</code>, <code>VERTEX_CHAT_MODEL</code>
             </p>
@@ -407,7 +407,7 @@ export default function AgentsTab() {
 
       <Card className="border-black/5 bg-white/90 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-slate-900">AgentX Control Surface</CardTitle>
+          <CardTitle className="text-slate-900">AgentC Control Surface</CardTitle>
           <CardDescription className="text-slate-500">
             The Insights view exposes the simplified entry point, but the execution path behind it is now collaborative.
           </CardDescription>
@@ -435,14 +435,14 @@ export default function AgentsTab() {
                 Ensemble routing
               </div>
               <p className="mt-2.5 text-xs text-slate-500">
-                Provider routing is internal. AgentX assigns architecture, reasoning, security, UX, and synthesis roles automatically.
+                Provider routing is internal. AgentC assigns architecture, reasoning, security, UX, and synthesis roles automatically.
               </p>
             </div>
           </div>
 
           <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-[#fbfaf6] px-4 py-3 text-sm text-slate-600">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
-            <span>Use the right-side `AgentX - The Architect` panel for requests. Open a workspace file first when you want an edit applied.</span>
+            <span>Use the right-side `AgentC - The Architect` panel for requests. Open a workspace file first when you want an edit applied.</span>
           </div>
         </CardContent>
       </Card>

@@ -1,0 +1,64 @@
+Debug: 
+Object
+injected.js:37 ✅ E164 Result: +441512360797
+injected.js:37 [AUDIO] Audio element cleaned up
+injected.js:37 Making call with params: 
+Object
+injected.js:37 Telnyx notification - Type: callUpdate Call State: new
+injected.js:37 Call object created - ID: 74c643c5-9499-4242-b640-44e5c06cf250 State: new
+injected.js:37 Captured Telnyx Call ID: 74c643c5-9499-4242-b640-44e5c06cf250
+injected.js:37 [2025-12-09T10:13:14.791Z] ICE Gathering State gathering
+injected.js:37 Telnyx notification - Type: callUpdate Call State: requesting
+injected.js:37 Telnyx notification - Type: callUpdate Call State: trying
+@telnyx_webrtc.js?v=0ab4603b:1979 Performance Metrics
+injected.js:37 
+Object
+injected.js:37 [2025-12-09T10:13:19.563Z] ICE Gathering State complete
+injected.js:37 [2025-12-09T10:13:19.872Z] ICE Connection State checking
+injected.js:37 Telnyx notification - Type: callUpdate Call State: active
+injected.js:37 [AUDIO] Call active - attempting to attach remote stream
+injected.js:37 [AUDIO] Got remoteStream from call.remoteStream
+injected.js:37 [AUDIO] Remote stream audio tracks: 1
+injected.js:37 [AUDIO] Track 0: enabled=true, muted=false, readyState=live
+injected.js:37 [CALL-ATTEMPT] Call became active, creating call attempt...
+injected.js:37 [2025-12-09T10:13:19.913Z] Connection State changed: new -> connecting
+injected.js:37 [AUDIO] ✅ Audio playback started successfully
+injected.js:37 [CALL-ATTEMPT] Created call attempt: undefined
+injected.js:37 [CALL-ATTEMPT] Call became active, creating call attempt...
+injected.js:37 [2025-12-09T10:13:21.006Z] ICE Connection State connected
+injected.js:37 [CALL-ATTEMPT] Created call attempt: undefined
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-MONITOR] AudioContext analyzer created
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [DEBUG] Call object keys: 
+(33) ['session', 'id', 'state', 'prevState', 'channels', 'role', 'extension', '_state', '_prevState', 'gotAnswer', 'gotEarly', '_lastSerno', '_targetNodeId', '_iceTimeout', '_iceDone', '_statsBindings', '_statsIntervalId', '_pendingIceCandidates', '_isRemoteDescriptionSet', '_checkConferenceSerno', '_doStats', 'options', '_onMediaError', '_onPeerConnectionFailureError', '_onTrickleIceSdp', '_registerPeerEvents', '_registerTrickleIcePeerEvents', '_ringtone', '_ringback', '_statsInterval', 'sendConversationMessage', 'direction', 'peer']
+injected.js:37 [DEBUG] Call options keys: 
+(34) ['destinationNumber', 'remoteCallerName', 'remoteCallerNumber', 'callerName', 'callerNumber', 'audio', 'useStereo', 'debug', 'debugOutput', 'attach', 'screenShare', 'userVariables', 'mediaSettings', 'mutedMicOnStart', 'iceServers', 'localElement', 'remoteElement', 'micId', 'micLabel', 'camId', 'camLabel', 'speakerId', 'ringtoneFile', 'ringbackFile', 'trickleIce', 'prefetchIceCandidates', 'keepConnectionAliveOnSocketClose', 'video', 'record', 'id', 'localStream', 'telnyxSessionId', 'telnyxLegId', 'remoteStream']
+injected.js:37 [DEBUG] Has peer: object
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [DEBUG] Call object keys: 
+(33) ['session', 'id', 'state', 'prevState', 'channels', 'role', 'extension', '_state', '_prevState', 'gotAnswer', 'gotEarly', '_lastSerno', '_targetNodeId', '_iceTimeout', '_iceDone', '_statsBindings', '_statsIntervalId', '_pendingIceCandidates', '_isRemoteDescriptionSet', '_checkConferenceSerno', '_doStats', 'options', '_onMediaError', '_onPeerConnectionFailureError', '_onTrickleIceSdp', '_registerPeerEvents', '_registerTrickleIcePeerEvents', '_ringtone', '_ringback', '_statsInterval', 'sendConversationMessage', 'direction', 'peer']
+injected.js:37 [DEBUG] Call options keys: 
+(34) ['destinationNumber', 'remoteCallerName', 'remoteCallerNumber', 'callerName', 'callerNumber', 'audio', 'useStereo', 'debug', 'debugOutput', 'attach', 'screenShare', 'userVariables', 'mediaSettings', 'mutedMicOnStart', 'iceServers', 'localElement', 'remoteElement', 'micId', 'micLabel', 'camId', 'camLabel', 'speakerId', 'ringtoneFile', 'ringbackFile', 'trickleIce', 'prefetchIceCandidates', 'keepConnectionAliveOnSocketClose', 'video', 'record', 'id', 'localStream', 'telnyxSessionId', 'telnyxLegId', 'remoteStream']
+injected.js:37 [DEBUG] Has peer: object
+injected.js:37 [AUDIO-MONITOR] Element state: 
+{paused: false, muted: false, volume: 1, hasSrcObject: true, readyState: 4, …}
+injected.js:37 [AUDIO-LEVELS] Frequency data: 
+{averageLevel: '0.00', maxLevel: 0, hasAudio: false}
+injected.js:37 [AUDIO-LEVELS] ⚠️ No audio data detected - check if remote party is speaking
+injected.js:37 [DEBUG] Call object keys: 
+(33) ['session', 'id', 'state', 'prevState', 'channels', 'role', 'extension', '_state', '_prevState', 'gotAnswer', 'gotEarly', '_lastSerno', '_targetNodeId', '_iceTimeout', '_iceDone', '_statsBindings', '_statsIntervalId', '_pendingIceCandidates', '_isRemoteDescriptionSet', '_checkConferenceSerno', '_doStats', 'options', '_onMediaError', '_onPeerConnectionFailureError', '_onTrickleIceSdp', '_registerPeerEvents', '_registerTrickleIcePeerEvents', '_ringtone', '_ringback', '_statsInterval', 'sendConversationMessage', 'direction', 'peer']
+injected.js:37 [DEBUG] Call options keys: 
+(34) ['destinationNumber', 'remoteCallerName', 'remoteCallerNumber', 'callerName', 'callerNumber', 'audio', 'useStereo', 'debug', 'debugOutput', 'attach', 'screenShare', 'userVariables', 'mediaSettings', 'mutedMicOnStart', 'iceServers', 'localElement', 'remoteElement', 'micId', 'micLabel', 'camId', 'camLabel', 'speakerId', 'ringtoneFile', 'ringbackFile', 'trickleIce', 'prefetchIceCandidates', 'keepConnectionAliveOnSocketClose', 'video', 'record', 'id', 'localStream', 'telnyxSessionId', 'telnyxLegId', 'remoteStream']
+injected.js:37 [DEBUG] Has peer: object
+injected.js:37 Telnyx notification - Type: callUpdate Call State: hangup
+injected.js:37 [AUDIO] Audio element cleaned up
+injected.js:37 Telnyx notification - Type: callUpdate Call State: destroy
+injected.js:37 [AUDIO] Audio element cleaned up

@@ -6,15 +6,12 @@ import {
   Bot,
   User,
   ChevronDown,
-  ChevronUp,
-  CheckCircle,
-  Wrench,
+  CheckCircle2,
   Copy,
   Check,
   Package,
   BarChart3,
   FileText,
-  CreditCard,
   Sparkles,
   Brain,
   Building2,
@@ -105,7 +102,7 @@ export function AgentChatInterface({
     );
   }, []);
 
-  // Check if user message triggers order mode → enter order mode via context
+  // Check if user message triggers order mode
   useEffect(() => {
     const lastUserMessage = messages.findLast(m => m.role === 'user');
     if (lastUserMessage && detectOrderIntent(lastUserMessage.content) && isClientPortal) {
@@ -118,17 +115,14 @@ export function AgentChatInterface({
       setAgentStatus('executing');
       return;
     }
-
     if (isLoading) {
       setAgentStatus('thinking');
       return;
     }
-
     if (currentPlan) {
       setAgentStatus('awaiting_review');
       return;
     }
-
     setAgentStatus('idle');
   }, [currentPlan, isExecutingPlan, isLoading, setAgentStatus]);
 
@@ -156,76 +150,6 @@ export function AgentChatInterface({
     return localStorage.getItem(isClientPortal ? 'clientPortalToken' : 'authToken');
   }, [isClientPortal]);
 
-  const WelcomeHero = () => (
-    <div className="flex flex-col items-center justify-center py-10 px-6 text-center space-y-6 animate-in fade-in zoom-in duration-500">
-      <div className="relative">
-        <div className="absolute -inset-4 bg-gradient-to-r from-primary/20 to-purple-500/20 blur-xl rounded-full opacity-50" />
-        <div className="bg-gradient-to-br from-primary/10 to-background p-4 rounded-2xl border border-primary/10 shadow-xl relative backdrop-blur-sm">
-          <Bot className="w-12 h-12 text-primary" />
-        </div>
-      </div>
-      <div className="space-y-2 max-w-sm">
-        <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-purple-600">
-          How can I help you?
-        </h3>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          I can help you analyze leads, optimize campaigns, or process new orders.
-        </p>
-      </div>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md">
-        <QuickActionCard 
-          icon={Package} 
-          label="New Campaign" 
-          desc="Create a new lead order"
-          onClick={() => {
-            enterOrderMode();
-          }}
-        />
-        <QuickActionCard 
-          icon={BarChart3} 
-          label="Analyze Leads" 
-          desc="Review recent performance"
-          onClick={() => {
-             setInputValue("Analyze my recent lead performance");
-             inputRef.current?.focus();
-          }}
-        />
-        <QuickActionCard 
-          icon={Sparkles} 
-          label="Optimize" 
-          desc="Improve conversion rates"
-          onClick={() => {
-             setInputValue("How can I optimize my current campaigns?");
-             inputRef.current?.focus();
-          }}
-        />
-        <QuickActionCard 
-          icon={FileText} 
-          label="Reports" 
-          desc="Generate summary report"
-          onClick={() => {
-             setInputValue("Generate a summary report for this week");
-             inputRef.current?.focus();
-          }}
-        />
-      </div>
-    </div>
-  );
-
-  const QuickActionCard = ({ icon: Icon, label, desc, onClick }: any) => (
-    <button
-      onClick={onClick}
-      className="flex flex-col items-start p-3 rounded-xl border border-border/50 bg-card/50 hover:bg-primary/5 hover:border-primary/20 transition-all duration-300 text-left group"
-    >
-      <div className="flex items-center gap-2 mb-1">
-        <Icon className="w-4 h-4 text-primary group-hover:scale-110 transition-transform" />
-        <span className="font-medium text-sm text-foreground/80 group-hover:text-primary transition-colors">{label}</span>
-      </div>
-      <span className="text-[10px] text-muted-foreground">{desc}</span>
-    </button>
-  );
-
   const sendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading) return;
 
@@ -243,13 +167,11 @@ export function AgentChatInterface({
 
     try {
       const token = getAuthToken();
-
       if (!token) {
         throw new Error('Authentication required. Please log in.');
       }
 
       const endpoint = `/api/agent-panel/chat?clientPortal=${isClientPortal}`;
-
       const requestBody = {
         message: userMessage.content,
         sessionId,
@@ -274,19 +196,16 @@ export function AgentChatInterface({
 
       const data = await response.json();
 
-      // Update conversation ID if new
       if (data.conversationId && data.conversationId !== conversationId) {
         setConversationId(data.conversationId);
       }
 
-      // Regular message handling
       const assistantMessage: Message = {
         ...data.message,
         timestamp: data.message?.timestamp || new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Set plan if returned
       if (data.plan) {
         setCurrentPlan(data.plan);
       }
@@ -329,14 +248,15 @@ export function AgentChatInterface({
       }
 
       const data = await response.json();
+      const stepCount = data.executedSteps?.length || 0;
 
       const resultMessage: Message = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
-        content: `Plan executed successfully. ${data.executedSteps?.length || 0} steps completed.`,
+        content: `Plan executed successfully. ${stepCount} step${stepCount !== 1 ? 's' : ''} completed.`,
         timestamp: new Date().toISOString(),
         toolsExecuted: data.executedSteps?.map((s: any) => ({
-          tool: s.stepId,
+          tool: s.result?.tool || s.stepId,
           args: {},
           result: s.result,
         })),
@@ -376,10 +296,10 @@ export function AgentChatInterface({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
       {/* Messages Area */}
       <ScrollArea className="flex-1 px-4" ref={scrollRef}>
-        <div className="py-4 space-y-4">
+        <div className="py-4 space-y-5">
           {messages.length === 0 ? (
             <WelcomeMessage isClientPortal={isClientPortal} userRole={userRole} onEnterOrderMode={enterOrderMode} />
           ) : (
@@ -392,13 +312,18 @@ export function AgentChatInterface({
 
           {/* Current Plan */}
           {currentPlan && (
-            <div className="space-y-3">
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-3"
+            >
               <AgentPlanViewer
                 plan={currentPlan}
                 onApprove={() => handlePlanApprove(currentPlan.id)}
                 onReject={() => handlePlanReject(currentPlan.id)}
+                isExecuting={isExecutingPlan}
               />
-            </div>
+            </motion.div>
           )}
 
           {/* Loading Indicator */}
@@ -414,17 +339,17 @@ export function AgentChatInterface({
         </div>
       </ScrollArea>
 
-      {/* Input Area */}
-      <div className="p-4 border-t border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="relative">
-          <div className="relative flex items-center rounded-xl border border-input bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring transition-all">
+      {/* ── Input Area ── */}
+      <div className="border-t border-border/30 bg-background/98 backdrop-blur-xl">
+        <div className="p-3">
+          <div className="relative flex items-end rounded-xl border border-border/60 bg-background shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all duration-200">
             <Textarea
               ref={inputRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Tell AgentX what you want done..."
-              className="min-h-[50px] max-h-[200px] w-full resize-none border-0 shadow-none focus-visible:ring-0 py-3.5 pl-4 pr-12 bg-transparent leading-relaxed"
+              placeholder="Tell AgentC what you want done..."
+              className="min-h-[44px] max-h-[160px] w-full resize-none border-0 shadow-none focus-visible:ring-0 py-3 pl-4 pr-12 bg-transparent text-sm leading-relaxed"
               rows={1}
             />
             <div className="absolute right-2 bottom-2">
@@ -433,27 +358,27 @@ export function AgentChatInterface({
                 onClick={sendMessage}
                 disabled={!inputValue.trim() || isLoading}
                 className={cn(
-                  "h-8 w-8 rounded-lg transition-all duration-200",
-                  !inputValue.trim() && !isLoading ? "opacity-50 grayscale" : "opacity-100 shadow-md",
-                  isLoading && "opacity-80"
+                  'h-7 w-7 rounded-lg transition-all duration-200',
+                  inputValue.trim() && !isLoading
+                    ? 'bg-primary hover:bg-primary/90 shadow-md shadow-primary/25'
+                    : 'bg-muted text-muted-foreground'
                 )}
               >
                 {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <Send className="h-3.5 w-3.5" />
                 )}
               </Button>
             </div>
           </div>
         </div>
 
-        <div className="mt-4 mb-2">
-          <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
-        </div>
+        {/* Quick Actions */}
+        <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
 
-        <p className="text-[10px] text-muted-foreground/60 mt-2 text-center select-none">
-          AgentX can make mistakes. Check important info.
+        <p className="text-[10px] text-muted-foreground/40 pb-2 text-center select-none">
+          AgentC can make mistakes. Check important info.
         </p>
       </div>
     </div>
@@ -461,31 +386,29 @@ export function AgentChatInterface({
 }
 
 
-// Typing Indicator Component
+// ── Typing Indicator ──
 function TypingIndicator() {
   return (
-    <div className="flex items-center gap-1 p-2">
-      <motion.div
-        className="w-1.5 h-1.5 bg-muted-foreground rounded-full"
-        animate={{ y: [0, -5, 0] }}
-        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <motion.div
-        className="w-1.5 h-1.5 bg-muted-foreground rounded-full"
-        animate={{ y: [0, -5, 0] }}
-        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut', delay: 0.1 }}
-      />
-      <motion.div
-        className="w-1.5 h-1.5 bg-muted-foreground rounded-full"
-        animate={{ y: [0, -5, 0] }}
-        transition={{ duration: 0.6, repeat: Infinity, ease: 'easeInOut', delay: 0.2 }}
-      />
-      <span className="text-xs text-muted-foreground ml-2">AgentX is thinking...</span>
+    <div className="flex items-start gap-3">
+      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10">
+        <Bot className="h-3.5 w-3.5 text-primary" />
+      </div>
+      <div className="flex items-center gap-1.5 pt-2">
+        {[0, 1, 2].map(i => (
+          <motion.div
+            key={i}
+            className="w-1.5 h-1.5 bg-primary/40 rounded-full"
+            animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
+            transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut', delay: i * 0.15 }}
+          />
+        ))}
+        <span className="text-xs text-muted-foreground/60 ml-1.5">Thinking...</span>
+      </div>
     </div>
   );
 }
 
-// Welcome Action Card for client portal
+// ── Welcome Action Card ──
 function WelcomeActionCard({
   icon: Icon,
   title,
@@ -503,38 +426,34 @@ function WelcomeActionCard({
     <button
       onClick={onClick}
       className={cn(
-        'flex flex-col items-start gap-2 p-3.5 rounded-xl border text-left transition-all duration-200 group',
+        'flex flex-col items-start gap-2 p-3 rounded-xl border text-left transition-all duration-200 group',
         primary
-          ? 'bg-gradient-to-br from-primary/15 via-primary/10 to-primary/5 border-primary/25 hover:border-primary/40 hover:shadow-md hover:shadow-primary/10'
-          : 'bg-card/50 border-border/60 hover:bg-muted/50 hover:border-border hover:shadow-sm'
+          ? 'bg-gradient-to-br from-primary/10 to-primary/[0.03] border-primary/20 hover:border-primary/35 hover:shadow-md hover:shadow-primary/5'
+          : 'bg-card/50 border-border/50 hover:bg-muted/40 hover:border-border/80 hover:shadow-sm'
       )}
     >
-      <div
-        className={cn(
-          'p-2 rounded-lg transition-colors',
-          primary
-            ? 'bg-primary/15 text-primary group-hover:bg-primary/20'
-            : 'bg-muted text-muted-foreground group-hover:bg-muted/80'
-        )}
-      >
+      <div className={cn(
+        'p-1.5 rounded-lg transition-colors',
+        primary
+          ? 'bg-primary/15 text-primary group-hover:bg-primary/20'
+          : 'bg-muted text-muted-foreground group-hover:text-foreground'
+      )}>
         <Icon className="h-4 w-4" />
       </div>
       <div>
         <p className={cn(
-          'text-sm font-semibold leading-none',
-          primary ? 'text-primary' : 'text-foreground'
+          'text-xs font-semibold leading-none',
+          primary ? 'text-primary' : 'text-foreground/90'
         )}>
           {title}
         </p>
-        <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-          {description}
-        </p>
+        <p className="text-[10px] text-muted-foreground mt-1 leading-snug">{description}</p>
       </div>
     </button>
   );
 }
 
-// Welcome Message Component
+// ── Welcome Message ──
 function WelcomeMessage({
   isClientPortal,
   userRole,
@@ -552,118 +471,63 @@ function WelcomeMessage({
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95, y: 20 }}
+      initial={{ opacity: 0, scale: 0.97, y: 16 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="flex flex-col items-center justify-center py-12 px-6 space-y-8 select-none"
+      transition={{ duration: 0.35 }}
+      className="flex flex-col items-center justify-center py-10 px-4 space-y-6 select-none"
     >
       <div className="relative group cursor-default">
-        <div className="absolute -inset-1 bg-gradient-to-r from-primary to-purple-600 rounded-full blur opacity-20 group-hover:opacity-40 transition duration-1000 group-hover:duration-200" />
-        <div className="relative w-24 h-24 rounded-3xl bg-gradient-to-br from-card to-background flex items-center justify-center border border-border/50 shadow-2xl">
-          <Bot className="h-10 w-10 text-primary transition-transform duration-500 group-hover:scale-110" />
+        <div className="absolute -inset-3 bg-gradient-to-r from-primary/15 to-violet-500/15 rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition duration-700" />
+        <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/10 to-background flex items-center justify-center border border-primary/10 shadow-xl">
+          <Bot className="h-9 w-9 text-primary" />
         </div>
-        <div className="absolute -bottom-2 -right-2 bg-background p-1.5 rounded-full border border-border shadow-sm">
-           <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500/20 animate-pulse" />
+        <div className="absolute -bottom-1.5 -right-1.5 bg-background p-1 rounded-full border border-border/50 shadow-sm">
+          <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
         </div>
       </div>
 
-      <div className="text-center space-y-3 max-w-sm">
-        <h3 className="font-bold text-2xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
-          AgentX
+      <div className="text-center space-y-2 max-w-xs">
+        <h3 className="font-bold text-xl tracking-tight text-foreground">
+          AgentC
         </h3>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          I'm an autonomic agent designed to help you analyze data, execute campaigns, and manage operations.
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Your autonomous AI assistant for campaigns, analytics, and operations.
         </p>
       </div>
 
       {/* Client Portal Action Cards */}
       {isClientPortal && (
-        <div className="w-full grid grid-cols-2 gap-3 max-w-md">
-          <WelcomeActionCard
-            icon={Rocket}
-            title="New Campaign"
-            description="Launch order"
-            onClick={onEnterOrderMode}
-            primary
-          />
-          <WelcomeActionCard
-            icon={BarChart3}
-            title="Analysis"
-            description="Performance review"
-            onClick={() => dispatchQuickAction('Analyze the performance of my active campaigns')}
-          />
-          <WelcomeActionCard
-            icon={FileText}
-            title="Reports"
-            description="View reports"
-            onClick={() => dispatchQuickAction('Generate a weekly summary report')}
-          />
-           <WelcomeActionCard
-            icon={Target}
-            title="Leads"
-            description="Lead quality check"
-            onClick={() => dispatchQuickAction('Check the quality of leads generated today')}
-          />
-          <WelcomeActionCard
-            icon={Search}
-            title="Deep Research"
-            description="Market & competitive intel"
-            onClick={() => dispatchQuickAction('Deep research: analyze the competitive landscape and market trends for our industry')}
-          />
-          <WelcomeActionCard
-            icon={Code2}
-            title="Code Assist"
-            description="AI code generation"
-            onClick={() => dispatchQuickAction('Help me write code for a new API endpoint')}
-          />
+        <div className="w-full grid grid-cols-2 gap-2.5 max-w-sm">
+          <WelcomeActionCard icon={Rocket} title="New Campaign" description="Launch order" onClick={onEnterOrderMode} primary />
+          <WelcomeActionCard icon={BarChart3} title="Analysis" description="Performance review" onClick={() => dispatchQuickAction('Analyze the performance of my active campaigns')} />
+          <WelcomeActionCard icon={FileText} title="Reports" description="Summary report" onClick={() => dispatchQuickAction('Generate a weekly summary report')} />
+          <WelcomeActionCard icon={Target} title="Leads" description="Quality check" onClick={() => dispatchQuickAction('Check the quality of leads generated today')} />
+          <WelcomeActionCard icon={Search} title="Deep Research" description="Market & competitive" onClick={() => dispatchQuickAction('Deep research: analyze the competitive landscape and market trends for our industry')} />
+          <WelcomeActionCard icon={Code2} title="Code Assist" description="AI generation" onClick={() => dispatchQuickAction('Help me write code for a new API endpoint')} />
         </div>
       )}
 
-      {/* Admin/Internal Welcome */}
+      {/* Admin Welcome */}
       {!isClientPortal && (
-        <div className="w-full grid grid-cols-2 gap-3 max-w-md">
-            <WelcomeActionCard
-              icon={Brain}
-              title="System Check"
-              description="Diagnostics"
-              onClick={() => dispatchQuickAction('Run a full system diagnostic check')}
-            />
-             <WelcomeActionCard
-              icon={Building2}
-              title="Org Intel"
-              description="Analyze accounts"
-              onClick={() => dispatchQuickAction('Analyze recently active accounts for intent')}
-            />
-            <WelcomeActionCard
-              icon={Search}
-              title="Deep Research"
-              description="Market & competitive intel"
-              onClick={() => dispatchQuickAction('Deep research: comprehensive market analysis and industry trends')}
-            />
-            <WelcomeActionCard
-              icon={Code2}
-              title="Code Assist"
-              description="AI code generation"
-              onClick={() => dispatchQuickAction('Help me implement a new feature with code')}
-            />
+        <div className="w-full grid grid-cols-2 gap-2.5 max-w-sm">
+          <WelcomeActionCard icon={Brain} title="System Check" description="Diagnostics" onClick={() => dispatchQuickAction('Run a full system diagnostic check')} />
+          <WelcomeActionCard icon={Building2} title="Org Intel" description="Account analysis" onClick={() => dispatchQuickAction('Analyze recently active accounts for intent')} />
+          <WelcomeActionCard icon={Search} title="Deep Research" description="Market intel" onClick={() => dispatchQuickAction('Deep research: comprehensive market analysis and industry trends')} />
+          <WelcomeActionCard icon={Code2} title="Code Assist" description="AI generation" onClick={() => dispatchQuickAction('Help me implement a new feature with code')} />
         </div>
       )}
     </motion.div>
   );
 }
 
-// Message Bubble Component
+// ── Message Bubble ──
 function MessageBubble({ message }: { message: Message }) {
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
-  
-  // Detect if this is a campaign proposal or highly structured output
-  const isCampaignProposal = !isUser && (
-    message.content.includes('# Campaign Strategy') || 
-    message.content.includes('Campaign Created') ||
-    message.content.includes('Order Summary')
-  );
+
+  const hasExecutedSteps = !isUser && message.toolsExecuted && message.toolsExecuted.length > 0;
+  const isSuccessMessage = !isUser && message.content.includes('Plan executed successfully');
 
   const copyContent = () => {
     navigator.clipboard.writeText(message.content);
@@ -674,129 +538,119 @@ function MessageBubble({ message }: { message: Message }) {
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 10, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ type: "spring", stiffness: 400, damping: 30 }}
-      className={cn('group flex gap-4', isUser && 'flex-row-reverse')}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      className={cn('group flex gap-3', isUser && 'flex-row-reverse')}
     >
-      <div
-        className={cn(
-          'w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ring-2 ring-background z-10',
-          isUser
-            ? 'bg-gradient-to-tr from-primary to-primary/80'
-            : 'bg-gradient-to-tr from-card to-secondary border border-border/50'
-        )}
-      >
+      {/* Avatar */}
+      <div className={cn(
+        'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5',
+        isUser
+          ? 'bg-primary shadow-sm shadow-primary/20'
+          : 'bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10'
+      )}>
         {isUser ? (
-          <User className="h-4 w-4 text-primary-foreground" />
+          <User className="h-3.5 w-3.5 text-primary-foreground" />
         ) : (
-          <Bot className="h-4 w-4 text-primary" />
+          <Bot className="h-3.5 w-3.5 text-primary" />
         )}
       </div>
 
-      <div
-        className={cn(
-          'flex-1 max-w-[85%] space-y-2',
-          isUser && 'flex flex-col items-end'
-        )}
-      >
-        <div className="flex flex-col gap-1">
-          {/* Sender Name */}
-          <div className={cn("text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70 px-1 flex items-center gap-2", isUser && "justify-end")}>
-            <span>{isUser ? 'You' : 'AgentX'}</span>
-          </div>
+      {/* Content */}
+      <div className={cn('flex-1 max-w-[85%] space-y-1.5', isUser && 'flex flex-col items-end')}>
+        {/* Sender */}
+        <span className={cn(
+          'text-[10px] font-medium text-muted-foreground/60 px-0.5',
+          isUser && 'text-right'
+        )}>
+          {isUser ? 'You' : 'AgentC'}
+        </span>
 
-          <div
-            className={cn(
-              'relative rounded-2xl px-5 py-4 text-sm shadow-sm leading-7 transition-all duration-200',
-              isUser
-                ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                : 'bg-card/80 backdrop-blur-sm border border-border/50 rounded-tl-sm text-foreground shadow-sm hover:shadow-md'
-            )}
-          >
-            {isCampaignProposal && (
-              <div className="absolute top-0 right-0 p-2">
-                 <Badge variant="outline" className="bg-background/50 backdrop-blur text-[10px] border-primary/20 text-primary gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    Strategy
-                 </Badge>
-              </div>
-            )}
-            
-            <div className={cn("markdown-prose whitespace-pre-wrap", isCampaignProposal && "font-medium text-foreground/90")}>
-              {message.content}
+        {/* Bubble */}
+        <div className={cn(
+          'relative rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-200',
+          isUser
+            ? 'bg-primary text-primary-foreground rounded-tr-md'
+            : isSuccessMessage
+              ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 rounded-tl-md text-foreground'
+              : 'bg-card border border-border/50 rounded-tl-md text-foreground shadow-sm'
+        )}>
+          {/* Success icon for plan completion */}
+          {isSuccessMessage && (
+            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-emerald-200/60 dark:border-emerald-800/40">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Execution Complete</span>
             </div>
-          </div>
+          )}
+
+          <div className="whitespace-pre-wrap">{message.content}</div>
+
+          {/* Executed steps */}
+          {hasExecutedSteps && (
+            <div className="mt-3 pt-2 border-t border-border/30 space-y-1">
+              {message.toolsExecuted!.map((step, idx) => {
+                const toolLabel = (step.result?.message || step.tool || `Step ${idx + 1}`)
+                  .replace(/^Executed\s+/, '')
+                  .replace(/_/g, ' ')
+                  .replace(/\b\w/g, (c: string) => c.toUpperCase());
+                return (
+                  <div key={idx} className="flex items-center gap-2 text-xs">
+                    <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                    <span className="font-medium text-foreground/80">{toolLabel}</span>
+                    {step.result?.success && (
+                      <span className="text-emerald-600/70 text-[10px]">Done</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Copy button on hover */}
+          {!isUser && (
+            <button
+              onClick={copyContent}
+              className="absolute -bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-background border border-border/60 rounded-md p-1 shadow-sm hover:bg-muted"
+            >
+              {copied ? (
+                <Check className="h-3 w-3 text-emerald-500" />
+              ) : (
+                <Copy className="h-3 w-3 text-muted-foreground" />
+              )}
+            </button>
+          )}
         </div>
 
         {/* Thought Process */}
         {message.thoughtProcess && message.thoughtProcess.length > 0 && (
-          <div className="w-full max-w-[90%]">
-            <Collapsible open={showDetails} onOpenChange={setShowDetails} className="group/details bg-muted/20 hover:bg-muted/40 transition-colors rounded-lg border border-border/30 overflow-hidden">
+          <div className="w-full max-w-[92%]">
+            <Collapsible open={showDetails} onOpenChange={setShowDetails}>
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="w-full flex items-center justify-between px-3 h-8 text-xs font-medium text-muted-foreground hover:text-foreground"
+                  className="w-full flex items-center justify-between px-3 h-7 text-[11px] font-medium text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted/50"
                 >
-                  <div className="flex items-center gap-2">
-                    <Brain className="h-3.5 w-3.5" />
+                  <div className="flex items-center gap-1.5">
+                    <Brain className="h-3 w-3" />
                     <span>View Reasoning ({message.thoughtProcess.length} steps)</span>
                   </div>
-                  <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", showDetails && "rotate-180")} />
+                  <ChevronDown className={cn('h-3 w-3 transition-transform duration-200', showDetails && 'rotate-180')} />
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <div className="px-3 pb-3 pt-1 space-y-3">
-                  <div className="h-px w-full bg-border/40 mb-2" />
-                  {message.thoughtProcess.map((step, i) => (
-                    <div key={i} className="flex gap-3 text-xs group/step">
-                      <div className="flex items-center justify-center w-5 h-5 rounded-full bg-background border border-border/60 shrink-0 text-[10px] font-mono text-muted-foreground group-hover/step:border-primary/40 group-hover/step:text-primary transition-colors">
-                        {i + 1}
-                      </div>
-                      <span className="text-muted-foreground leading-relaxed pt-0.5">{step}</span>
+                <div className="mt-1 p-3 bg-muted/30 rounded-lg border border-border/30 space-y-2">
+                  {message.thoughtProcess.map((thought, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <span className="text-[10px] font-mono text-primary/60 shrink-0 mt-0.5 w-4 text-right">{idx + 1}.</span>
+                      <span className="leading-relaxed">{thought}</span>
                     </div>
                   ))}
                 </div>
               </CollapsibleContent>
             </Collapsible>
-          </div>
-        )}
-
-        {/* Tools Executed */}
-        {message.toolsExecuted && message.toolsExecuted.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {message.toolsExecuted.map((tool, i) => (
-              <Badge
-                key={i}
-                variant="outline"
-                className="text-xs py-1 px-3 h-7 bg-emerald-500/5 text-emerald-700 border-emerald-200/50 gap-1.5 hover:bg-emerald-500/10 transition-colors rounded-lg"
-              >
-                <div className="p-0.5 bg-emerald-500/20 rounded-full">
-                  <Check className="h-2.5 w-2.5" />
-                </div>
-                <span className="font-mono font-medium">{tool.tool}</span>
-              </Badge>
-            ))}
-          </div>
-        )}
-
-        {/* Actions */}
-        {!isUser && (
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity px-1 duration-200">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 rounded-md hover:bg-muted text-muted-foreground"
-              onClick={copyContent}
-            >
-              {copied ? (
-                <Check className="h-3 w-3 text-green-500" />
-              ) : (
-                <Copy className="h-3 w-3" />
-              )}
-            </Button>
           </div>
         )}
       </div>

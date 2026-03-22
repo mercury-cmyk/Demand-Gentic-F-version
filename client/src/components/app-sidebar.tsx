@@ -310,7 +310,7 @@ interface SidebarSectionProps {
 function SidebarSection({ section, isLastSection, spotlightItems, location, isActive, isCollapsed }: SidebarSectionProps) {
   return (
     <div className={cn("transition-all duration-300", isCollapsed ? "mb-2" : "mb-4")}>
-      {section.label && !isCollapsed && (
+      {section.label && !isCollapsed && !(section.items.length === 1 && section.items[0].items && section.items[0].items.length > 0) && (
         <h4 className="px-4 text-[0.72rem] font-semibold text-sidebar-foreground/70 uppercase tracking-[0.22em] mb-2 transition-opacity duration-300">
           {section.label}
         </h4>

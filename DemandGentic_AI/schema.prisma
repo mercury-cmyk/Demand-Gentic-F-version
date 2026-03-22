@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Opportunity {
+  id              String                 @id @default(cuid())
+  name            String
+  accountId       String
+  value           Int
+  stage           String
+  closeDate       DateTime
+  owner           String
+  lastContactDate DateTime
+
+  // Relation to communication history
+  communications CommunicationHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CommunicationHistory {
+  id            String      @id @default(cuid())
+  type          String // "email", "call", etc.
+  direction     String // "inbound", "outbound"
+  date          DateTime
+  summary       String
+  opportunityId String
+
+  // Relation to an opportunity
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id])
+}
+
+model Project {
+  id             String     @id @default(cuid())
+  clientName     String
+  status         String     @default("Draft") // e.g., Draft, Active, Completed
+  leadGoal       Int?
+  costPerLead    Float?
+  startDate      DateTime?
+  deliveryMethod String? // e.g., "API, Excel"
+  originalPrompt String? // For auditability
+
+  campaigns Campaign[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Campaign {
+  id             String @id @default(cuid())
+  name           String
+  type           String // "Email", "Call", "Data Verification", etc.
+  targetAudience Json? // Store audience criteria as JSON
+  leadsGenerated Int?   @default(0)
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+
+  // Relation to agent assignments
+  assignments CampaignAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Contact {
+  id        String  @id @default(cuid())
+  email     String  @unique
+  firstName String?
+  lastName  String?
+  jobTitle  String?
+  country   String?
+
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum AgentType {
+  HUMAN
+  VIRTUAL
+}
+
+model Agent {
+  id           String    @id @default(cuid())
+  name         String    @unique
+  type         AgentType @default(HUMAN)
+
+  // Human-specific fields
+  sipUser String?
+
+  // Virtual-specific fields
+  personaPrompt String?
+  voiceId       String? // e.g., 'en-US-Wavenet-F'
+  capabilities  String[]
+
+  assignments CampaignAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum AssignmentMode {
+  ROUND_ROBIN
+  BLOCK
+  WEIGHTED
+}
+
+model CampaignAssignment {
+  id         String @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  agentId    String
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  mode       AssignmentMode @default(ROUND_ROBIN)
+  quota      Int?
+
+  @@unique([campaignId, agentId])
+}
+
+model Account {
+  id           String  @id @default(cuid())
+  name         String
+  domain       String? @unique
+  industry     String?
+  employeeSize Int?
+
+  contacts Contact[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Segment {
+  id               String   @id @default(cuid())
+  name             String
+  description      String?
+  entityType       String // "contact" or "account"
+  definitionJson   Json
+  createdBy        String?
+  recordCountCache Int?
+  tags             String[]
+  visibilityScope  String   @default("private") // "private", "team", "global"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model List {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  entityType      String // "contact" or "account"
+  sourceType      String // "segment", "manual_upload", "selection"
+  sourceRef       String?
+  recordIds       String[]
+  createdBy       String?
+  tags            String[]
+  visibilityScope String   @default("private")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+  DEBUG
+}
+
+model LogEntry {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  level     LogLevel
+  message   String   @db.Text
+  service   String? // e.g., 'api-server', 'pipeline-agent'
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+}
+
+enum AnomalySeverity {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AnomalyStatus {
+  NEW
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+model Anomaly {
+  id            String          @id @default(cuid())
+  detectedAt    DateTime        @default(now())
+  description   String          @db.Text
+  severity      AnomalySeverity
+  status        AnomalyStatus   @default(NEW)
+  relatedLogIds String[]
+  notes         String?         @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SystemPrompt {
+  id         String   @id @default(cuid())
+  agentName  String   @unique // e.g., "project-creation-agent", "log-monitor-agent"
+  promptText String   @db.Text
+  version    Int      @default(1)
+  isActive   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

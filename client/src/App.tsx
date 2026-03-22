@@ -96,6 +96,7 @@ import NumberPoolPage from "@/pages/number-pool";
 import EmailValidationTest from "./pages/email-validation-test";
 import PivotalPipelineManagementPage from "@/pages/pivotal-pipeline-management";
 import PipelineManagementPage from "@/pages/pipeline-management";
+import UnifiedPipelinePage from "@/pages/unified-pipeline";
 import PipelineImportPage from "@/pages/pipeline-import";
 import OpportunityDetailPage from "@/pages/opportunity-detail";
 import EmailSequencesPage from "@/pages/email-sequences";
@@ -165,9 +166,7 @@ import TelephonySettingsPage from "@/pages/settings/telephony";
 import VoiceEngineControlCenter from "@/pages/settings/voice-engine";
 import AiGovernanceSettingsPage from "@/pages/settings/ai-governance";
 import SuperOrgSettingsPage from "@/pages/settings/super-org";
-import AgentDefaultsSettingsPage from "@/pages/agent-defaults-settings";
 import PromptManagementPage from "@/pages/prompt-management";
-import PromptInspectorPage from "@/pages/prompt-inspector";
 import SmtpProvidersPage from "@/pages/smtp-providers";
 import TransactionalTemplatesPage from "@/pages/transactional-templates";
 import EmailManagementPage from "@/pages/email-management";
@@ -323,7 +322,7 @@ function AuthenticatedApp() {
     <SidebarProvider style={style as React.CSSProperties}>
       <AgentPanelProvider userRole={primaryRole} isClientPortal={false}>
         <CommandPalette />
-        <div className="flex h-screen w-full agentx-shell">
+        <div className="flex h-screen w-full agentc-shell">
           {!isOpsHubRoute && <AppSidebar userRoles={resolvedUserRoles} />}
           <div className="flex flex-col flex-1 overflow-hidden">
             {!isOpsHubRoute && (
@@ -478,10 +477,8 @@ function AuthenticatedApp() {
               <Route path="/agent-command-center" component={AgentCommandCenter} />
               <Route path="/unified-agent-architecture" component={UnifiedAgentArchitectureDashboard} />
               <Route path="/agent-reports" component={AgentReportsDashboard} />
-              <Route path="/settings/agent-defaults" component={AgentDefaultsSettingsPage} />
               <Route path="/settings/ai-governance" component={AiGovernanceSettingsPage} />
               <Route path="/settings/prompts" component={PromptManagementPage} />
-              <Route path="/settings/prompt-inspector" component={PromptInspectorPage} />
 
               {/* Settings Hub */}
               <Route path="/settings" component={SettingsIndexPage} />
@@ -543,6 +540,7 @@ function AuthenticatedApp() {
               <Route path="/email-validation-test" component={EmailValidationTest} />
               
               {/* Pipeline & CRM */}
+              <Route path="/pipeline/unified" component={UnifiedPipelinePage} />
               <Route path="/pipeline" component={PipelineManagementPage} />
               <Route path="/pipeline/pivotal" component={PivotalPipelineManagementPage} />
               <Route path="/pipeline/import" component={PipelineImportPage} />

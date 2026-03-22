@@ -1,0 +1,150 @@
+Data Quality — De‑duplication, Upsert & Survivorship
+15.1 Objectives
+
+Ensure the platform prevents duplicates across Contacts and Accounts and supports idempotent upserts: when an existing entity is uploaded/ingested again, the system updates it instead of creating a new record. Design must be multi‑tenant safe, audited, and performant at scale.
+
+15.2 Canonical Identifiers & Uniqueness
+
+Contacts
+
+Primary Business Key (BK): tenant_id + email_normalized (unique).
+
+Normalization: lower‑case, trim, Unicode → ASCII (punycode), remove dots for Gmail‑style aliases (configurable), strip tags (+alias) (configurable).
+
+Secondary Emails: table contact_emails (contact_id, email_normalized, is_primary) with unique constraint per tenant; on import, map to existing contact if email matches in either primary or secondary.
+
+Accounts
+
+Primary BK (preferred): tenant_id + domain_normalized (unique, non‑null for corporate domains).
+
+Fallback BK (when domain missing): tenant_id + name_normalized + hq_country + hq_city (unique partial index).
+
+Alternate Domains: account_domains (account_id, domain_normalized) unique per tenant; used for matching.
+
+Company Renames: previous_names[] (optional) to improve fuzzy recall.
+
+Lists/Segments/Orders/Campaigns
+
+Natural keys are name‑scoped per tenant. Use tenant_id + slug unique to avoid duplicates.
+
+15.3 Database Constraints & Indexing (DDL Sketch). -- Contacts
+CREATE UNIQUE INDEX uq_contact_email ON contacts(tenant_id, email_normalized) WHERE deleted_at IS NULL;
+CREATE INDEX ix_contact_secondary_email ON contact_emails(tenant_id, email_normalized);
+
+
+-- Accounts
+CREATE UNIQUE INDEX uq_account_domain ON accounts(tenant_id, domain_normalized) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_account_fallback ON accounts(tenant_id, name_normalized, hq_country, hq_city)
+WHERE deleted_at IS NULL AND domain_normalized IS NULL;
+
+
+-- Account Domains (aliases)
+CREATE UNIQUE INDEX uq_account_domains ON account_domains(tenant_id, domain_normalized) WHERE deleted_at IS NULL;  . Note: All uniqueness constraints are partial to ignore soft‑deleted rows. Add btree + trigram indexes on name/domain for fuzzy search.
+
+15.4 Upsert Ingestion Workflow (Imports & APIs)
+
+Normalize Input → email/domain/name/phone standardization.
+
+Lookup (Deterministic)
+
+Contact: find by primary or any secondary email.
+
+Account: find by domain; else by name + geo; else by account_domains.
+
+Match Decision
+
+If exact BK match → UPSERT (update).
+
+If no match → create (with BK set).
+
+If multiple candidates → send to Review Queue with a confidence score.
+
+Field‑Level Survivorship
+
+Policy per field (see 15.5): prefer_new_if_not_null, prefer_existing, max_length, max_recency, trusted_source_rank.
+
+Write with idempotency key (hash of BK + payload) to prevent duplicates from retries.
+
+Emit Events (contact.upserted, account.upserted) → reindex search & recompute segments.
+
+API Contract (Illustrative)
+
+POST /contacts:upsert
+
+POST /accounts:upsert
+
+Both accept upsert_mode (strict|merge), source metadata, and idempotency_key.
+
+15.5 Survivorship Rules (Per‑Field Merge Policy)
+
+Default: keep existing value unless incoming is newer (based on source_updated_at) or existing is empty.
+
+High‑Trust Providers: (e.g., enrichment vendor) can override via source trust rank.
+
+Append‑Only Fields: tags[], intent_topics[], linkedin_specialties, technologies_installed → set union (deduped).
+
+Monotonic Fields: last_activity_at → take max.
+
+Phone/Emails: validate; if new phone passes E.164 and not suppressed, add as secondary or promote if flagged is_primary=true.
+
+Audit: every overwrite records {old, new, source, actor, ts} in field_change_log.
+
+15.6 Fuzzy Matching (Secondary, Human‑Reviewed)
+
+Use only when deterministic match fails.
+
+Contacts: Levenshtein on full_name + same account_id OR same email user part + similar domain; threshold configurable.
+
+Accounts: Trigram similarity on name_normalized; boost if same geo; block on conflicting domains.
+
+Queue: dedupe_review_queue UI to approve/merge; actions are audit‑logged.
+
+15.7 Merge Model (Safe Consolidation)
+
+Contact Merge: choose a survivor contact_id; others become aliases with redirects; re‑point FKs (activities, leads).
+
+Account Merge: same semantics; consolidate domains, previous names, tags, and roll up child Contacts.
+
+Reversibility: store merge_map (loser_id → survivor_id) to allow rollback within 30 days.
+
+15.8 Real‑Time Duplicate Prevention (UI & API)
+
+UI Guardrails: real‑time lookups on email/domain inputs; warn + offer “update existing” path.
+
+Bulk Import: pre‑flight Dry Run shows would‑update vs would‑create; exportable discrepancy file.
+
+API Errors: on unique violation, return 409 CONFLICT with canonical record reference and option ?merge=true to retry.
+
+15.9 Personal/Free Email Handling
+
+Maintain a configurable list of free mail domains (gmail, outlook, yahoo).
+
+Contacts with free emails do not auto‑link to Accounts; require explicit account_id or company_domain mapping.
+
+Option to disallow free emails for B2B contacts at tenant level.
+
+15.10 Governance, Auditing & Compliance
+
+Provenance: store source_system, ingested_at, source_record_id.
+
+Idempotency: all upserts recorded with dedupe hash for replay safety.
+
+Audit Trail: immutable logs for merges, overwrites, and deletes; exportable for compliance.
+
+RPO/RTO: ensure backups cover BK indexes; test restore keeps uniqueness guarantees.
+
+15.11 Acceptance Criteria (Key)
+
+Importing the same CSV twice results in updates only (no new duplicates).
+
+Unique constraints enforce:
+
+Contacts: one row per tenant_id + email_normalized (ignoring soft deletes).
+
+Accounts: one row per tenant_id + domain_normalized, or unique fallback on name+geo if domain missing.
+
+Upsert throughput: ≥ 200 rps sustained with queues; 100k records finish ≤ 2 hours.
+
+Merge operations re‑point all foreign keys and retain full activity history.
+
+Outcome: A robust, auditable deduplication and upsert strategy that prevents duplicates by design, updates existing records seamlessly, and scales with growing field counts and data sources.

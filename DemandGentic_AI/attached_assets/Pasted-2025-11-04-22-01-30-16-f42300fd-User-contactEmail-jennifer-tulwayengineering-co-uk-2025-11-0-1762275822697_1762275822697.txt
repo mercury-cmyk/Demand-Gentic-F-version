@@ -1,0 +1,112 @@
+2025-11-04 22:01:30.16
+f42300fd
+User
+contactEmail: 'jennifer@tulwayengineering.co.uk',
+2025-11-04 22:01:30.16
+f42300fd
+User
+campaignId: '70434f6e-3ab6-49e4-acf7-350b81f60ea2',
+2025-11-04 22:01:30.16
+f42300fd
+User
+hasRecording: false,
+2025-11-04 22:01:30.16
+f42300fd
+User
+callDuration: null,
+2025-11-04 22:01:30.16
+f42300fd
+User
+qaStatus: 'new',
+2025-11-04 22:01:30.16
+f42300fd
+User
+telnyxCallId: '452e2959-5e25-4251-896b-88e156c2be9a',
+2025-11-04 22:01:30.16
+f42300fd
+User
+dialedNumber: '+441515489988'
+2025-11-04 22:01:30.16
+f42300fd
+User
+}
+2025-11-04 22:01:30.30
+f42300fd
+User
+[DISPOSITION] Qualified/Lead call - adding to campaign suppression for contact ba2c1810-5174-4e15-8528-eab9175fb958
+2025-11-04 22:01:30.34
+f42300fd
+User
+[DISPOSITION] Contact added to campaign suppression list
+2025-11-04 22:01:30.37
+f42300fd
+User
+[DISPOSITION] Checking per-account cap for account acc42fa4-f0cc-46c9-82ea-00091661d056 (mode: positive_disp, cap: 1)
+2025-11-04 22:01:30.50
+f42300fd
+User
+[DISPOSITION] Account has 0 counted items (mode: positive_disp), cap is 1
+2025-11-04 22:01:30.50
+f42300fd
+User
+[DISPOSITION] ⚠️ Account cap reached! Auto-suppressing account acc42fa4-f0cc-46c9-82ea-00091661d056 from campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-11-04 22:01:30.60
+f42300fd
+User
+[DISPOSITION] Final disposition "qualified" - removing contact ba2c1810-5174-4e15-8528-eab9175fb958 from ALL queues in campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2
+2025-11-04 22:01:30.63
+f42300fd
+User
+5:01:30 PM [express] POST /api/calls/disposition 201 in 716ms :: {"id":"07b0cf0e-003c-4eec-99f3-2f0b…
+2025-11-04 22:01:30.65
+f42300fd
+User
+[DB Pool] Client connected | Total: 2, Idle: 1, Waiting: 0
+2025-11-04 22:01:31.04
+f42300fd
+User
+5:01:31 PM [express] GET /api/contacts/9dc9f647-c2ac-4f21-a5d1-8a8bf7d77db4 200 in 36ms :: {"id":"9d…
+2025-11-04 22:01:31.06
+f42300fd
+User
+[AGENT QUEUE] Campaign 70434f6e-3ab6-49e4-acf7-350b81f60ea2 dial mode: manual
+2025-11-04 22:01:31.13
+f42300fd
+User
+[DB Pool] Client connected | Total: 3, Idle: 1, Waiting: 0
+2025-11-04 22:01:31.21
+f42300fd
+User
+5:01:31 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/related-contacts…
+2025-11-04 22:01:31.80
+f42300fd
+User
+[AGENT QUEUE] Manual queue returned 7983 items
+2025-11-04 22:01:31.96
+f42300fd
+User
+5:01:31 PM [express] GET /api/agents/me/queue 200 in 893ms :: [{"id":"e3f61173-6920-4532-ac7a-74c6fa…
+2025-11-04 22:01:32.65
+f42300fd
+User
+5:01:32 PM [express] GET /api/contacts/61334f80-0baf-45a3-b777-9e4bd4228e23 200 in 64ms :: {"id":"61…
+2025-11-04 22:01:32.68
+f42300fd
+User
+5:01:32 PM [express] GET /api/campaigns/70434f6e-3ab6-49e4-acf7-350b81f60ea2/queues/related-contacts…
+2025-11-04 22:01:50.24
+f42300fd
+User
+5:01:50 PM [express] GET /api/dashboard/stats 304 in 1ms :: {"totalAccounts":46957,"totalContacts":6…
+2025-11-04 22:01:50.61
+f42300fd
+User
+5:01:50 PM [express] GET /api/filters/fields/entity/contact 304 in 35ms :: {"fields":[],"grouped":{}…
+2025-11-04 22:01:50.68
+f42300fd
+User
+5:01:50 PM [express] GET /api/leads 200 in 69ms :: [{"id":"8a3634d6-5931-4594-9995-7825b6b9f4da","co…
+2025-11-04 22:01:55.52
+f42300fd
+User
+5:01:55 PM [express] GET /api/leads/8a3634d6-5931-4594-9995-7825b6b9f4da 200

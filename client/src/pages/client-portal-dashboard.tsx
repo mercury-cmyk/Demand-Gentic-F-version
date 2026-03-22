@@ -892,7 +892,7 @@ export default function ClientPortalDashboard() {
     }
   }, [featuresData]);
 
-  // Agent capabilities (loaded only when AgentX tab is active)
+  // Agent capabilities (loaded only when AgentC tab is active)
   const {
     data: agenticCapabilitiesData,
     isLoading: agenticCapabilitiesLoading,
@@ -1787,7 +1787,7 @@ export default function ClientPortalDashboard() {
   return (
     <ClientPortalLayout>
       <div className="space-y-6">
-          {/* Sub-Navigation for Target Markets */}
+          {/* Sub-Navigation for Data Management */}
           {activeTab === 'target-markets' && (
             <div className="space-y-6">
                <div className="mb-6">
@@ -2245,7 +2245,7 @@ export default function ClientPortalDashboard() {
                   onClick={() => setActiveTab('agent-x')}
                 >
                   <Brain className="h-4 w-4 mr-2" />
-                  Open AgentX
+                  Open AgentC
                 </Button>
                 <Button
                   variant="outline"
@@ -2600,7 +2600,7 @@ export default function ClientPortalDashboard() {
             <div className="flex flex-col gap-2">
               <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
                 <Sparkles className="h-8 w-8 text-violet-600" />
-                AgentX
+                AgentC
               </h1>
               <p className="text-lg text-muted-foreground font-light">
                 Autonomous Agents & Workflow Automation
@@ -2620,7 +2620,7 @@ export default function ClientPortalDashboard() {
                   <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-3" />
                   <h3 className="text-base font-semibold">Unable to load capabilities</h3>
                   <p className="text-sm text-muted-foreground mt-1 mb-4">
-                    We could not fetch AgentX capabilities from the client portal API.
+                    We could not fetch AgentC capabilities from the client portal API.
                   </p>
                   <Button variant="outline" onClick={() => refetchAgenticCapabilities()}>
                     <RefreshCw className="h-4 w-4 mr-2" />
@@ -5700,7 +5700,7 @@ export default function ClientPortalDashboard() {
         onOpenChange={setShowEmailGenerator}
       />
 
-      {/* AgentX is now universal - provided by AgentSidePanel in ClientPortalLayout */}
+      {/* AgentC is now universal - provided by AgentSidePanel in ClientPortalLayout */}
 
       {/* ==================== VOICE SELECTION DIALOG ==================== */}
       <Dialog open={showClientVoiceSelect} onOpenChange={setShowClientVoiceSelect}>

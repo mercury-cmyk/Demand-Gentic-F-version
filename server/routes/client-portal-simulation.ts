@@ -516,7 +516,7 @@ async function generateGeminiResponse(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
 ): Promise<string> {
   const model = gemini.getGenerativeModel({ 
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
   });
 
@@ -875,7 +875,7 @@ async function generateEmailTemplate(
   plainTextContent: string;
   variables: string[];
 }> {
-  const model = gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const model = gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   const prompt = buildEmailGenerationPrompt(campaign, options);
 
