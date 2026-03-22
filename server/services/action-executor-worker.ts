@@ -20,10 +20,13 @@ import {
   contacts,
   campaigns,
   campaignQueue,
+  emailSequences,
+  accounts,
 } from '@shared/schema';
-import { eq, and, lte, sql, inArray } from 'drizzle-orm';
+import { eq, and, lte, sql, inArray, desc } from 'drizzle-orm';
 import { mercuryEmailService } from './mercury/email-service';
 import { completeTrigger, failTrigger } from './engagement-trigger-service';
+import { enrollInSequence } from './email-sequence-engine';
 import { v4 as uuidv4 } from 'uuid';
 
 const LOG_PREFIX = '[ActionExecutor]';
@@ -80,28 +83,21 @@ async function processEngagementTriggers(): Promise<number> {
 
 /**
  * Execute an email follow-up trigger.
- * Queues the email via Mercury outbox for async delivery.
+ *
+ * Strategy:
+ * 1. If campaign has an email sequence, enroll the contact for multi-step follow-up
+ * 2. Otherwise, send a single email via Mercury outbox
+ *
+ * Client campaigns: skip Mercury (client uses their own connected email)
  */
 async function executeEmailTrigger(trigger: typeof accountEngagementTriggers.$inferSelect): Promise<void> {
-  // Guard: Only send Mercury emails for campaigns without a clientAccountId (Pivotal B2B internal).
-  // Client campaigns must use their own connected email — skip and log.
-  if (trigger.campaignId) {
-    const [campaign] = await db
-      .select({ clientAccountId: campaigns.clientAccountId })
-      .from(campaigns)
-      .where(eq(campaigns.id, trigger.campaignId))
-      .limit(1);
-
-    if (campaign?.clientAccountId) {
-      console.log(`${LOG_PREFIX} ⏭️  Skipping email trigger ${trigger.id} — campaign ${trigger.campaignId} belongs to client account ${campaign.clientAccountId}. Client must connect their own email.`);
-      await completeTrigger(trigger.id, 'skipped', 'Skipped: client campaign — Mercury emails not authorized for non-Pivotal campaigns');
-      return;
-    }
-  }
-
-  // Look up contact email and account
+  // Look up contact
   const [contact] = await db
-    .select({ email: contacts.email, name: contacts.firstName, accountId: contacts.accountId })
+    .select({
+      email: contacts.email,
+      name: contacts.firstName,
+      accountId: contacts.accountId,
+    })
     .from(contacts)
     .where(eq(contacts.id, trigger.contactId))
     .limit(1);
@@ -111,9 +107,78 @@ async function executeEmailTrigger(trigger: typeof accountEngagementTriggers.$in
     return;
   }
 
+  // Resolve campaign context for client guard + sequence lookup
+  let isClientCampaign = false;
+  let campaignName = '';
+  if (trigger.campaignId) {
+    const [campaign] = await db
+      .select({
+        clientAccountId: campaigns.clientAccountId,
+        name: campaigns.name,
+      })
+      .from(campaigns)
+      .where(eq(campaigns.id, trigger.campaignId))
+      .limit(1);
+
+    isClientCampaign = !!campaign?.clientAccountId;
+    campaignName = campaign?.name || '';
+  }
+
+  // ── Strategy 1: Try email sequence enrollment ──
+  // Look for an active sequence linked to this campaign
+  if (trigger.campaignId) {
+    const [sequence] = await db
+      .select({ id: emailSequences.id, name: emailSequences.name })
+      .from(emailSequences)
+      .where(
+        and(
+          eq(emailSequences.campaignId, trigger.campaignId),
+          eq(emailSequences.status, 'active'),
+        )
+      )
+      .limit(1);
+
+    if (sequence) {
+      try {
+        await enrollInSequence(sequence.id, trigger.contactId);
+        await completeTrigger(
+          trigger.id,
+          sequence.id,
+          `Enrolled in sequence "${sequence.name}" (${contact.email})`
+        );
+        console.log(`${LOG_PREFIX} ✅ Email trigger ${trigger.id} → enrolled in sequence ${sequence.id} (${sequence.name})`);
+        return;
+      } catch (seqErr: any) {
+        // Sequence enrollment failed (e.g. already enrolled) — fall through to single email
+        console.warn(`${LOG_PREFIX} Sequence enrollment failed for trigger ${trigger.id}:`, seqErr.message);
+      }
+    }
+  }
+
+  // ── Strategy 2: Single email via Mercury ──
+  // Guard: client campaigns must use their own connected email
+  if (isClientCampaign) {
+    console.log(`${LOG_PREFIX} ⏭️ Skipping email trigger ${trigger.id} — client campaign. Client must connect their own email provider.`);
+    await completeTrigger(trigger.id, 'skipped', 'Skipped: client campaign — Mercury emails not authorized');
+    return;
+  }
+
+  // Build email content — use payload if provided, otherwise contextual default
   const payload = trigger.triggerPayload as Record<string, any> | null;
-  const subject = payload?.emailSubject || 'Following up on our conversation';
-  const body = payload?.emailBody || buildDefaultEmailBody(contact.name || 'there');
+  const accountName = contact.accountId
+    ? (await db.select({ name: accounts.name }).from(accounts).where(eq(accounts.id, contact.accountId)).limit(1))?.[0]?.name
+    : null;
+
+  const subject = payload?.emailSubject
+    || (trigger.sourceChannel === 'call'
+      ? `Following up on our conversation${accountName ? ` — ${accountName}` : ''}`
+      : 'Quick follow-up');
+  const body = payload?.emailBody || buildContextualEmailBody(
+    contact.name || 'there',
+    trigger.sourceChannel,
+    campaignName,
+    payload?.callObjective
+  );
 
   const idempotencyKey = `engagement-trigger-${trigger.id}`;
   const { outboxId, skipped } = await mercuryEmailService.queueEmail({
@@ -141,7 +206,11 @@ async function executeEmailTrigger(trigger: typeof accountEngagementTriggers.$in
 
 /**
  * Execute a call follow-up trigger.
- * Re-queues the contact into the campaign dialer queue.
+ * Re-queues the contact into the campaign dialer queue with engagement context.
+ *
+ * The trigger payload carries callObjective and callScript from the source
+ * engagement, which the dialer can use to provide the AI agent with context
+ * about why this follow-up call is being made.
  */
 async function executeCallTrigger(trigger: typeof accountEngagementTriggers.$inferSelect): Promise<void> {
   if (!trigger.campaignId) {
@@ -151,7 +220,11 @@ async function executeCallTrigger(trigger: typeof accountEngagementTriggers.$inf
 
   // Look up the contact's phone number and account
   const [contact] = await db
-    .select({ phone: contacts.dialingPhoneE164, firstName: contacts.firstName, accountId: contacts.accountId })
+    .select({
+      phone: contacts.dialingPhoneE164,
+      firstName: contacts.firstName,
+      accountId: contacts.accountId,
+    })
     .from(contacts)
     .where(eq(contacts.id, trigger.contactId))
     .limit(1);
@@ -166,6 +239,19 @@ async function executeCallTrigger(trigger: typeof accountEngagementTriggers.$inf
     return;
   }
 
+  const payload = trigger.triggerPayload as Record<string, any> | null;
+  const priority = payload?.priority === 'high' ? 10 : 5;
+
+  // Build AI context for the call from the trigger payload
+  const aiContext: Record<string, any> = {
+    triggerSource: 'engagement_trigger',
+    triggerId: trigger.id,
+    sourceChannel: trigger.sourceChannel,
+    sourceEngagedAt: trigger.sourceEngagedAt?.toISOString(),
+  };
+  if (payload?.callObjective) aiContext.callObjective = payload.callObjective;
+  if (payload?.callScript) aiContext.callScript = payload.callScript;
+
   // Insert into campaign queue for the dialer to pick up
   const queueId = uuidv4();
   await db.insert(campaignQueue).values({
@@ -175,13 +261,18 @@ async function executeCallTrigger(trigger: typeof accountEngagementTriggers.$inf
     accountId: contact.accountId,
     dialedNumber: contact.phone,
     status: 'queued',
-    priority: trigger.triggerPayload && (trigger.triggerPayload as Record<string, any>).priority === 'high' ? 10 : 5,
+    priority,
     enqueuedBy: 'system',
     enqueuedReason: 'engagement_trigger',
+    aiScoreBreakdown: aiContext,
   }).onConflictDoNothing();
 
-  await completeTrigger(trigger.id, queueId, `Call re-queued: ${contact.phone}`);
-  console.log(`${LOG_PREFIX} ✅ Call trigger ${trigger.id} → queued campaign ${trigger.campaignId}`);
+  const contextNote = payload?.callObjective
+    ? `Call re-queued with context: "${payload.callObjective}" (${contact.phone})`
+    : `Call re-queued: ${contact.phone}`;
+
+  await completeTrigger(trigger.id, queueId, contextNote);
+  console.log(`${LOG_PREFIX} ✅ Call trigger ${trigger.id} → queued campaign ${trigger.campaignId} (priority=${priority})`);
 }
 
 // ==================== UNIFIED PIPELINE ACTION EXECUTOR ====================
@@ -403,6 +494,35 @@ function buildDefaultEmailBody(name: string): string {
   return `<p>Hi ${name},</p>
 <p>Thank you for taking the time to speak with us. I wanted to follow up on our conversation and see if you have any additional questions.</p>
 <p>We'd love to continue the discussion whenever it's convenient for you.</p>
+<p>Best regards,<br/>The Team</p>`;
+}
+
+/**
+ * Build contextual email body based on the source engagement channel.
+ * Provides more relevant copy depending on whether this follows a call or email interaction.
+ */
+function buildContextualEmailBody(
+  name: string,
+  sourceChannel: string,
+  campaignName?: string,
+  callObjective?: string
+): string {
+  if (sourceChannel === 'call') {
+    // Follow-up after a call
+    const contextLine = callObjective
+      ? `<p>As we discussed, ${callObjective.toLowerCase()}</p>`
+      : `<p>I wanted to follow up on our recent conversation and see if you have any additional questions or if there's anything else we can help with.</p>`;
+    return `<p>Hi ${name},</p>
+${contextLine}
+<p>Please don't hesitate to reach out if you'd like to continue the discussion — we're here to help.</p>
+<p>Best regards,<br/>The Team</p>`;
+  }
+
+  // Follow-up after email engagement (click/reply)
+  const campaignRef = campaignName ? ` regarding ${campaignName}` : '';
+  return `<p>Hi ${name},</p>
+<p>I noticed you've been looking at some of our materials${campaignRef} and wanted to reach out personally.</p>
+<p>Would you be open to a brief conversation to explore how we might be able to help? I'd be happy to schedule a time that works for you.</p>
 <p>Best regards,<br/>The Team</p>`;
 }
 

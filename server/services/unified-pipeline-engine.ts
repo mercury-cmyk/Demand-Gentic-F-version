@@ -16,6 +16,8 @@ import {
   contacts,
   campaigns,
   users,
+  clientAccounts,
+  campaignOrganizations,
 } from "@shared/schema";
 import {
   and,
@@ -98,8 +100,28 @@ export async function listUnifiedPipelines(filters: {
   }
 
   const rows = await db
-    .select()
+    .select({
+      id: unifiedPipelines.id,
+      organizationId: unifiedPipelines.organizationId,
+      clientAccountId: unifiedPipelines.clientAccountId,
+      name: unifiedPipelines.name,
+      description: unifiedPipelines.description,
+      status: unifiedPipelines.status,
+      objective: unifiedPipelines.objective,
+      totalAccounts: unifiedPipelines.totalAccounts,
+      totalCampaigns: unifiedPipelines.totalCampaigns,
+      appointmentsSet: unifiedPipelines.appointmentsSet,
+      createdAt: unifiedPipelines.createdAt,
+      updatedAt: unifiedPipelines.updatedAt,
+      // Joined client + org details
+      clientName: clientAccounts.name,
+      clientCompanyName: clientAccounts.companyName,
+      organizationName: campaignOrganizations.name,
+      organizationDomain: campaignOrganizations.domain,
+    })
     .from(unifiedPipelines)
+    .leftJoin(clientAccounts, eq(unifiedPipelines.clientAccountId, clientAccounts.id))
+    .leftJoin(campaignOrganizations, eq(unifiedPipelines.organizationId, campaignOrganizations.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(unifiedPipelines.createdAt))
     .limit(filters.limit || 50)

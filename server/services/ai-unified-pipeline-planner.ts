@@ -26,6 +26,7 @@ import type {
   PipelineStrategy,
   PipelineTargetCriteria,
 } from "@shared/unified-pipeline-types";
+import { UNIFIED_PIPELINE_FUNNEL_STAGES } from "@shared/unified-pipeline-types";
 import {
   createUnifiedPipeline,
   addCampaignToPipeline,
@@ -177,6 +178,11 @@ export async function generatePipelineStrategy(
     ? input.preferredChannels.join(', ')
     : 'All available (voice, email, content)';
 
+  const funnelStageGuide = UNIFIED_PIPELINE_FUNNEL_STAGES
+    .map((stage, index) => `${index + 1}. ${stage.id.toUpperCase()} — ${stage.description}`)
+    .join("\n");
+  const funnelStageSchemaIds = UNIFIED_PIPELINE_FUNNEL_STAGES.map((stage) => stage.id).join("|");
+
   const prompt = `## Organization Intelligence (Mandatory Context)
 All outputs must be aligned with this organizational context. Do not produce generic content.
 ${oiContext}
@@ -198,15 +204,8 @@ Additional Context: ${input.additionalContext || 'None'}
 ${learningSummary || 'No historical data — use industry benchmarks.'}
 
 === FUNNEL STAGES ===
-The pipeline uses these account-level funnel stages:
-1. TARGET — Identified accounts matching ICP, not yet contacted
-2. OUTREACH — Active multi-channel outreach in progress
-3. ENGAGED — Account has responded positively (call answered, email replied, content downloaded)
-4. QUALIFYING — In active qualification conversations (BANT assessment)
-5. QUALIFIED — Confirmed fit, ready for appointment setting
-6. APPOINTMENT_SET — Meeting/demo booked with decision-maker
-7. CLOSED_WON — Deal signed
-8. CLOSED_LOST — Disqualified or lost
+The unified pipeline uses these canonical account-level funnel stages:
+${funnelStageGuide}
 
 === INSTRUCTIONS ===
 1. Ground ALL strategy in the Organization Intelligence — use real products, personas, pain points.
@@ -229,7 +228,7 @@ Return ONLY valid JSON matching this schema:
   "funnelStrategy": {
     "stages": [
       {
-        "stageId": "target|outreach|engaged|qualifying|qualified|appointment_set|closed_won",
+        "stageId": "${funnelStageSchemaIds}",
         "advancementCriteria": "string — what signals advance an account to this stage",
         "expectedDuration": "string — e.g. '3-5 days'",
         "primaryChannel": "string — dominant channel for this stage"

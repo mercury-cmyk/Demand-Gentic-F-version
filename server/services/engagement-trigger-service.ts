@@ -22,6 +22,11 @@ import {
   type AccountEngagementTrigger,
   type InsertAccountEngagementTrigger,
 } from '@shared/schema';
+import type { UnifiedPipelineFunnelStage } from '@shared/unified-pipeline-types';
+import {
+  isEngagementTriggerEligibleStage,
+  normalizeUnifiedPipelineStage,
+} from '@shared/unified-pipeline-stage-governance';
 import { eq, and, desc, sql, or, inArray, isNotNull, count, gte } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -73,13 +78,11 @@ export interface PipelineLeadView {
 
 // ==================== STAGE-AWARE DELAY RULES ====================
 
-type FunnelStage = 'target' | 'outreach' | 'engaged' | 'qualifying' | 'qualified' | 'appointment_set';
-
 /**
  * Stage-aware delays (minutes) for cross-channel follow-ups.
  * Higher-intent stages get faster follow-up to capitalize on momentum.
  */
-const STAGE_DELAY_MATRIX: Record<FunnelStage, { emailDelayMin: number; callDelayMin: number }> = {
+const STAGE_DELAY_MATRIX: Partial<Record<UnifiedPipelineFunnelStage, { emailDelayMin: number; callDelayMin: number }>> = {
   target:          { emailDelayMin: 120,  callDelayMin: 240 },  // Cold — slow drip
   outreach:        { emailDelayMin: 30,   callDelayMin: 120 },  // Active outreach — standard pace
   engaged:         { emailDelayMin: 15,   callDelayMin: 60 },   // Responding — move faster
@@ -152,7 +155,7 @@ async function canTouchAccount(accountId: string): Promise<boolean> {
 /**
  * Look up the current funnel stage for an account.
  */
-async function getAccountFunnelStage(accountId: string): Promise<FunnelStage> {
+async function getAccountFunnelStage(accountId: string): Promise<UnifiedPipelineFunnelStage> {
   const [pipelineAccount] = await db
     .select({ funnelStage: unifiedPipelineAccounts.funnelStage })
     .from(unifiedPipelineAccounts)
@@ -160,7 +163,7 @@ async function getAccountFunnelStage(accountId: string): Promise<FunnelStage> {
     .orderBy(desc(unifiedPipelineAccounts.updatedAt))
     .limit(1);
 
-  return (pipelineAccount?.funnelStage as FunnelStage) ?? 'outreach';
+  return normalizeUnifiedPipelineStage(pipelineAccount?.funnelStage, 'outreach');
 }
 
 // ==================== CORE TRIGGER LOGIC ====================
@@ -188,6 +191,11 @@ export async function processEngagementEvent(event: EngagementEvent): Promise<Tr
 
   // Stage-aware delay lookup
   const stage = await getAccountFunnelStage(event.accountId);
+  if (!isEngagementTriggerEligibleStage(stage)) {
+    console.log(`${LOG_PREFIX} ⏭️ Skipped — stage ${stage} is not eligible for engagement triggers`);
+    return null;
+  }
+
   const stageDelays = STAGE_DELAY_MATRIX[stage] ?? DEFAULT_STAGE_DELAYS;
 
   // Build trigger payload based on target channel
@@ -232,31 +240,45 @@ export async function processEngagementEvent(event: EngagementEvent): Promise<Tr
 
 /**
  * Build contextual trigger payload based on the source engagement.
+ *
+ * Call → Email: includes disposition context for email personalization.
+ * Email → Call: includes click/open context as call objective so the
+ *   voice agent knows why this follow-up is being made.
  */
 function buildTriggerPayload(
   event: EngagementEvent,
   targetChannel: 'call' | 'email'
 ): NonNullable<InsertAccountEngagementTrigger['triggerPayload']> {
   if (targetChannel === 'email') {
-    // After a call → send follow-up email
+    // After a call → send follow-up email (or enroll in sequence)
+    const isHighPriority = event.metadata?.disposition === 'qualified_lead'
+      || event.metadata?.disposition === 'callback_requested';
     return {
-      priority: event.metadata?.disposition === 'qualified_lead' ? 'high' : 'normal',
-      delayMinutes: event.metadata?.disposition === 'callback_requested' ? 15 : 30,
-      callScript: undefined,
-      callObjective: undefined,
-      emailSubject: undefined, // Will be AI-generated at execution time
+      priority: isHighPriority ? 'high' : 'normal',
+      delayMinutes: event.metadata?.disposition === 'callback_requested' ? 15 : undefined,
+      // Email content left undefined — will be:
+      // 1. Filled by email sequence if campaign has one
+      // 2. Built contextually by action-executor-worker if no sequence
+      emailSubject: undefined,
       emailBody: undefined,
+      callScript: undefined,
+      callObjective: event.metadata?.disposition
+        ? `Source call disposition: ${event.metadata.disposition}`
+        : undefined,
     };
   }
 
-  // After email engagement → schedule call
+  // After email engagement → schedule call with engagement context
+  const isClick = !!event.metadata?.emailClicked;
   return {
-    priority: event.metadata?.emailClicked ? 'high' : 'normal',
-    delayMinutes: event.metadata?.emailClicked ? 60 : 120,
-    callObjective: event.metadata?.emailClicked
-      ? 'Follow up on clicked email content — high intent signal'
-      : 'Re-engage after email open — warm contact',
-    callScript: undefined,
+    priority: isClick ? 'high' : 'normal',
+    delayMinutes: isClick ? 60 : 120,
+    callObjective: isClick
+      ? 'Follow up on clicked email content — prospect showed high intent by clicking a link in our email'
+      : 'Re-engage after email open — prospect opened our email, indicating awareness and potential interest',
+    callScript: isClick
+      ? 'Reference the specific content they clicked on. Ask what caught their attention and how you can help further.'
+      : 'Mention the email they received. Ask if they had a chance to review it and if they have questions.',
     emailSubject: undefined,
     emailBody: undefined,
   };

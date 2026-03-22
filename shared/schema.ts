@@ -9809,6 +9809,9 @@ export const emailSequences = pgTable("email_sequences", {
   description: text("description"),
   status: emailSequenceStatusEnum("status").default('active').notNull(),
 
+  // Campaign link (for engagement trigger sequence enrollment)
+  campaignId: varchar("campaign_id", { length: 36 }).references(() => campaigns.id, { onDelete: 'set null' }),
+
   // Mailbox for sending
   mailboxAccountId: varchar("mailbox_account_id", { length: 36 }).notNull().references(() => mailboxAccounts.id, { onDelete: 'restrict' }),
 
@@ -9827,6 +9830,7 @@ export const emailSequences = pgTable("email_sequences", {
   mailboxIdx: index("email_sequences_mailbox_idx").on(table.mailboxAccountId),
   createdByIdx: index("email_sequences_created_by_idx").on(table.createdBy),
   statusIdx: index("email_sequences_status_idx").on(table.status),
+  campaignIdx: index("email_sequences_campaign_idx").on(table.campaignId),
 }));
 
 export const insertEmailSequenceSchema = createInsertSchema(emailSequences).omit({ 
@@ -13791,6 +13795,72 @@ export const insertClientMailboxAccountSchema = createInsertSchema(clientMailbox
 
 export type ClientMailboxAccount = typeof clientMailboxAccounts.$inferSelect;
 export type InsertClientMailboxAccount = z.infer<typeof insertClientMailboxAccountSchema>;
+
+/**
+ * Client Inbox Messages - Synced email messages for client portal inbox
+ * Mirrors dealMessages but scoped to client accounts
+ */
+export const clientInboxMessages = pgTable("client_inbox_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  mailboxAccountId: varchar("mailbox_account_id").notNull().references(() => clientMailboxAccounts.id, { onDelete: 'cascade' }),
+  conversationId: varchar("conversation_id", { length: 128 }),
+  externalMessageId: varchar("external_message_id", { length: 512 }),
+  subject: text("subject"),
+  bodyPreview: text("body_preview"),
+  bodyHtml: text("body_html"),
+  fromEmail: varchar("from_email", { length: 320 }),
+  fromName: varchar("from_name", { length: 255 }),
+  toEmails: text("to_emails").array(),
+  ccEmails: text("cc_emails").array(),
+  direction: varchar("direction", { length: 16 }).default('inbound').notNull(), // 'inbound' | 'outbound'
+  hasAttachments: boolean("has_attachments").default(false),
+  importance: varchar("importance", { length: 32 }).default('normal'),
+  isRead: boolean("is_read").default(false),
+  isStarred: boolean("is_starred").default(false),
+  isArchived: boolean("is_archived").default(false),
+  isTrashed: boolean("is_trashed").default(false),
+  category: varchar("category", { length: 32 }).default('primary'), // 'primary' | 'other'
+  receivedAt: timestamp("received_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  clientAccountIdx: index("client_inbox_msgs_client_account_idx").on(table.clientAccountId),
+  mailboxIdx: index("client_inbox_msgs_mailbox_idx").on(table.mailboxAccountId),
+  receivedAtIdx: index("client_inbox_msgs_received_at_idx").on(table.receivedAt.desc()),
+  externalMsgIdx: uniqueIndex("client_inbox_msgs_external_msg_idx").on(table.externalMessageId),
+  categoryIdx: index("client_inbox_msgs_category_idx").on(table.clientAccountId, table.category),
+}));
+
+export const insertClientInboxMessageSchema = createInsertSchema(clientInboxMessages).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type ClientInboxMessage = typeof clientInboxMessages.$inferSelect;
+export type InsertClientInboxMessage = z.infer<typeof insertClientInboxMessageSchema>;
+
+/**
+ * Client Inbox Settings - Per-client inbox preferences
+ */
+export const clientInboxSettings = pgTable("client_inbox_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  clientAccountId: varchar("client_account_id").notNull().references(() => clientAccounts.id, { onDelete: 'cascade' }),
+  displayDensity: varchar("display_density", { length: 32 }).default('comfortable'),
+  autoReplyEnabled: boolean("auto_reply_enabled").default(false),
+  autoReplySubject: varchar("auto_reply_subject", { length: 512 }),
+  autoReplyBody: text("auto_reply_body"),
+  notifyNewEmail: boolean("notify_new_email").default(true),
+  notifyDesktop: boolean("notify_desktop").default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  clientAccountIdx: uniqueIndex("client_inbox_settings_account_idx").on(table.clientAccountId),
+}));
+
+export type ClientInboxSettings = typeof clientInboxSettings.$inferSelect;
 
 /**
  * Client Accounts (CRM) - Client's own account records

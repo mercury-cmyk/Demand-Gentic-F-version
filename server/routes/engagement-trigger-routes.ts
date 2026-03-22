@@ -16,8 +16,17 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../auth';
 import { db } from '../db';
-import { clientCampaignAccess } from '@shared/schema';
-import { eq, isNotNull } from 'drizzle-orm';
+import {
+  clientCampaignAccess,
+  dialerCallAttempts,
+  emailEvents,
+  emailSends,
+  contacts,
+  accounts,
+  campaigns,
+  accountEngagementTriggers,
+} from '@shared/schema';
+import { eq, and, or, desc, isNotNull, inArray } from 'drizzle-orm';
 import {
   processEngagementEvent,
   listEngagementTriggers,
@@ -255,6 +264,347 @@ router.patch('/:id/complete', requireAuth, async (req: Request, res: Response) =
   } catch (error: any) {
     console.error('[EngagementTriggerRoutes] Complete failed:', error);
     res.status(500).json({ error: error.message || 'Failed to complete trigger' });
+  }
+});
+
+/**
+ * GET /api/engagement-triggers/:id/timeline
+ * Get the full engagement timeline for a trigger — the source engagement details,
+ * trigger creation, execution, and post-execution outcome.
+ */
+router.get('/:id/timeline', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const triggerId = req.params.id;
+
+    // 1. Get the trigger itself
+    const [trigger] = await db
+      .select()
+      .from(accountEngagementTriggers)
+      .where(eq(accountEngagementTriggers.id, triggerId))
+      .limit(1);
+
+    if (!trigger) {
+      return res.status(404).json({ error: 'Trigger not found' });
+    }
+
+    // 2. Get the contact and account info
+    const [contact] = await db
+      .select({
+        firstName: contacts.firstName,
+        lastName: contacts.lastName,
+        email: contacts.email,
+        phone: contacts.dialingPhoneE164,
+        jobTitle: contacts.jobTitle,
+      })
+      .from(contacts)
+      .where(eq(contacts.id, trigger.contactId))
+      .limit(1);
+
+    const [account] = await db
+      .select({ name: accounts.name, website: accounts.website })
+      .from(accounts)
+      .where(eq(accounts.id, trigger.accountId))
+      .limit(1);
+
+    // 3. Get the source engagement details
+    let sourceDetails: Record<string, any> = {};
+
+    if (trigger.sourceChannel === 'call' && trigger.sourceEntityId) {
+      // Get the call attempt that triggered this
+      const [callAttempt] = await db
+        .select({
+          disposition: dialerCallAttempts.disposition,
+          callDurationSeconds: dialerCallAttempts.callDurationSeconds,
+          connected: dialerCallAttempts.connected,
+          voicemailDetected: dialerCallAttempts.voicemailDetected,
+          notes: dialerCallAttempts.notes,
+          fullTranscript: dialerCallAttempts.fullTranscript,
+          callStartedAt: dialerCallAttempts.callStartedAt,
+          callEndedAt: dialerCallAttempts.callEndedAt,
+          campaignName: campaigns.name,
+        })
+        .from(dialerCallAttempts)
+        .leftJoin(campaigns, eq(dialerCallAttempts.campaignId, campaigns.id))
+        .where(eq(dialerCallAttempts.id, trigger.sourceEntityId))
+        .limit(1);
+
+      if (callAttempt) {
+        sourceDetails = {
+          type: 'call',
+          disposition: callAttempt.disposition,
+          durationSeconds: callAttempt.callDurationSeconds,
+          connected: callAttempt.connected,
+          voicemailDetected: callAttempt.voicemailDetected,
+          notes: callAttempt.notes,
+          // Truncate transcript for timeline (first 500 chars)
+          transcriptPreview: callAttempt.fullTranscript
+            ? callAttempt.fullTranscript.substring(0, 500) + (callAttempt.fullTranscript.length > 500 ? '...' : '')
+            : null,
+          startedAt: callAttempt.callStartedAt,
+          endedAt: callAttempt.callEndedAt,
+          campaignName: callAttempt.campaignName,
+        };
+      }
+    } else if (trigger.sourceChannel === 'email' && trigger.sourceEntityId) {
+      // Get the email events (opens, clicks) that triggered this
+      const events = await db
+        .select({
+          type: emailEvents.type,
+          recipient: emailEvents.recipient,
+          metadata: emailEvents.metadata,
+          createdAt: emailEvents.createdAt,
+        })
+        .from(emailEvents)
+        .where(eq(emailEvents.messageId, trigger.sourceEntityId))
+        .orderBy(desc(emailEvents.createdAt))
+        .limit(5);
+
+      // Get the email send details
+      const [emailSend] = await db
+        .select({
+          status: emailSends.status,
+          sentAt: emailSends.sentAt,
+          campaignName: campaigns.name,
+        })
+        .from(emailSends)
+        .leftJoin(campaigns, eq(emailSends.campaignId, campaigns.id))
+        .where(eq(emailSends.contactId, trigger.contactId))
+        .orderBy(desc(emailSends.sentAt))
+        .limit(1);
+
+      sourceDetails = {
+        type: 'email',
+        events: events.map(e => ({
+          type: e.type,
+          at: e.createdAt,
+          metadata: e.metadata,
+        })),
+        sentAt: emailSend?.sentAt,
+        campaignName: emailSend?.campaignName,
+      };
+    }
+
+    // 4. Get execution result details
+    let executionDetails: Record<string, any> = {};
+    if (trigger.resultEntityId) {
+      if (trigger.targetChannel === 'email') {
+        executionDetails = {
+          type: 'email_queued',
+          outboxId: trigger.resultEntityId,
+          notes: trigger.resultNotes,
+        };
+      } else {
+        executionDetails = {
+          type: 'call_queued',
+          queueId: trigger.resultEntityId,
+          notes: trigger.resultNotes,
+        };
+      }
+    }
+
+    // 5. Build the timeline events
+    const timeline = [];
+
+    // Source engagement
+    timeline.push({
+      id: 'source',
+      type: 'source_engagement',
+      channel: trigger.sourceChannel,
+      timestamp: trigger.sourceEngagedAt,
+      details: sourceDetails,
+    });
+
+    // Trigger creation
+    timeline.push({
+      id: 'created',
+      type: 'trigger_created',
+      timestamp: trigger.createdAt,
+      details: {
+        targetChannel: trigger.targetChannel,
+        payload: trigger.triggerPayload,
+        createdBy: trigger.createdBy,
+      },
+    });
+
+    // Scheduled
+    if (trigger.scheduledAt) {
+      timeline.push({
+        id: 'scheduled',
+        type: 'scheduled',
+        timestamp: trigger.scheduledAt,
+        details: {
+          scheduledAt: trigger.scheduledAt,
+        },
+      });
+    }
+
+    // Execution
+    if (trigger.executedAt) {
+      timeline.push({
+        id: 'executed',
+        type: 'executed',
+        channel: trigger.targetChannel,
+        timestamp: trigger.executedAt,
+        details: executionDetails,
+      });
+    }
+
+    // Failed
+    if (trigger.status === 'failed' && trigger.errorMessage) {
+      timeline.push({
+        id: 'failed',
+        type: 'failed',
+        timestamp: trigger.updatedAt,
+        details: { error: trigger.errorMessage },
+      });
+    }
+
+    res.json({
+      trigger: {
+        id: trigger.id,
+        sourceChannel: trigger.sourceChannel,
+        targetChannel: trigger.targetChannel,
+        status: trigger.status,
+        createdAt: trigger.createdAt,
+        scheduledAt: trigger.scheduledAt,
+        executedAt: trigger.executedAt,
+        triggerPayload: trigger.triggerPayload,
+        resultNotes: trigger.resultNotes,
+        errorMessage: trigger.errorMessage,
+      },
+      contact: contact || null,
+      account: account || null,
+      timeline,
+    });
+  } catch (error: any) {
+    console.error('[EngagementTriggerRoutes] Timeline failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to get timeline' });
+  }
+});
+
+/**
+ * GET /api/engagement-triggers/contact/:contactId/history
+ * Get full engagement history for a contact across all channels.
+ * Used to build context for AI-generated follow-up content.
+ */
+router.get('/contact/:contactId/history', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { contactId } = req.params;
+    const limit = Math.min(Number(req.query.limit) || 20, 50);
+
+    // Get recent calls
+    const recentCalls = await db
+      .select({
+        id: dialerCallAttempts.id,
+        disposition: dialerCallAttempts.disposition,
+        durationSeconds: dialerCallAttempts.callDurationSeconds,
+        connected: dialerCallAttempts.connected,
+        voicemailDetected: dialerCallAttempts.voicemailDetected,
+        notes: dialerCallAttempts.notes,
+        calledAt: dialerCallAttempts.callStartedAt,
+        campaignName: campaigns.name,
+      })
+      .from(dialerCallAttempts)
+      .leftJoin(campaigns, eq(dialerCallAttempts.campaignId, campaigns.id))
+      .where(eq(dialerCallAttempts.contactId, contactId))
+      .orderBy(desc(dialerCallAttempts.callStartedAt))
+      .limit(limit);
+
+    // Get recent email events
+    const recentEmails = await db
+      .select({
+        id: emailEvents.id,
+        type: emailEvents.type,
+        recipient: emailEvents.recipient,
+        createdAt: emailEvents.createdAt,
+        campaignName: campaigns.name,
+      })
+      .from(emailEvents)
+      .leftJoin(campaigns, eq(emailEvents.campaignId, campaigns.id))
+      .where(eq(emailEvents.contactId, contactId))
+      .orderBy(desc(emailEvents.createdAt))
+      .limit(limit);
+
+    // Get engagement triggers for this contact
+    const triggers = await db
+      .select()
+      .from(accountEngagementTriggers)
+      .where(eq(accountEngagementTriggers.contactId, contactId))
+      .orderBy(desc(accountEngagementTriggers.createdAt))
+      .limit(limit);
+
+    // Merge into a unified timeline sorted by date
+    const events: Array<{
+      id: string;
+      channel: 'call' | 'email' | 'trigger';
+      type: string;
+      timestamp: Date | null;
+      details: Record<string, any>;
+    }> = [];
+
+    for (const call of recentCalls) {
+      events.push({
+        id: call.id,
+        channel: 'call',
+        type: call.disposition || 'call_attempt',
+        timestamp: call.calledAt,
+        details: {
+          disposition: call.disposition,
+          durationSeconds: call.durationSeconds,
+          connected: call.connected,
+          voicemailDetected: call.voicemailDetected,
+          notes: call.notes,
+          campaignName: call.campaignName,
+        },
+      });
+    }
+
+    for (const email of recentEmails) {
+      events.push({
+        id: email.id,
+        channel: 'email',
+        type: email.type,
+        timestamp: email.createdAt,
+        details: {
+          recipient: email.recipient,
+          campaignName: email.campaignName,
+        },
+      });
+    }
+
+    for (const trigger of triggers) {
+      events.push({
+        id: trigger.id,
+        channel: 'trigger',
+        type: `${trigger.sourceChannel}_to_${trigger.targetChannel}`,
+        timestamp: trigger.createdAt,
+        details: {
+          status: trigger.status,
+          sourceChannel: trigger.sourceChannel,
+          targetChannel: trigger.targetChannel,
+          scheduledAt: trigger.scheduledAt,
+          executedAt: trigger.executedAt,
+          payload: trigger.triggerPayload,
+          resultNotes: trigger.resultNotes,
+        },
+      });
+    }
+
+    // Sort by timestamp descending
+    events.sort((a, b) => {
+      const ta = a.timestamp?.getTime() ?? 0;
+      const tb = b.timestamp?.getTime() ?? 0;
+      return tb - ta;
+    });
+
+    res.json({
+      contactId,
+      totalEvents: events.length,
+      events: events.slice(0, limit),
+    });
+  } catch (error: any) {
+    console.error('[EngagementTriggerRoutes] Contact history failed:', error);
+    res.status(500).json({ error: error.message || 'Failed to get contact history' });
   }
 });
 

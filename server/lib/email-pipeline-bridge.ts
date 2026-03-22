@@ -10,12 +10,13 @@
  */
 
 import { db } from "../db";
-import { emailSends, contacts, campaigns } from "@shared/schema";
+import { emailSends, contacts, campaigns, accounts } from "@shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import {
   processEmailEngagement,
   type EngagementSignal,
 } from "../services/campaign-pipeline-orchestrator";
+import { processEngagementEvent } from "../services/engagement-trigger-service";
 
 /**
  * Emit an engagement signal from an email tracking event.
@@ -94,6 +95,47 @@ export async function emitEmailEngagementSignal(
           source: "email_tracking_fallback",
         },
       });
+    }
+    // ── Cross-channel engagement trigger: email engagement → schedule call follow-up ──
+    // Only fire on click (high-intent signal) or reply — opens alone are too noisy
+    if (signal === 'email_clicked' || signal === 'email_replied') {
+      try {
+        // Find the contact and their account for the trigger
+        const [contactRecord] = await db
+          .select({
+            id: contacts.id,
+            accountId: contacts.accountId,
+          })
+          .from(contacts)
+          .where(eq(contacts.email, recipientEmail))
+          .limit(1);
+
+        if (contactRecord?.accountId) {
+          // Find most recent campaign for this contact
+          const [recentSend] = await db
+            .select({ campaignId: emailSends.campaignId })
+            .from(emailSends)
+            .where(eq(emailSends.contactId, contactRecord.id))
+            .orderBy(sql`${emailSends.createdAt} DESC`)
+            .limit(1);
+
+          await processEngagementEvent({
+            accountId: contactRecord.accountId,
+            contactId: contactRecord.id,
+            campaignId: recentSend?.campaignId || undefined,
+            channel: 'email',
+            entityId: messageId,
+            engagedAt: new Date(),
+            metadata: {
+              emailOpened: signal === 'email_clicked',
+              emailClicked: signal === 'email_clicked',
+            },
+          });
+          console.log(`[EmailPipelineBridge] Engagement trigger created: ${signal} → call follow-up for ${recipientEmail}`);
+        }
+      } catch (triggerErr: any) {
+        console.warn(`[EmailPipelineBridge] Engagement trigger failed for ${recipientEmail}:`, triggerErr.message);
+      }
     }
   } catch (error: any) {
     // Non-critical — don't fail email tracking if pipeline signal fails

@@ -34,6 +34,7 @@ import {
   Target, Send, PhoneCall, MailOpen, Timer, Shield, Eye,
   MousePointerClick, CircleDot, Workflow, GitBranch
 } from 'lucide-react';
+import { EngagementTimelineSheet } from './engagement-timeline';
 
 // ==================== TYPES ====================
 
@@ -322,17 +323,22 @@ function TriggerFlowCard({
   trigger,
   onCancel,
   isCancelling,
+  onViewTimeline,
 }: {
   trigger: EngagementTrigger;
   onCancel: (id: string) => void;
   isCancelling: boolean;
+  onViewTimeline?: (triggerId: string) => void;
 }) {
   const style = STATUS_STYLES[trigger.status] ?? STATUS_STYLES.pending;
   const priority = (trigger.triggerPayload as any)?.priority ?? 'normal';
   const isActive = trigger.status === 'pending' || trigger.status === 'scheduled';
 
   return (
-    <div className={`group relative rounded-xl border ${style.border} ${style.bg} p-4 transition-all duration-200 hover:shadow-md`}>
+    <div
+      className={`group relative rounded-xl border ${style.border} ${style.bg} p-4 transition-all duration-200 hover:shadow-md cursor-pointer`}
+      onClick={() => onViewTimeline?.(trigger.id)}
+    >
       {/* Flow visualization */}
       <div className="flex items-center gap-3 mb-3">
         {/* Source channel node */}
@@ -384,6 +390,18 @@ function TriggerFlowCard({
         </div>
       </div>
 
+      {/* Context from payload */}
+      {payload?.callObjective && (
+        <p className="text-[11px] text-muted-foreground italic mb-2 line-clamp-2 leading-relaxed">
+          "{payload.callObjective}"
+        </p>
+      )}
+      {payload?.callScript && !payload?.callObjective && (
+        <p className="text-[11px] text-muted-foreground italic mb-2 line-clamp-2 leading-relaxed">
+          "{payload.callScript}"
+        </p>
+      )}
+
       {/* Info row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -415,7 +433,7 @@ function TriggerFlowCard({
               size="sm"
               className="h-6 text-[11px] text-muted-foreground hover:text-destructive px-2"
               disabled={isCancelling}
-              onClick={() => onCancel(trigger.id)}
+              onClick={(e) => { e.stopPropagation(); onCancel(trigger.id); }}
             >
               <XCircle className="h-3 w-3 mr-1" />
               Cancel
@@ -739,6 +757,8 @@ export function EngagementTriggersTab({ authHeaders, clientAccountId }: Engageme
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedLead, setSelectedLead] = useState<PipelineLeadView | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [timelineTriggerId, setTimelineTriggerId] = useState<string | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const pageSize = 24;
 
   // ==================== QUERIES ====================
@@ -994,8 +1014,9 @@ export function EngagementTriggersTab({ authHeaders, clientAccountId }: Engageme
                   <TriggerFlowCard
                     key={trigger.id}
                     trigger={trigger}
-                    onCancel={(id) => cancelMutation.mutate(id)}
+                    onCancel={(id) => { cancelMutation.mutate(id); }}
                     isCancelling={cancelMutation.isPending}
+                    onViewTimeline={(id) => { setTimelineTriggerId(id); setTimelineOpen(true); }}
                   />
                 ))}
               </div>
@@ -1048,6 +1069,14 @@ export function EngagementTriggersTab({ authHeaders, clientAccountId }: Engageme
           });
         }}
         onClose={() => { setCreateDialogOpen(false); setSelectedLead(null); }}
+      />
+
+      {/* Engagement Timeline Sheet */}
+      <EngagementTimelineSheet
+        triggerId={timelineTriggerId}
+        open={timelineOpen}
+        onOpenChange={setTimelineOpen}
+        authHeaders={authHeaders}
       />
     </div>
   );

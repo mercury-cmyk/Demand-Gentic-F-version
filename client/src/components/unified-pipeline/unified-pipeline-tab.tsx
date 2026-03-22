@@ -67,6 +67,13 @@ interface PipelineSummary {
   totalCampaigns: number;
   appointmentsSet: number;
   createdAt: string;
+  // Client & Organization details
+  clientAccountId: string | null;
+  clientName: string | null;
+  clientCompanyName: string | null;
+  organizationId: string | null;
+  organizationName: string | null;
+  organizationDomain: string | null;
 }
 
 interface PipelineAccount {

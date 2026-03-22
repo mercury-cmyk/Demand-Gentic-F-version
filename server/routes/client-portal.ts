@@ -61,6 +61,7 @@ import { UKEF_CLIENT_ACCOUNT_ID } from '../integrations/ukef_reports/types';
 import clientPortalWorkOrdersRouter from './client-portal-work-orders';
 import clientPortalAnalyticsRouter from './client-portal-analytics';
 import clientPortalEmailRouter, { callbackRouter as clientPortalEmailCallbackRouter } from './client-portal-email';
+import clientPortalInboxRouter from './client-portal-inbox';
 import clientCampaignPlannerRouter from './client-campaign-planner-routes';
 // Old client-journey-pipeline-routes removed — unified pipeline handles this
 import { requireClientFeature, requireAnyClientFeature } from '../middleware/client-feature-gate';
@@ -660,6 +661,9 @@ router.use('/campaign-planner', requireClientAuth, requireClientFeature('ai_camp
 router.use('/email', clientPortalEmailCallbackRouter);
 // Email connection — protected endpoints (authorize, status, disconnect, smtp)
 router.use('/email', requireClientAuth, requireClientFeature('email_connect'), clientPortalEmailRouter);
+
+// Full inbox — messages, sync, send, settings, mailbox-accounts
+router.use('/inbox', requireClientAuth, requireClientFeature('email_inbox'), clientPortalInboxRouter);
 
 // Campaigns (Client wizard and management)
 /**

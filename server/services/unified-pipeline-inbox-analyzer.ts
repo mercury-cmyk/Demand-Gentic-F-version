@@ -10,6 +10,12 @@ import {
   unifiedPipelineContacts,
 } from "@shared/schema";
 import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { UNIFIED_PIPELINE_FUNNEL_STAGES } from "@shared/unified-pipeline-types";
+import {
+  getControlledForwardStage,
+  getUnifiedPipelineStageRank,
+  normalizeUnifiedPipelineStage,
+} from "@shared/unified-pipeline-stage-governance";
 
 import { db } from "../db";
 import { categorizePrimaryOther } from "../lib/inbox-service";
@@ -156,17 +162,13 @@ export interface AnalyzePipelineInboxResult {
   }>;
 }
 
-const STAGE_RANK: Record<ThreadSignalAnalysis["stage"] | "target" | "closed_won" | "closed_lost" | "on_hold", number> = {
-  target: 0,
-  outreach: 1,
-  engaged: 2,
-  qualifying: 3,
-  qualified: 4,
-  appointment_set: 5,
-  closed_won: 6,
-  closed_lost: 6,
-  on_hold: 1,
-};
+const STAGE_RANK: Record<
+  ThreadSignalAnalysis["stage"] | "target" | "closed_won" | "closed_lost" | "on_hold",
+  number
+> = UNIFIED_PIPELINE_FUNNEL_STAGES.reduce((acc, stage) => {
+  acc[stage.id] = getUnifiedPipelineStageRank(stage.id);
+  return acc;
+}, {} as Record<ThreadSignalAnalysis["stage"] | "target" | "closed_won" | "closed_lost" | "on_hold", number>);
 
 const STOPWORDS = new Set([
   "about",
@@ -1147,9 +1149,8 @@ export async function analyzePipelineInboxOpportunities(
       continue;
     }
 
-    const existingStage = pipelineAccount.funnelStage as keyof typeof STAGE_RANK;
-    const nextStage =
-      STAGE_RANK[candidate.stage] > STAGE_RANK[existingStage] ? candidate.stage : pipelineAccount.funnelStage;
+    const currentStage = normalizeUnifiedPipelineStage(pipelineAccount.funnelStage, "target");
+    const nextStage = getControlledForwardStage(currentStage, candidate.stage, 1);
     const shouldAdvanceStage = nextStage !== pipelineAccount.funnelStage;
 
     const existingMetadata =
