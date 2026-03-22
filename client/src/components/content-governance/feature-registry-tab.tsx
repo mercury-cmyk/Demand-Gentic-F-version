@@ -31,7 +31,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Package, Loader2, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Loader2, Search, Sparkles } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface ProductFeature {
   id: string;
@@ -59,11 +60,28 @@ const STATUS_COLORS: Record<string, string> = {
   sunset: "bg-red-100 text-red-700",
 };
 
-const CATEGORIES = ["Platform", "Integration", "Analytics", "AI & Intelligence", "Communication", "Reporting", "Security", "Other"];
+const CATEGORIES = [
+  "Agentic AI",
+  "Voice & Realtime",
+  "Campaign Intelligence",
+  "Pipeline & Engagement",
+  "Content & Creative",
+  "Data Management",
+  "Email & Communication",
+  "Analytics & Reporting",
+  "Lead Intelligence",
+  "Client Portal",
+  "Platform Infrastructure",
+  "Integration",
+  "Security & Governance",
+  "Other",
+];
 
 export default function FeatureRegistryTab({ organizationId }: FeatureRegistryTabProps) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [search, setSearch] = useState("");
+  const [isSeeding, setIsSeeding] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showDialog, setShowDialog] = useState(false);
   const [editingFeature, setEditingFeature] = useState<ProductFeature | null>(null);
@@ -164,6 +182,23 @@ export default function FeatureRegistryTab({ organizationId }: FeatureRegistryTa
     }
   }
 
+  async function handleSeedPlatformFeatures() {
+    setIsSeeding(true);
+    try {
+      const res = await apiRequest("POST", "/api/content-governance/seed-platform-features", { organizationId });
+      const result = await res.json();
+      toast({
+        title: "Platform Features Seeded",
+        description: `Created ${result.created} new features, ${result.skipped} already existed. Total: ${result.total} platform capabilities registered.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["content-governance", "features"] });
+    } catch (err: any) {
+      toast({ title: "Seed Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsSeeding(false);
+    }
+  }
+
   const features: ProductFeature[] = data?.features || [];
   const filtered = features.filter(f =>
     !search || f.name.toLowerCase().includes(search.toLowerCase()) || (f.description || "").toLowerCase().includes(search.toLowerCase())
@@ -195,10 +230,21 @@ export default function FeatureRegistryTab({ organizationId }: FeatureRegistryTa
             </SelectContent>
           </Select>
         </div>
-        <Dialog open={showDialog} onOpenChange={(open) => { setShowDialog(open); if (!open) { setEditingFeature(null); resetForm(); } }}>
-          <DialogTrigger asChild>
-            <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add Feature</Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSeedPlatformFeatures}
+            disabled={isSeeding}
+            className="gap-1.5"
+          >
+            {isSeeding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {isSeeding ? "Seeding..." : "Seed Platform Features"}
+          </Button>
+          <Dialog open={showDialog} onOpenChange={(open) => { setShowDialog(open); if (!open) { setEditingFeature(null); resetForm(); } }}>
+            <DialogTrigger asChild>
+              <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add Feature</Button>
+            </DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>{editingFeature ? "Edit Feature" : "Add Product Feature"}</DialogTitle>

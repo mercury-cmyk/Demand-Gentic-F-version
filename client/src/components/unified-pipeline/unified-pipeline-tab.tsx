@@ -37,7 +37,7 @@ import {
   ArrowRight, Calendar, Phone, Mail, Clock, ChevronRight, Zap,
   BarChart3, Activity, CheckCircle2, XCircle, RefreshCw,
   User, Tag, Info, ListChecks, Eye, ChevronLeft,
-  Download, UserCheck, Search, AlertCircle,
+  Download, UserCheck, Search, AlertCircle, Globe, Users,
 } from "lucide-react";
 import {
   UNIFIED_PIPELINE_FUNNEL_STAGES,
@@ -1310,25 +1310,56 @@ export function UnifiedPipelineTab({ authHeaders, clientAccountId, organizationI
         </div>
 
         <div className="grid gap-3">
-          {pipelines.map((p) => (
-            <Card key={p.id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => setSelectedPipelineId(p.id)}>
-              <CardContent className="flex items-center justify-between p-5">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold">{p.name}</h3>
-                    <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-xs">{p.status}</Badge>
+          {pipelines.map((p) => {
+            const clientLabel = p.clientCompanyName || p.clientName;
+            const orgLabel = p.organizationName;
+            return (
+              <Card key={p.id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => setSelectedPipelineId(p.id)}>
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold truncate">{p.name}</h3>
+                        <Badge variant={p.status === 'active' ? 'default' : 'secondary'} className="text-xs shrink-0">{p.status}</Badge>
+                      </div>
+                      {/* Client & Org info */}
+                      {(clientLabel || orgLabel) && (
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          {clientLabel && (
+                            <span className="flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              {clientLabel}
+                            </span>
+                          )}
+                          {orgLabel && (
+                            <span className="flex items-center gap-1">
+                              <Building2 className="h-3 w-3" />
+                              {orgLabel}
+                            </span>
+                          )}
+                          {p.organizationDomain && (
+                            <span className="flex items-center gap-1">
+                              <Globe className="h-3 w-3" />
+                              {p.organizationDomain}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {p.objective && (
+                        <p className="text-sm text-muted-foreground line-clamp-2">{p.objective}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-5 text-sm text-muted-foreground shrink-0 pt-0.5">
+                      <div className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{p.totalAccounts}</div>
+                      <div className="flex items-center gap-1"><Target className="h-3.5 w-3.5" />{p.totalCampaigns} campaigns</div>
+                      <div className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{p.appointmentsSet} appts</div>
+                      <ChevronRight className="h-4 w-4" />
+                    </div>
                   </div>
-                  {p.objective && <p className="text-sm text-muted-foreground">{p.objective}</p>}
-                </div>
-                <div className="flex items-center gap-5 text-sm text-muted-foreground shrink-0">
-                  <div className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{p.totalAccounts}</div>
-                  <div className="flex items-center gap-1"><Target className="h-3.5 w-3.5" />{p.totalCampaigns} campaigns</div>
-                  <div className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />{p.appointmentsSet} appts</div>
-                  <ChevronRight className="h-4 w-4" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         <CreatePipelineDialog

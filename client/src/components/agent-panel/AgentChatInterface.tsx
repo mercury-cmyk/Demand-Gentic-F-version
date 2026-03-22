@@ -19,6 +19,8 @@ import {
   Target,
   Search,
   Code2,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,6 +36,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentPlanViewer } from './AgentPlanViewer';
 import { AgentQuickActions } from './AgentQuickActions';
+import { MarkdownRenderer } from '@/components/ui/markdown-renderer';
 
 interface Message {
   id: string;
@@ -296,9 +299,13 @@ export function AgentChatInterface({
   };
 
   return (
-    <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
+    <div className="flex flex-col h-full bg-background relative overflow-hidden">
+      {/* Ambient glowing orbs */}
+      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-primary/[0.03] rounded-full blur-[100px] -translate-y-1/2 pointer-events-none" />
+      <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-violet-500/[0.03] rounded-full blur-[100px] translate-y-1/3 pointer-events-none" />
+      
       {/* Messages Area */}
-      <ScrollArea className="flex-1 px-4" ref={scrollRef}>
+      <ScrollArea className="flex-1 px-4 relative z-10" ref={scrollRef}>
         <div className="py-4 space-y-5">
           {messages.length === 0 ? (
             <WelcomeMessage isClientPortal={isClientPortal} userRole={userRole} onEnterOrderMode={enterOrderMode} />
@@ -340,9 +347,15 @@ export function AgentChatInterface({
       </ScrollArea>
 
       {/* ── Input Area ── */}
-      <div className="border-t border-border/30 bg-background/98 backdrop-blur-xl">
-        <div className="p-3">
-          <div className="relative flex items-end rounded-xl border border-border/60 bg-background shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary/30 transition-all duration-200">
+      <div className="border-t border-border/20 bg-background/60 backdrop-blur-3xl px-3 pb-3 pt-4 relative isolate">
+        <div className="absolute inset-0 bg-gradient-to-t from-background to-transparent -z-10" />
+        <div className="relative group max-w-[850px] mx-auto">
+          <div className={cn(
+            "absolute -inset-0.5 bg-gradient-to-r from-primary/40 via-violet-500/40 to-primary/40 rounded-2xl blur-md opacity-0 transition-opacity duration-500",
+            inputValue.trim() && "opacity-40 group-focus-within:opacity-100",
+            isLoading && "animate-pulse opacity-100 from-sky-400/40 to-sky-600/40"
+          )} />
+          <div className="relative flex items-end rounded-xl border border-border/40 bg-card/80 backdrop-blur-lg shadow-sm focus-within:border-primary/50 transition-all duration-300">
             <Textarea
               ref={inputRef}
               value={inputValue}
@@ -358,16 +371,16 @@ export function AgentChatInterface({
                 onClick={sendMessage}
                 disabled={!inputValue.trim() || isLoading}
                 className={cn(
-                  'h-7 w-7 rounded-lg transition-all duration-200',
+                  'h-8 w-8 rounded-lg transition-all duration-300',
                   inputValue.trim() && !isLoading
-                    ? 'bg-primary hover:bg-primary/90 shadow-md shadow-primary/25'
-                    : 'bg-muted text-muted-foreground'
+                    ? 'bg-gradient-to-tr from-primary to-violet-500 hover:opacity-90 text-white shadow-lg shadow-primary/20 scale-100'
+                    : 'bg-muted/50 text-muted-foreground scale-95'
                 )}
               >
                 {isLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-3.5 w-3.5" />
+                  <Send className="h-4 w-4 translate-x-[-1px] translate-y-[1px]" />
                 )}
               </Button>
             </div>
@@ -375,9 +388,11 @@ export function AgentChatInterface({
         </div>
 
         {/* Quick Actions */}
-        <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
+        <div className="mt-3">
+          <AgentQuickActions isClientPortal={isClientPortal} userRole={userRole} />
+        </div>
 
-        <p className="text-[10px] text-muted-foreground/40 pb-2 text-center select-none">
+        <p className="text-[10px] text-muted-foreground/40 mt-3 text-center select-none tracking-wide">
           AgentC can make mistakes. Check important info.
         </p>
       </div>
@@ -389,20 +404,23 @@ export function AgentChatInterface({
 // ── Typing Indicator ──
 function TypingIndicator() {
   return (
-    <div className="flex items-start gap-3">
-      <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10">
-        <Bot className="h-3.5 w-3.5 text-primary" />
+    <div className="flex items-start gap-3 py-2">
+      <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 bg-gradient-to-br from-primary/15 to-primary/5 ring-1 ring-primary/20 backdrop-blur-sm shadow-[0_0_12px_rgba(var(--primary),0.1)] relative">
+        <Bot className="h-4 w-4 text-primary animate-pulse" />
+        <div className="absolute inset-0 rounded-full border border-primary/30 animate-[spin_3s_linear_infinite]" style={{ borderTopColor: 'transparent', borderRightColor: 'transparent' }} />
       </div>
-      <div className="flex items-center gap-1.5 pt-2">
-        {[0, 1, 2].map(i => (
-          <motion.div
-            key={i}
-            className="w-1.5 h-1.5 bg-primary/40 rounded-full"
-            animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
-            transition={{ duration: 0.8, repeat: Infinity, ease: 'easeInOut', delay: i * 0.15 }}
-          />
-        ))}
-        <span className="text-xs text-muted-foreground/60 ml-1.5">Thinking...</span>
+      <div className="flex flex-col gap-2 pt-1.5">
+        <div className="flex items-center gap-1.5 bg-card/40 backdrop-blur-md px-3 py-2 rounded-2xl rounded-tl-sm border border-border/40 shadow-sm">
+          {[0, 1, 2].map(i => (
+            <motion.div
+              key={i}
+              className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-primary to-violet-500"
+              animate={{ y: [0, -4, 0], scale: [0.8, 1.2, 0.8], opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut', delay: i * 0.2 }}
+            />
+          ))}
+        </div>
+        <span className="text-[10px] font-medium text-primary/60 px-1 tracking-widest uppercase">AgentC Processing</span>
       </div>
     </div>
   );
@@ -426,28 +444,32 @@ function WelcomeActionCard({
     <button
       onClick={onClick}
       className={cn(
-        'flex flex-col items-start gap-2 p-3 rounded-xl border text-left transition-all duration-200 group',
+        'flex flex-col items-start gap-2.5 p-3.5 rounded-2xl border text-left transition-all duration-300 group relative overflow-hidden',
         primary
-          ? 'bg-gradient-to-br from-primary/10 to-primary/[0.03] border-primary/20 hover:border-primary/35 hover:shadow-md hover:shadow-primary/5'
-          : 'bg-card/50 border-border/50 hover:bg-muted/40 hover:border-border/80 hover:shadow-sm'
+          ? 'bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border-primary/20 hover:border-primary/40 focus:ring-2 focus:ring-primary/20 backdrop-blur-md shadow-[0_8px_16px_-6px_rgba(var(--primary),0.1)] hover:shadow-[0_8px_24px_-6px_rgba(var(--primary),0.2)] hover:-translate-y-0.5'
+          : 'bg-card/40 backdrop-blur-sm border-border/40 hover:bg-card/80 hover:border-border/80 hover:shadow-lg hover:-translate-y-0.5'
       )}
     >
       <div className={cn(
-        'p-1.5 rounded-lg transition-colors',
+        "absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-10 transition-opacity duration-500",
+        primary ? "from-primary to-violet-500" : "from-foreground/5 to-transparent"
+      )} />
+      <div className={cn(
+        'p-2 rounded-xl transition-all duration-300 relative z-10',
         primary
-          ? 'bg-primary/15 text-primary group-hover:bg-primary/20'
-          : 'bg-muted text-muted-foreground group-hover:text-foreground'
+          ? 'bg-primary/20 text-primary group-hover:bg-primary group-hover:text-primary-foreground shadow-inner'
+          : 'bg-muted text-muted-foreground group-hover:text-foreground group-hover:bg-background shadow-sm'
       )}>
         <Icon className="h-4 w-4" />
       </div>
-      <div>
+      <div className="relative z-10">
         <p className={cn(
-          'text-xs font-semibold leading-none',
+          'text-xs font-semibold tracking-tight',
           primary ? 'text-primary' : 'text-foreground/90'
         )}>
           {title}
         </p>
-        <p className="text-[10px] text-muted-foreground mt-1 leading-snug">{description}</p>
+        <p className="text-[10px] text-muted-foreground/80 mt-1 leading-relaxed line-clamp-2">{description}</p>
       </div>
     </button>
   );
@@ -471,26 +493,30 @@ function WelcomeMessage({
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.97, y: 16 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-      className="flex flex-col items-center justify-center py-10 px-4 space-y-6 select-none"
+      initial={{ opacity: 0, scale: 0.95, y: 20, filter: "blur(8px)" }}
+      animate={{ opacity: 1, scale: 1, y: 0, filter: "blur(0px)" }}
+      transition={{ duration: 0.5, ease: [0.23, 1, 0.32, 1] }}
+      className="flex flex-col items-center justify-center py-10 px-4 space-y-6 select-none relative z-10"
     >
-      <div className="relative group cursor-default">
-        <div className="absolute -inset-3 bg-gradient-to-r from-primary/15 to-violet-500/15 rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition duration-700" />
-        <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/10 to-background flex items-center justify-center border border-primary/10 shadow-xl">
-          <Bot className="h-9 w-9 text-primary" />
+      <motion.div 
+        className="relative group cursor-default"
+        animate={{ y: [0, -6, 0] }}
+        transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+      >
+        <div className="absolute -inset-4 bg-gradient-to-r from-primary/30 via-violet-500/30 to-fuchsia-500/30 rounded-full blur-2xl opacity-60 group-hover:opacity-100 group-hover:blur-3xl transition-all duration-700 animate-in fade-in" />
+        <div className="relative w-20 h-20 rounded-3xl bg-gradient-to-br from-card to-card/50 flex items-center justify-center border border-border/50 shadow-2xl backdrop-blur-xl">
+          <Bot className="h-9 w-9 text-primary drop-shadow-[0_0_8px_rgba(var(--primary),0.5)]" />
         </div>
-        <div className="absolute -bottom-1.5 -right-1.5 bg-background p-1 rounded-full border border-border/50 shadow-sm">
-          <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
+        <div className="absolute -bottom-1.5 -right-1.5 bg-background p-1.5 rounded-full border border-border/50 shadow-lg">
+          <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500/20" />
         </div>
-      </div>
+      </motion.div>
 
       <div className="text-center space-y-2 max-w-xs">
-        <h3 className="font-bold text-xl tracking-tight text-foreground">
+        <h3 className="font-bold text-2xl tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-foreground to-foreground/70">
           AgentC
         </h3>
-        <p className="text-xs text-muted-foreground leading-relaxed">
+        <p className="text-xs text-muted-foreground/80 leading-relaxed font-medium">
           Your autonomous AI assistant for campaigns, analytics, and operations.
         </p>
       </div>
@@ -521,7 +547,7 @@ function WelcomeMessage({
 }
 
 // ── Message Bubble ──
-function MessageBubble({ message }: { message: Message }) {
+const MessageBubble = React.forwardRef<HTMLDivElement, { message: Message }>(({ message }, ref) => {
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -537,19 +563,20 @@ function MessageBubble({ message }: { message: Message }) {
 
   return (
     <motion.div
+      ref={ref}
       layout
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.97 }}
-      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      initial={{ opacity: 0, y: 15, scale: 0.95, filter: "blur(4px)" }}
+      animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+      exit={{ opacity: 0, scale: 0.95, filter: "blur(4px)" }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
       className={cn('group flex gap-3', isUser && 'flex-row-reverse')}
     >
       {/* Avatar */}
       <div className={cn(
-        'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5',
+        'w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 z-10',
         isUser
-          ? 'bg-primary shadow-sm shadow-primary/20'
-          : 'bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/10'
+          ? 'bg-gradient-to-tr from-primary to-primary/80 shadow-md shadow-primary/20'
+          : 'bg-gradient-to-br from-primary/10 to-primary/5 ring-1 ring-primary/20 backdrop-blur-sm'
       )}>
         {isUser ? (
           <User className="h-3.5 w-3.5 text-primary-foreground" />
@@ -559,10 +586,10 @@ function MessageBubble({ message }: { message: Message }) {
       </div>
 
       {/* Content */}
-      <div className={cn('flex-1 max-w-[85%] space-y-1.5', isUser && 'flex flex-col items-end')}>
+      <div className={cn('flex-1 max-w-[88%] space-y-1.5', isUser && 'flex flex-col items-end')}>
         {/* Sender */}
         <span className={cn(
-          'text-[10px] font-medium text-muted-foreground/60 px-0.5',
+          'text-[10px] font-medium text-muted-foreground/50 px-0.5 tracking-wider uppercase',
           isUser && 'text-right'
         )}>
           {isUser ? 'You' : 'AgentC'}
@@ -570,12 +597,12 @@ function MessageBubble({ message }: { message: Message }) {
 
         {/* Bubble */}
         <div className={cn(
-          'relative rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-200',
+          'relative rounded-2xl px-4 py-3 text-sm leading-relaxed transition-all duration-300',
           isUser
-            ? 'bg-primary text-primary-foreground rounded-tr-md'
+            ? 'bg-gradient-to-br from-primary/95 to-primary text-primary-foreground rounded-tr-sm shadow-md shadow-primary/10'
             : isSuccessMessage
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 rounded-tl-md text-foreground'
-              : 'bg-card border border-border/50 rounded-tl-md text-foreground shadow-sm'
+              ? 'bg-emerald-500/5 backdrop-blur-md border border-emerald-500/20 rounded-tl-sm text-foreground shadow-sm'
+              : 'bg-card/60 backdrop-blur-lg border border-border/40 rounded-tl-sm text-foreground shadow-sm hover:shadow-md hover:border-border/60'
         )}>
           {/* Success icon for plan completion */}
           {isSuccessMessage && (
@@ -585,7 +612,11 @@ function MessageBubble({ message }: { message: Message }) {
             </div>
           )}
 
-          <div className="whitespace-pre-wrap">{message.content}</div>
+          {isUser ? (
+            <div className="whitespace-pre-wrap">{message.content}</div>
+          ) : (
+            <MarkdownRenderer content={message.content} />
+          )}
 
           {/* Executed steps */}
           {hasExecutedSteps && (

@@ -1190,7 +1190,7 @@ export default function OpsHub() {
         return <PreviewTab />;
       default:
         return (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400">
+          <div className="flex flex-col items-center justify-center h-full text-white/30">
             <Code2 className="w-16 h-16 mb-4 opacity-20" />
             <p className="text-lg font-medium">Select a section to get started</p>
           </div>
@@ -1199,44 +1199,44 @@ export default function OpsHub() {
   };
 
   const statusColor = activeProject.status === 'running'
-    ? 'bg-emerald-400'
+    ? 'bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/50'
     : activeProject.status === 'deploying'
-    ? 'bg-amber-400 animate-pulse'
-    : 'bg-slate-300';
+    ? 'bg-amber-400 animate-pulse shadow-[0_0_6px] shadow-amber-400/50'
+    : 'bg-slate-500';
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
+    <div className="h-screen flex flex-col bg-[#0a0e1a] text-slate-100 overflow-hidden font-sans">
       {/* ── Header ── */}
-      <header className="h-12 border-b border-slate-200 bg-white flex items-center px-4 shrink-0 z-50">
+      <header className="h-12 border-b border-white/[0.06] bg-[#0d1117]/90 backdrop-blur-xl flex items-center px-4 shrink-0 z-50 shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
         {/* Logo */}
         <div className="flex items-center gap-2.5 mr-5">
-          <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Zap className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-semibold text-slate-900 tracking-tight">Ops Hub</span>
+          <span className="text-sm font-bold text-white tracking-tight">Ops Hub</span>
         </div>
 
         {/* Separator */}
-        <div className="h-5 w-px bg-slate-200 mr-4" />
+        <div className="h-5 w-px bg-white/10 mr-4" />
 
         {/* Project Switcher */}
         <div className="relative mr-5">
           <button
             onClick={() => setProjectDropdownOpen(!projectDropdownOpen)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-slate-50 transition-colors text-sm"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/5 transition-colors text-sm border border-transparent hover:border-white/10"
           >
-            <div className={`w-2 h-2 rounded-full ${statusColor}`} />
-            <span className="font-medium text-slate-700">{activeProject.name}</span>
-            <span className="text-[10px] text-slate-400 uppercase font-medium">{activeProject.environment}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            <div className={`w-2 h-2 rounded-full ${statusColor} shadow-[0_0_6px] ${activeProject.status === 'running' ? 'shadow-emerald-400/50' : ''}`} />
+            <span className="font-medium text-white/90">{activeProject.name}</span>
+            <span className="text-[10px] text-white/40 uppercase font-medium">{activeProject.environment}</span>
+            <ChevronDown className="w-3.5 h-3.5 text-white/40" />
           </button>
 
           {projectDropdownOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setProjectDropdownOpen(false)} />
-              <div className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1">
+              <div className="absolute top-full left-0 mt-1 w-72 bg-[#161b26] border border-white/10 rounded-xl shadow-2xl shadow-black/50 z-50 py-1 backdrop-blur-xl">
                 <div className="px-3 py-2">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Projects</span>
+                  <span className="text-[10px] font-semibold text-white/30 uppercase tracking-wider">Projects</span>
                 </div>
                 {PROJECTS.map((project) => (
                   <button
@@ -1245,21 +1245,21 @@ export default function OpsHub() {
                       setActiveProject(project);
                       setProjectDropdownOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 transition-colors ${
-                      activeProject.id === project.id ? 'bg-slate-50' : ''
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/5 transition-colors ${
+                      activeProject.id === project.id ? 'bg-white/5' : ''
                     }`}
                   >
                     <div className={`w-2 h-2 rounded-full shrink-0 ${
-                      project.status === 'running' ? 'bg-emerald-400' : project.status === 'deploying' ? 'bg-amber-400 animate-pulse' : 'bg-slate-300'
+                      project.status === 'running' ? 'bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/50' : project.status === 'deploying' ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'
                     }`} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-slate-800 truncate">{project.name}</div>
-                      <div className="text-xs text-slate-500 truncate">{project.description}</div>
+                      <div className="text-sm font-medium text-white/90 truncate">{project.name}</div>
+                      <div className="text-xs text-white/40 truncate">{project.description}</div>
                     </div>
                     <span className={`text-[10px] font-medium uppercase px-1.5 py-0.5 rounded ${
                       project.deployTarget === 'cloud-run'
-                        ? 'bg-blue-50 text-blue-600'
-                        : 'bg-slate-100 text-slate-600'
+                        ? 'bg-blue-500/10 text-blue-400'
+                        : 'bg-white/5 text-white/50'
                     }`}>
                       {project.deployTarget === 'cloud-run' ? 'Cloud Run' : 'VM'}
                     </span>
@@ -1276,10 +1276,10 @@ export default function OpsHub() {
             <button
               key={tab.id}
               onClick={() => goToTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-md transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium rounded-lg transition-all duration-200 ${
                 activeTopTab === tab.id
-                  ? 'text-slate-900 bg-slate-100'
-                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                  ? 'text-white bg-white/10 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
+                  : 'text-white/50 hover:text-white/80 hover:bg-white/5'
               }`}
             >
               {tab.icon}
@@ -1292,37 +1292,37 @@ export default function OpsHub() {
         <div className="ml-auto flex items-center gap-2">
           <button
             onClick={toggleSidePanel}
-            className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${
               sidePanelOpen
-                ? 'bg-slate-900 text-white'
-                : 'text-slate-600 hover:bg-slate-100'
+                ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-lg shadow-indigo-500/25'
+                : 'text-white/50 hover:bg-white/5 hover:text-white/80'
             }`}
           >
             <Brain className="h-3.5 w-3.5" />
             Agent C
           </button>
-          <div className="h-5 w-px bg-slate-200" />
-          <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center cursor-pointer hover:bg-slate-300 transition-colors">
-            <User className="w-3.5 h-3.5 text-slate-600" />
+          <div className="h-5 w-px bg-white/10" />
+          <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center cursor-pointer hover:bg-white/15 transition-colors ring-1 ring-white/5">
+            <User className="w-3.5 h-3.5 text-white/70" />
           </div>
         </div>
       </header>
 
       {/* ── Secondary Navigation ── */}
-      <div className="shrink-0 border-b border-slate-200 bg-white px-4">
+      <div className="shrink-0 border-b border-white/[0.06] bg-[#0d1117]/80 backdrop-blur-sm px-4">
         <div className="flex items-center gap-0 overflow-x-auto -mb-px">
           {secondaryNavSections.map((section) =>
             section.items.map((item) => (
               <button
                 key={item.id}
                 onClick={() => goToPage(item.id)}
-                className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+                className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-[13px] font-medium border-b-2 transition-all duration-200 ${
                   activePage === item.id
-                    ? 'border-slate-900 text-slate-900'
-                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                    ? 'border-indigo-400 text-white'
+                    : 'border-transparent text-white/40 hover:text-white/70 hover:border-white/20'
                 }`}
               >
-                <span className={activePage === item.id ? 'text-slate-700' : 'text-slate-400'}>{item.icon}</span>
+                <span className={activePage === item.id ? 'text-indigo-400' : 'text-white/30'}>{item.icon}</span>
                 {item.label}
               </button>
             ))
@@ -1332,7 +1332,7 @@ export default function OpsHub() {
 
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden">
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#0f1420]">
           {activePage === 'logs' || activePage === 'vm-logs' ? (
             renderContent()
           ) : (
@@ -1343,24 +1343,24 @@ export default function OpsHub() {
         </main>
 
         {sidePanelOpen && (
-          <aside className="flex h-full w-[400px] shrink-0 flex-col border-l border-slate-200 bg-white">
+          <aside className="flex h-full w-[400px] shrink-0 flex-col border-l border-white/[0.06] bg-[#0d1117]">
             {/* ── Panel Header ── */}
-            <div className="border-b border-slate-200 px-4 py-3">
+            <div className="border-b border-white/[0.06] px-4 py-3 bg-[#0d1117]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-900">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/20">
                     <Code2 className="h-3.5 w-3.5 text-white" />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">Agent C</p>
-                    <p className="text-[11px] text-slate-500">{activeProject.name}</p>
+                    <p className="text-sm font-semibold text-white">Agent C</p>
+                    <p className="text-[11px] text-white/40">{activeProject.name}</p>
                   </div>
                 </div>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setSidePanelOpen(false)}
-                  className="h-7 w-7 rounded-md p-0 text-slate-400 hover:bg-slate-100"
+                  className="h-7 w-7 rounded-md p-0 text-white/40 hover:bg-white/5 hover:text-white/70"
                 >
                   <X className="h-3.5 w-3.5" />
                 </Button>
@@ -1368,23 +1368,23 @@ export default function OpsHub() {
 
               {/* Mode & Provider Controls */}
               <div className="mt-2.5 flex items-center gap-1.5">
-                <div className="flex items-center rounded-md bg-slate-100 p-0.5">
+                <div className="flex items-center rounded-lg bg-white/5 p-0.5 ring-1 ring-white/[0.06]">
                   <button
                     onClick={() => setCodingAgentMode('agent')}
-                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all duration-200 ${
                       codingAgentMode === 'agent'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-700'
+                        ? 'bg-white/10 text-white shadow-sm'
+                        : 'text-white/40 hover:text-white/70'
                     }`}
                   >
                     Agent
                   </button>
                   <button
                     onClick={() => setCodingAgentMode('plan')}
-                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-all duration-200 ${
                       codingAgentMode === 'plan'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-700'
+                        ? 'bg-white/10 text-white shadow-sm'
+                        : 'text-white/40 hover:text-white/70'
                     }`}
                   >
                     Plan
@@ -1396,7 +1396,7 @@ export default function OpsHub() {
                     value={modelSelector}
                     onValueChange={(value) => setModelSelector(value as CodingAgentModelSelector)}
                   >
-                    <SelectTrigger className="h-7 w-[90px] rounded-md border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-700">
+                    <SelectTrigger className="h-7 w-[90px] rounded-lg border-white/10 bg-white/5 px-2 text-[11px] text-white/70">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1410,7 +1410,7 @@ export default function OpsHub() {
                   value={selectedProvider}
                   onValueChange={(value) => setSelectedProvider(value as CodingAgentProvider)}
                 >
-                  <SelectTrigger className="h-7 w-[100px] rounded-md border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-700">
+                  <SelectTrigger className="h-7 w-[100px] rounded-lg border-white/10 bg-white/5 px-2 text-[11px] text-white/70">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1429,30 +1429,30 @@ export default function OpsHub() {
 
             {/* ── Collapsible File Context ── */}
             {selectedFile && (
-              <div className="border-b border-slate-200">
+              <div className="border-b border-white/[0.06]">
                 <button
                   onClick={() => setFileContextExpanded(!fileContextExpanded)}
-                  className="flex w-full items-center gap-2 px-4 py-2 text-left transition hover:bg-slate-50"
+                  className="flex w-full items-center gap-2 px-4 py-2 text-left transition hover:bg-white/[0.03]"
                 >
-                  <FileText className="h-3.5 w-3.5 text-slate-400" />
-                  <span className="flex-1 truncate text-[11px] font-medium text-slate-600">{selectedFile.path}</span>
-                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px]">active</Badge>
-                  <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${fileContextExpanded ? 'rotate-180' : ''}`} />
+                  <FileText className="h-3.5 w-3.5 text-white/30" />
+                  <span className="flex-1 truncate text-[11px] font-medium text-white/60">{selectedFile.path}</span>
+                  <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[9px]">active</Badge>
+                  <ChevronDown className={`h-3.5 w-3.5 text-white/30 transition ${fileContextExpanded ? 'rotate-180' : ''}`} />
                 </button>
                 {fileContextExpanded && (
                   <div className="px-4 pb-3">
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-2">
+                    <div className="flex items-center gap-2 text-[10px] text-white/30 mb-2">
                       <span>{formatWorkspaceTimestamp(selectedFile.modifiedAt)}</span>
                       <span>·</span>
                       <span>{formatWorkspaceBytes(selectedFile.content.length)}</span>
                       <button
                         onClick={() => setSelectedFile(null)}
-                        className="ml-auto text-[10px] text-red-400 hover:text-red-600"
+                        className="ml-auto text-[10px] text-red-400 hover:text-red-300"
                       >
                         Clear
                       </button>
                     </div>
-                    <pre className="max-h-24 overflow-y-auto rounded-lg bg-slate-950 px-3 py-2 text-[10px] leading-relaxed text-slate-100">
+                    <pre className="max-h-24 overflow-y-auto rounded-lg bg-black/40 ring-1 ring-white/[0.06] px-3 py-2 text-[10px] leading-relaxed text-emerald-300/80">
                       {selectedFile.content.slice(0, 400) || 'Empty file'}
                     </pre>
                   </div>
@@ -1462,33 +1462,33 @@ export default function OpsHub() {
 
             {/* ── Architect Pipeline View ── */}
             {showArchitect && architectSteps.length > 0 && (
-              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+              <div className="border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
                 <div className="flex items-center gap-1.5 mb-1.5">
-                  <Wand2 className="h-3 w-3 text-slate-500" />
-                  <span className="text-[11px] font-medium text-slate-600">Pipeline</span>
+                  <Wand2 className="h-3 w-3 text-indigo-400" />
+                  <span className="text-[11px] font-medium text-white/60">Pipeline</span>
                 </div>
                 <div className="space-y-1.5">
                   {architectSteps.map((step, i) => (
                     <div key={step.id} className="flex items-center gap-2">
-                      {step.status === 'pending' && <CircleDot className="h-3.5 w-3.5 text-slate-300" />}
-                      {step.status === 'active' && <Loader2 className="h-3.5 w-3.5 text-indigo-500 animate-spin" />}
-                      {step.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
-                      {step.status === 'error' && <X className="h-3.5 w-3.5 text-red-500" />}
+                      {step.status === 'pending' && <CircleDot className="h-3.5 w-3.5 text-white/20" />}
+                      {step.status === 'active' && <Loader2 className="h-3.5 w-3.5 text-indigo-400 animate-spin" />}
+                      {step.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />}
+                      {step.status === 'error' && <X className="h-3.5 w-3.5 text-red-400" />}
                       <div className="flex-1 min-w-0">
                         <span className={`text-[11px] font-medium ${
-                          step.status === 'active' ? 'text-indigo-700' :
-                          step.status === 'done' ? 'text-emerald-700' :
-                          step.status === 'error' ? 'text-red-700' :
-                          'text-slate-400'
+                          step.status === 'active' ? 'text-indigo-300' :
+                          step.status === 'done' ? 'text-emerald-300' :
+                          step.status === 'error' ? 'text-red-300' :
+                          'text-white/20'
                         }`}>
                           {step.label}
                         </span>
                         {step.detail && (
-                          <span className="ml-2 text-[10px] text-slate-400">{step.detail}</span>
+                          <span className="ml-2 text-[10px] text-white/30">{step.detail}</span>
                         )}
                       </div>
                       {i < architectSteps.length - 1 && step.status === 'done' && (
-                        <ArrowRight className="h-3 w-3 text-slate-300" />
+                        <ArrowRight className="h-3 w-3 text-white/20" />
                       )}
                     </div>
                   ))}
@@ -1497,15 +1497,15 @@ export default function OpsHub() {
             )}
 
             {/* ── Chat Messages ── */}
-            <div className="flex-1 overflow-y-auto bg-slate-50 px-4 py-4">
+            <div className="flex-1 overflow-y-auto bg-[#0a0e1a] px-4 py-4">
               {chatMessages.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center px-4">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100">
-                    <Brain className="h-5 w-5 text-slate-400" />
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 ring-1 ring-indigo-500/20">
+                    <Brain className="h-5 w-5 text-indigo-400" />
                   </div>
-                  <p className="text-sm font-medium text-slate-700">What would you like to build?</p>
-                  <p className="mt-1.5 max-w-[260px] text-xs text-slate-400 leading-relaxed">
-                    Agent C is scoped to <strong className="text-slate-500">{activeProject.name}</strong>. Select a file in the workspace, then ask for edits, analysis, or planning.
+                  <p className="text-sm font-medium text-white/90">What would you like to build?</p>
+                  <p className="mt-1.5 max-w-[260px] text-xs text-white/40 leading-relaxed">
+                    Agent C is scoped to <strong className="text-white/60">{activeProject.name}</strong>. Select a file in the workspace, then ask for edits, analysis, or planning.
                   </p>
 
                   <div className="mt-4 grid grid-cols-2 gap-1.5 w-full max-w-[280px]">
@@ -1518,7 +1518,7 @@ export default function OpsHub() {
                       <button
                         key={action.label}
                         onClick={() => setChatInput(action.prompt)}
-                        className="rounded-md border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 text-left"
+                        className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-[11px] font-medium text-white/60 transition-all hover:border-white/15 hover:bg-white/[0.06] hover:text-white/90 text-left"
                       >
                         {action.label}
                       </button>
@@ -1527,7 +1527,7 @@ export default function OpsHub() {
 
                   <button
                     onClick={() => goToPage('files')}
-                    className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-slate-400 transition hover:text-slate-600"
+                    className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-white/30 transition hover:text-white/60"
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
                     Open workspace
@@ -1542,12 +1542,12 @@ export default function OpsHub() {
 
                   return (
                     <div key={`${message.timestamp.toISOString()}-${index}`} className={`mb-3 ${message.role === 'user' ? 'flex justify-end' : ''}`}>
-                      <div className={`max-w-[90%] rounded-lg px-3 py-2.5 text-[13px] leading-relaxed ${
+                      <div className={`max-w-[90%] rounded-xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
                         message.role === 'user'
-                          ? 'bg-slate-900 text-white'
+                          ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/20'
                           : message.isError
-                          ? 'border border-red-200 bg-red-50 text-red-700'
-                          : 'border border-slate-200 bg-white text-slate-700'
+                          ? 'border border-red-500/20 bg-red-500/10 text-red-300'
+                          : 'border border-white/[0.08] bg-white/[0.04] text-white/80'
                       }`}>
                         <p className="whitespace-pre-wrap">{message.content}</p>
                         <div className="mt-2 flex items-center gap-2 text-[10px] opacity-60">
@@ -1565,7 +1565,7 @@ export default function OpsHub() {
                           <button
                             onClick={() => handleChatSend(message.retryPrompt!)}
                             disabled={chatSending}
-                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-[11px] font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-[11px] font-medium text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
                           >
                             <RefreshCw className="h-3 w-3" />
                             Retry
@@ -1580,10 +1580,10 @@ export default function OpsHub() {
             </div>
 
             {/* ── Input Area ── */}
-            <div className="border-t border-slate-200 bg-white px-3 py-2.5">
+            <div className="border-t border-white/[0.06] bg-[#0d1117] px-3 py-2.5">
               {promptOptimizing && (
-                <div className="mb-2 flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">
-                  <Sparkles className="h-3 w-3 animate-pulse text-slate-400" />
+                <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-indigo-500/10 ring-1 ring-indigo-500/20 px-2.5 py-1.5 text-[11px] text-indigo-300">
+                  <Sparkles className="h-3 w-3 animate-pulse text-indigo-400" />
                   Optimizing prompt...
                 </div>
               )}
@@ -1593,18 +1593,18 @@ export default function OpsHub() {
                   onChange={(event) => setChatInput(event.target.value)}
                   onKeyDown={handleChatKeyDown}
                   placeholder={voiceListening ? 'Listening...' : 'Describe what you need...'}
-                  className={`min-h-[64px] max-h-[120px] resize-none rounded-lg border-slate-200 bg-slate-50 pr-20 text-[13px] text-slate-800 placeholder:text-slate-400 focus:border-slate-300 focus:ring-0 ${
-                    voiceListening ? 'border-red-300 bg-red-50/30' : ''
+                  className={`min-h-[64px] max-h-[120px] resize-none rounded-xl border-white/[0.08] bg-white/[0.03] pr-20 text-[13px] text-white/90 placeholder:text-white/25 focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 ${
+                    voiceListening ? 'border-red-500/30 bg-red-500/5' : ''
                   }`}
                   rows={2}
                 />
                 <div className="absolute bottom-2 right-2 flex items-center gap-1">
                   <button
                     onClick={toggleVoiceInput}
-                    className={`rounded-md p-1.5 transition-colors ${
+                    className={`rounded-lg p-1.5 transition-all ${
                       voiceListening
-                        ? 'bg-red-500 text-white animate-pulse'
-                        : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'
+                        ? 'bg-red-500 text-white animate-pulse shadow-lg shadow-red-500/30'
+                        : 'text-white/30 hover:text-white/60 hover:bg-white/5'
                     }`}
                     title={voiceListening ? 'Stop listening' : 'Voice input'}
                   >
@@ -1613,7 +1613,7 @@ export default function OpsHub() {
                   <button
                     onClick={() => handleChatSend()}
                     disabled={chatSending || !chatInput.trim()}
-                    className="rounded-md bg-slate-900 p-1.5 transition-colors hover:bg-slate-800 disabled:opacity-30"
+                    className="rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 p-1.5 transition-all hover:from-indigo-400 hover:to-violet-400 disabled:opacity-20 shadow-lg shadow-indigo-500/20"
                   >
                     {chatSending ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-white" />
@@ -1623,10 +1623,10 @@ export default function OpsHub() {
                   </button>
                 </div>
               </div>
-              <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+              <div className="mt-1.5 flex items-center justify-between text-[10px] text-white/25">
                 <span>Enter to send</span>
                 <span className="flex items-center gap-1">
-                  <span className={`h-1.5 w-1.5 rounded-full ${PROVIDER_ROUTING[selectedProvider]?.color || 'bg-slate-400'}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${PROVIDER_ROUTING[selectedProvider]?.color || 'bg-white/30'}`} />
                   {PROVIDER_ROUTING[selectedProvider]?.label || selectedProvider}
                 </span>
               </div>
@@ -1636,13 +1636,14 @@ export default function OpsHub() {
       </div>
 
       {/* ── Footer ── */}
-      <footer className="h-7 border-t border-slate-200 bg-white flex items-center px-4 shrink-0 text-[10px] text-slate-400">
+      <footer className="h-7 border-t border-white/[0.06] bg-[#0d1117]/90 backdrop-blur-sm flex items-center px-4 shrink-0 text-[10px] text-white/30">
         <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${platformOnline ? 'bg-emerald-400' : 'bg-red-400'}`} />
+          <div className={`w-1.5 h-1.5 rounded-full ${platformOnline ? 'bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400/50' : 'bg-red-400 shadow-[0_0_6px] shadow-red-400/50'}`} />
           <span>{platformOnline ? 'Online' : 'Offline'}</span>
         </div>
         {overview?.currentBranch && (
-          <span className="ml-3 truncate">
+          <span className="ml-3 truncate flex items-center gap-1">
+            <GitBranch className="h-3 w-3" />
             {overview.currentBranch}{overview.currentCommit ? ` · ${overview.currentCommit.slice(0, 7)}` : ''}
           </span>
         )}

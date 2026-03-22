@@ -7,6 +7,7 @@
  */
 
 import { reason } from "./vertex-ai/vertex-client";
+import { kimiChat, isKimiConfigured } from "./kimi-client";
 import { db } from "../db";
 import {
   accountIntelligence,
@@ -250,13 +251,39 @@ Return ONLY valid JSON matching this schema:
   "oiSnapshotSummary": "string — brief summary of OI used"
 }`;
 
-  // 3. Call reason() for deep strategic thinking
-  const result = await reason(prompt, { temperature: 0.7 });
+  // 3. Call Kimi (primary) or Vertex AI reason() (fallback) for strategy generation
+  let aiAnswer = '';
+  let aiThinking = '';
+  let aiModel = 'unknown';
+
+  if (isKimiConfigured()) {
+    try {
+      console.log("[PipelinePlanner] Using Kimi for strategy generation (Vertex rate-limited)");
+      const systemPrompt = "You are an expert B2B demand generation strategist. Return ONLY valid JSON — no markdown, no code fences, no explanation.";
+      aiAnswer = await kimiChat(
+        systemPrompt,
+        [{ role: 'user', content: prompt }],
+        { model: 'long', temperature: 0.7, maxTokens: 4000 }
+      );
+      aiThinking = 'Strategy generated via Kimi AI (128k context)';
+      aiModel = 'kimi-long';
+    } catch (kimiErr: any) {
+      console.warn("[PipelinePlanner] Kimi failed, falling back to Vertex AI:", kimiErr.message);
+    }
+  }
+
+  // Fallback to Vertex AI if Kimi didn't produce a result
+  if (!aiAnswer) {
+    const result = await reason(prompt, { temperature: 0.7 });
+    aiAnswer = result.answer;
+    aiThinking = result.thinking;
+    aiModel = result.model || 'vertex-ai';
+  }
 
   // 4. Parse the strategy JSON
   let strategy: PipelineStrategy;
   try {
-    const jsonMatch = result.answer.match(/\{[\s\S]*\}/);
+    const jsonMatch = aiAnswer.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("No JSON found in AI response");
     strategy = JSON.parse(jsonMatch[0]);
   } catch (parseError: any) {
@@ -268,9 +295,9 @@ Return ONLY valid JSON matching this schema:
 
   return {
     strategy,
-    thinking: result.thinking,
+    thinking: aiThinking,
     oiSummary,
-    model: 'gemini-3-pro-preview',
+    model: aiModel,
     durationMs,
   };
 }
