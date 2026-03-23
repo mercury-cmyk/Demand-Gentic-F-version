@@ -62,3 +62,4 @@ fix-production-db.sql
 .env.sip
 .env.sip.example
 !.env.development.example
+node_modules
