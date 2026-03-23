@@ -7,7 +7,6 @@ import {
   RotateCcw,
   Package,
   Sparkles,
-  Radio,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -16,7 +15,6 @@ import { cn } from '@/lib/utils';
 import { useAgentPanelContext } from './AgentPanelProvider';
 import { AgentChatInterface } from './AgentChatInterface';
 import { OrderWizardPanel } from './OrderWizardPanel';
-import { AgentRealtimeVoice } from './AgentRealtimeVoice';
 
 interface AgentSidePanelProps {
   className?: string;
@@ -39,7 +37,6 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
   } = useAgentPanelContext();
 
   const [isResizing, setIsResizing] = useState(false);
-  const [voiceMode, setVoiceMode] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const startWidthRef = useRef(state.width);
   const startXRef = useRef(0);
@@ -152,46 +149,34 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
     <AnimatePresence mode="wait">
       <motion.div
         ref={panelRef}
-        initial={{ x: '100%', opacity: 0, filter: 'blur(8px)' }}
+        initial={{ x: '100%', opacity: 0 }}
         animate={{
           x: 0,
           opacity: 1,
-          filter: 'blur(0px)',
           width: state.isCollapsed ? 64 : effectiveWidth,
         }}
-        exit={{ x: '100%', opacity: 0, filter: 'blur(8px)' }}
+        exit={{ x: '100%', opacity: 0 }}
         transition={{
           type: 'spring',
-          damping: 25,
-          stiffness: 250,
-          opacity: { duration: 0.2 },
-          filter: { duration: 0.2 },
-          width: { type: 'spring', damping: 30, stiffness: 220 },
+          damping: 28,
+          stiffness: 280,
+          width: { type: 'spring', damping: 30, stiffness: 200 },
         }}
         className={cn(
           'fixed right-0 top-0 h-screen z-50 flex',
-          'bg-white/85 dark:bg-slate-950/85 backdrop-blur-3xl border-l border-slate-200/50 dark:border-slate-800/50',
-          'shadow-[-30px_0_60px_-15px_rgba(0,0,0,0.1)]',
+          'bg-white dark:bg-slate-950 border-l border-slate-200/80 dark:border-slate-800/80',
+          'shadow-[-20px_0_40px_-12px_rgba(0,0,0,0.06)]',
           className
         )}
       >
         {/* Resize Handle */}
         {!state.isCollapsed && (
           <div
-            className={cn(
-              "absolute left-0 top-0 w-4 -translate-x-1/2 h-full z-50 cursor-col-resize group flex items-center justify-center outline-none touch-none",
-              isResizing ? "bg-primary/5" : ""
-            )}
+            className="absolute left-0 top-0 w-4 -translate-x-1/2 h-full z-50 cursor-col-resize group flex items-center justify-center outline-none touch-none"
             onMouseDown={handleResizeStart}
           >
-            <div className={cn(
-              "w-px h-full transition-colors duration-300",
-              isResizing ? "bg-primary/30" : "bg-transparent group-hover:bg-primary/15"
-            )}>
-              <div className={cn(
-                "absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 rounded-full transition-all duration-300",
-                isResizing ? "w-1.5 h-32 bg-primary/70 shadow-[0_0_12px_rgba(var(--primary),0.5)]" : "w-1 h-12 bg-border/60 group-hover:bg-primary/50 group-hover:h-20"
-              )} />
+            <div className="w-px h-full bg-transparent group-hover:bg-primary/15 transition-colors duration-300">
+              <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-1 h-12 rounded-full bg-border/60 group-hover:bg-primary/50 group-hover:h-20 transition-all duration-300" />
             </div>
           </div>
         )}
@@ -288,29 +273,6 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                   </Badge>
                 )}
 
-                {/* Realtime Voice Toggle */}
-                {!state.orderMode && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          'h-7 px-2 rounded-lg text-xs gap-1.5 font-medium',
-                          voiceMode
-                            ? 'bg-violet-500/10 text-violet-500 hover:bg-violet-500/20'
-                            : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setVoiceMode(!voiceMode)}
-                      >
-                        <Radio className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Voice</span>
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{voiceMode ? 'Switch to Chat' : 'Realtime Voice'}</TooltipContent>
-                  </Tooltip>
-                )}
-
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -377,24 +339,17 @@ export function AgentSidePanel({ className }: AgentSidePanelProps) {
                 )}
               </AnimatePresence>
 
-              {/* Chat / Voice zone */}
+              {/* Chat zone */}
               <div className={cn(
                 'flex flex-col transition-all duration-300 overflow-hidden',
                 state.orderMode ? 'w-[320px] min-w-[280px]' : 'flex-1'
               )}>
-                {voiceMode && !state.orderMode ? (
-                  <AgentRealtimeVoice
-                    isClientPortal={isClientPortal}
-                    onClose={() => setVoiceMode(false)}
-                  />
-                ) : (
-                  <AgentChatInterface
-                    sessionId={state.sessionId}
-                    conversationId={state.conversationId}
-                    isClientPortal={isClientPortal}
-                    userRole={userRole}
-                  />
-                )}
+                <AgentChatInterface
+                  sessionId={state.sessionId}
+                  conversationId={state.conversationId}
+                  isClientPortal={isClientPortal}
+                  userRole={userRole}
+                />
               </div>
             </div>
           </div>

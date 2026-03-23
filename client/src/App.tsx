@@ -632,8 +632,8 @@ function AuthenticatedApp() {
               </RouteGuard>
             </main>
           </div>
-          {/* Global AI Agent Side Panel — Ops Hub has its own built-in Agent C */}
-          {!isOpsHubRoute && <AgentSidePanel />}
+          {/* Global AI Agent Side Panel */}
+          <AgentSidePanel />
         </div>
       </AgentPanelProvider>
     </SidebarProvider>

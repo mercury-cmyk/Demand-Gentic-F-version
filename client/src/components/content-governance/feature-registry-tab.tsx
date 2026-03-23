@@ -307,6 +307,7 @@ export default function FeatureRegistryTab({ organizationId }: FeatureRegistryTa
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {isLoading ? (
